@@ -81,6 +81,21 @@ export function estimateSizeBytes(durationUs, videoKbps, audioKbps = 192) {
  * sequence of pieces joined with concat — one piece per stretch in which the same clips are on screen — so a
  * frame composites only the clips visible in it, and a frame-filling clip on its own is passed through as is.
  */
+/**
+ * Gain expression that keeps the voice and lowers what is between words to -20 dB, for audio that starts at source
+ * time `srcFromUs` and plays at `speed` for `durUs`. `regions` = speechRegions() of the file (source µs). 50 ms ramps.
+ * Null when the file's words are unknown (nothing is lowered then).
+ */
+export function betweenWords(regions, srcFromUs, speed, durUs) {
+  if (!regions?.length) return null;
+  const from = srcFromUs, to = srcFromUs + durUs * speed;
+  const r = 0.05, FLOOR = 0.1;
+  const T = `(${s(from)}+if(isnan(t),0,t)*${Number(speed.toFixed(6))})`;
+  const terms = regions.filter(([a, b]) => b > from && a < to).map(([a, b]) => `clip(min((${T}-${s(a)})/${r},(${s(b)}-${T})/${r}),0,1)`);
+  if (!terms.length) return String(FLOOR);
+  return `${FLOOR}+${1 - FLOOR}*min(1,${terms.join("+")})`;
+}
+
 export function buildExport(tl, o) {
   const W = o.width, H = o.height, FPS = o.fps;
   const FRAME = US / FPS;
@@ -128,6 +143,8 @@ export function buildExport(tl, o) {
     return out;
   }
 
+  /** True when a clip plays from the stabilized copy of its video (StabilizeService). */
+  const usesStab = (seg) => seg.kind === "video" && !!seg.videoFx?.stabilize?.enabled && !!o.stabilized?.[seg.mediaId];
   const mediaOf = (seg) => {
     if (seg.kind === "compound") {
       const p = o.compoundFiles?.[seg.compoundTimelineId];
@@ -136,7 +153,7 @@ export function buildExport(tl, o) {
     }
     const m = o.media[seg.mediaId];
     if (!m) throw new AppError("MEDIA", "err.mediaMissing", { segId: seg.id });
-    return m;
+    return usesStab(seg) ? o.stabilized[seg.mediaId] : m; // the stabilized copy (same timing and audio)
   };
 
   /**
@@ -148,7 +165,7 @@ export function buildExport(tl, o) {
     if (seg.kind !== "video" || seg.videoFx?.matte?.type !== "person") return out;
     // Person cutout: the cached mask video opened with the clip's own timing (source times, speed, pads), stretched
     // to the source frame and merged as alpha — what is under this layer shows around the person.
-    const file = o.mattes?.[seg.mediaId];
+    const file = o.mattes?.[usesStab(seg) ? `${seg.mediaId}|stab` : seg.mediaId];
     if (!file) throw new AppError("MEDIA", "err.matteMissing", { segId: seg.id });
     const m = rawSource(seg, { ...media, path: file }, preUs, postUs, w0, w1);
     const yv = L(), a = L(), merged = L();
@@ -213,7 +230,7 @@ export function buildExport(tl, o) {
       const c = seg.crop || {};
       if (c.w < 0.999 || c.h < 0.999 || c.x > 0.001 || c.y > 0.001) f.push(`crop=iw*${c.w}:ih*${c.h}:iw*${c.x}:ih*${c.y}`);
       const fx = seg.videoFx;
-      if (fx?.stabilize?.enabled) f.push(fx.stabilize.level === "most_stable" ? "deshake=rx=32:ry=32" : "deshake");
+      if (fx?.stabilize?.enabled && !usesStab(seg)) f.push(fx.stabilize.level === "most_stable" ? "deshake=rx=32:ry=32" : "deshake");
       if (fx?.denoise?.enabled) f.push(`hqdn3d=${(1 + fx.denoise.level / 25).toFixed(2)}`);
       if (fx?.motionBlur?.enabled) f.push(`tmix=frames=${Math.max(2, Math.min(10, Math.round(fx.motionBlur.amount)))}`);
       if (seg.kind !== "image") f.push(toRgba(sourceMatrix(media))); // before any RGB grading filter
@@ -309,7 +326,18 @@ export function buildExport(tl, o) {
     if (animated(layerState(EXPR, seg, tLocal, { ...ctx, transIn: null, transOut: null }).opacity)) f.push(`geq=r='r(X,Y)':g='g(X,Y)':b='b(X,Y)':a='alpha(X,Y)*(${String(st.opacity).replace(/\bt\b/g, "T")})'`);
     else { const op = opacityFrames(seg, ctx, w0, w1); if (op) f.push(op); }
     const sx = st.scaleX, sy = st.scaleY;
-    if (animated(sx) || animated(sy)) f.push(`scale=w='max(2,${baseW}*${sx})':h='max(2,${baseH}*${sy})':eval=frame`);
+    if (animated(sx) || animated(sy)) {
+      // The layer's size changes per frame; frames leaving a filter at a changing size can stall the graph (seen
+      // as a hung export with a zoom transition), so they are centred on a transparent canvas of the largest size.
+      let mx = 0, my = 0;
+      for (let k = frameAt(w0); k <= frameAt(w1); k++) {
+        const v = layerState(NUM, seg, (T0 + k * FRAME - seg.start) / US, ctx);
+        mx = Math.max(mx, v.scaleX); my = Math.max(my, v.scaleY);
+      }
+      const pw = Math.max(2, Math.ceil((Number(baseW === "iw" ? 0 : baseW) * mx) / 2) * 2 + 2), ph = Math.max(2, Math.ceil((Number(baseH === "ih" ? 0 : baseH) * my) / 2) * 2 + 2);
+      f.push(`scale=w='max(2,${baseW}*${sx})':h='max(2,${baseH}*${sy})':eval=frame`);
+      if (baseW !== "iw") f.push(`format=rgba,pad=w=${pw}:h=${ph}:x='(ow-iw)/2':y='(oh-ih)/2':color=0x00000000:eval=frame`);
+    }
     else f.push(`scale=w='max(2,${baseW}*${sx})':h='max(2,${baseH}*${sy})'`);
     if (animated(st.rotation) || Math.abs(Number(st.rotation) || 0) > 0.01) f.push(`rotate=a='(${st.rotation})*PI/180':ow='hypot(iw,ih)':oh='hypot(iw,ih)':c=none`);
     const placed = L();
@@ -416,7 +444,7 @@ export function buildExport(tl, o) {
       clips.push(c);
     });
     const clip = (u, v, c) => [Math.max(u, c.v0), Math.min(v, c.v1)];
-    const temporal = (seg) => { const fx = seg.videoFx || {}; return !!(fx.stabilize?.enabled || fx.denoise?.enabled || fx.motionBlur?.enabled); };
+    const temporal = (seg) => { const fx = seg.videoFx || {}; return !!((fx.stabilize?.enabled && !usesStab(seg)) || fx.denoise?.enabled || fx.motionBlur?.enabled); };
     const groups = []; // decode groups: { c, uses: [{ kind: "seq" | "over", u, v, ctx, fades }] }
     for (const c of clips) {
       const end = c.seg.start + c.seg.duration;
@@ -640,11 +668,20 @@ export function buildExport(tl, o) {
       tail = `atrim=duration=${s(a1 - a0)}`;
     }
     const a = seg.audioFx;
-    if (a?.denoise?.enabled) fx.push(AUDIO_CHAINS.denoise);
+    if (a?.denoise?.enabled) {
+      // Neural speech denoiser (RNNoise) when its model is available, else the FFT denoiser; then, when the words
+      // of this file are known, everything between them (breaths, handling noise, room tone) is lowered smoothly.
+      if (o.rnnModel) fx.push(`highpass=f=70,arnndn=model='${o.rnnModel.replace(/\\/g, "/").replace(/:/g, "\\:")}'`);
+      else fx.push(AUDIO_CHAINS.denoise);
+      const duck = seg.speedMode === "curve" ? null : betweenWords(o.speech?.[seg.mediaId], seg.sourceStart + skip * (seg.speed || 1), seg.speed || 1, a1 - a0);
+      if (duck) fx.push(`volume='${duck}':eval=frame`);
+    }
     if (a?.enhanceVoice?.enabled) fx.push(AUDIO_CHAINS.enhanceVoice);
     if (a?.isolate === "remove_vocal" || a?.isolate === "keep_vocal") fx.push(AUDIO_CHAINS[a.isolate]);
     if (a?.voiceChanger && a.voiceChanger !== "none" && VOICE_CHANGERS[a.voiceChanger]) fx.push(VOICE_CHANGERS[a.voiceChanger](48000));
-    if (a?.normalize?.enabled) fx.push(`loudnorm=I=${a.normalize.targetLufs}:TP=-1.5:LRA=11`);
+    // Loudness: one static gain on the whole mix when the export measured it (o.masterGainDb, two passes) — a
+    // per-clip dynamic loudnorm lifted the pauses and noise between words by >10 dB.
+    if (a?.normalize?.enabled && o.masterGainDb === undefined && !o.measureLoudness) fx.push(`loudnorm=I=${a.normalize.targetLufs}:TP=-1.5:LRA=11`);
     // t is NAN on frames without a timestamp; a curve keeps the whole segment until `tail`, a constant speed
     // starts `skip` into it.
     const tSeg = seg.speedMode === "curve" || !skip ? "if(isnan(t),0,t)" : `(if(isnan(t),0,t)+${s(skip)})`;
@@ -674,7 +711,10 @@ export function buildExport(tl, o) {
   }
   if (wantAudio && o.mode !== "gif" && o.mode !== "still") {
     aOut = "aout";
-    if (audioLabels.length) chains.push(`${audioLabels.map((x) => `[${x}]`).join("")}amix=inputs=${audioLabels.length}:normalize=0:duration=longest:dropout_transition=0,apad=whole_dur=${lenS},atrim=end=${lenS},asetpts=PTS-STARTPTS,alimiter=limit=0.97[${aOut}]`);
+    // Master: the measured static gain (two-pass loudness), then a true-peak-safe limiter. alimiter's auto level is
+    // off: it raised the whole mix back to 0 dB peak, noise included.
+    const master = o.measureLoudness ? "ebur128=framelog=quiet" : o.masterGainDb !== undefined ? `volume=${o.masterGainDb.toFixed(2)}dB,alimiter=limit=0.84:attack=5:release=60:level=0` : "alimiter=limit=0.97:level=0";
+    if (audioLabels.length) chains.push(`${audioLabels.map((x) => `[${x}]`).join("")}amix=inputs=${audioLabels.length}:normalize=0:duration=longest:dropout_transition=0,apad=whole_dur=${lenS},atrim=end=${lenS},asetpts=PTS-STARTPTS,${master}[${aOut}]`);
     else { const ni = addInput(["-f", "lavfi", "-i", `anullsrc=r=48000:cl=stereo:d=${lenS}`]); chains.push(`[${ni}:a]anull[${aOut}]`); }
   }
 

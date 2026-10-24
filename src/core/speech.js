@@ -113,19 +113,33 @@ export const CUT_STYLES = {
   // keepUs: silence kept on each side of speech at a pause cut; minPauseUs: shortest pause that is cut.
   tight: { minPauseUs: 300_000, keepUs: 80_000 },
   natural: { minPauseUs: 600_000, keepUs: 180_000 },
+  // Creator pacing: every pause is cut, but what remains depends on what it is — a beat after a question or an
+  // exclamation (comic/dramatic timing), a breath at a sentence end, or a hesitation inside a sentence.
+  creator: { minPauseUs: 220_000, keep: { beat: 350_000, sentence: 180_000, mid: 100_000 } },
 };
+
+/** What a pause after word `prev` is, for pacing: "beat" (after ?/!), "sentence" (after . or ،) or "mid". */
+export const pauseKind = (prev) => (/[?؟!]["»”]?$/.test(prev?.text || "") ? "beat" : /[.،,…:;]["»”]?$/.test(prev?.text || "") ? "sentence" : "mid");
 
 /**
  * Cuts suggested by the analysis, as SOURCE ranges to remove: long pauses (keeping a little air), sure fillers,
  * and retakes (the first attempt). Possible fillers ("maybe") are reported but never cut automatically.
  */
-export function suggestCuts(words, { style = "natural", durationUs = null, removeFillers = true, removeRetakes = true } = {}) {
+export function suggestCuts(words, { style = "natural", durationUs = null, removeFillers = true, removeRetakes = true, keep = [] } = {}) {
   const st = CUT_STYLES[style] || CUT_STYLES.natural;
   const ranges = [];
   for (const p of pauses(words, { minUs: st.minPauseUs, durationUs })) {
-    const from = p.edge === "start" ? 0 : p.fromUs + st.keepUs;
-    const to = p.edge === "end" ? p.toUs : p.toUs - st.keepUs;
-    if (to - from > 100_000) ranges.push({ fromUs: from, toUs: to, reason: "pause" });
+    let from, to, reason = "pause";
+    if (st.keep && !p.edge) {
+      // Keep 40 % of the air after the word and 60 % before the next (its onset is never clipped).
+      const kind = pauseKind(words[p.after]), k = st.keep[kind];
+      from = p.fromUs + Math.round(k * 0.4); to = p.toUs - Math.round(k * 0.6);
+      if (kind === "beat") reason = "pause (beat kept)";
+    } else {
+      from = p.edge === "start" ? 0 : p.fromUs + (st.keepUs ?? 80_000);
+      to = p.edge === "end" ? p.toUs : p.toUs - (st.keepUs ?? 120_000);
+    }
+    if (to - from > 80_000) ranges.push({ fromUs: from, toUs: to, reason });
   }
   if (removeFillers) for (const f of fillers(words)) if (f.sure) {
     const prevEnd = f.i > 0 ? words[f.i - 1].endUs : 0, nextStart = f.i < words.length - 1 ? words[f.i + 1].startUs : f.endUs;
@@ -133,7 +147,14 @@ export function suggestCuts(words, { style = "natural", durationUs = null, remov
     ranges.push({ fromUs: Math.max(prevEnd + 20_000, f.startUs - 120_000), toUs: Math.min(nextStart - 20_000, f.endUs + 120_000), reason: "filler" });
   }
   if (removeRetakes) for (const r of retakes(words)) ranges.push({ fromUs: Math.max(0, r.fromUs - 20_000), toUs: r.toUs - 20_000, reason: r.kind === "restart" ? "retake" : "repeat" });
-  return mergeRanges(ranges, 40_000);
+  // Moments the director protects (an action, a reaction, a reveal) are never cut.
+  const out = [];
+  for (const r of mergeRanges(ranges, 40_000)) {
+    let parts = [r];
+    for (const [a, b] of keep) parts = parts.flatMap((x) => (b <= x.fromUs || a >= x.toUs ? [x] : [{ ...x, toUs: a }, { ...x, fromUs: b }].filter((y) => y.toUs - y.fromUs > 80_000)));
+    out.push(...parts);
+  }
+  return out;
 }
 
 /** Everything at once (what media_analyze_speech returns). */
@@ -176,6 +197,20 @@ export function correctWords(words, corrections = []) {
       } else next.push(out[i++]);
     }
     out = next;
+  }
+  return out;
+}
+
+/**
+ * Where someone is speaking, in source time: words padded by `padUs` and joined across gaps under `joinUs`.
+ * [[fromUs, toUs]] sorted. Used to keep the voice and lower everything between words (breaths, handling noise).
+ */
+export function speechRegions(words, { padUs = 120_000, joinUs = 350_000 } = {}) {
+  const out = [];
+  for (const w of [...words].sort((a, b) => a.startUs - b.startUs)) {
+    const a = Math.max(0, w.startUs - padUs), b = w.endUs + padUs;
+    const last = out[out.length - 1];
+    if (last && a - last[1] < joinUs) last[1] = Math.max(last[1], b); else out.push([a, b]);
   }
   return out;
 }

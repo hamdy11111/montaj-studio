@@ -223,6 +223,17 @@ export class Materials {
     const ed = this.ed, tpl = GRAPHIC_TEMPLATES[id];
     const def = Object.fromEntries(Object.entries(tpl.params).map(([k, s]) => [k, s.default]));
     const label = String(def.text || def.title || def.label || def.emoji || tpl.name).slice(0, 40);
+    if (tpl.subject || tpl.behind) {
+      // Follows the person / plays behind them: the app finds the head first (the first time per video: a while).
+      const { subject, ...params } = def;
+      const tst = toast(t("lib.matteWorking", { p: "…" }), "info", { ms: 30 * 60_000 });
+      try {
+        const r = await call("graphics.add", ed.timelineId(), { template: id, params, atUs: ed.playhead() });
+        await ed.reloadTimeline();
+        if (r?.clipId) ed.select([r.clipId]);
+      } catch (err) { toast(errorText(err), "error", { ms: 8000 }); } finally { tst.remove(); }
+      return;
+    }
     const res = await ed.exec("addSegment", { kind: "text", atUs: ed.playhead(), durationUs: tpl.durUs,
       init: { name: `${getLang() === "ar" ? tpl.ar : tpl.name}: ${label}`, text: { ...DEFAULT_TEXT, content: label, graphic: { template: id, params: def } } } });
     if (res && id === "behind-title") await ed.behindPerson([res.result], true);

@@ -8,6 +8,7 @@ import os from "node:os";
 import path from "node:path";
 import { MatteService } from "../../src/services/matteService.js";
 import { binaries, run, ffprobe } from "../../src/services/ffmpeg.js";
+import { decodeRecipes } from "../../src/services/fastDecode.js";
 
 const root = fs.mkdtempSync(path.join(os.tmpdir(), "montaj-matte-e2e-"));
 const clip = path.join(root, "clip.mp4");
@@ -42,9 +43,9 @@ test("the matte has the media's frames and aspect; parts are joined; progress re
 test("a part whose GPU decode fails is made again on the CPU", async (t) => {
   if (skip) return t.skip(skip);
   fs.rmSync(svc.file("m1"));
-  const key = [...svc.decoders.keys()][0];
+  const key = [...decodeRecipes.keys()].find((k) => k.startsWith(clip));
   // A GPU recipe that cannot work (bad filter): every GPU part fails and must fall back.
-  svc.decoders.set(key, { gpu: true, pre: [], vf: "no_such_filter", cpu: { gpu: false, pre: [], vf: "scale=640:360", cpu: null } });
+  decodeRecipes.set(key, { gpu: true, pre: [], vf: "no_such_filter", cpu: { gpu: false, pre: [], vf: "scale=640:360", cpu: null } });
   const file = await svc.ensure("m1");
   assert.ok(fs.existsSync(file));
   assert.ok(logs.some((l) => l.startsWith("matte: GPU decode failed, CPU for this part")), logs.join("\n"));

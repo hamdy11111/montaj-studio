@@ -5,6 +5,8 @@ import { AppError } from "../core/validation.js";
 import { deepClone, US } from "../core/util.js";
 import { DEFAULT_TEXT } from "../core/model.js";
 import { TEXT_PRESETS } from "../core/presets.js";
+import { GRAPHIC_TEMPLATES } from "../core/graphics.js";
+import { addSfx } from "./sfx.js";
 import { EDIT_PLAN_SCHEMA, checkPlan, mainPieces, mapSpan, mapPoint, normalizeCuts, fmtTime } from "../core/editPlan.js";
 import { OPERATION_INDEX } from "./operations.js";
 import { ajv } from "./skills/registry.js";
@@ -91,6 +93,11 @@ export async function applyPlan(ctx, timelineId, plan, { expectedRevision, job }
     }
     if (transitions) done.push(`transitions (${transitions})`);
 
+    // Stabilize before graphics: person-aware graphics read the head from the stabilized picture.
+    if (plan.stabilize) {
+      const ids = pieces().filter((p) => p.kind === "video").map((p) => p.id);
+      if (ids.length) { await exec("updateSegments", { ids, patch: { videoFx: { stabilize: { enabled: true } } } }); done.push(`stabilized (${ids.length} clips)`); }
+    }
     // On-screen text tied to source spans.
     step(0.7, "texts");
     let texts = 0;
@@ -111,12 +118,22 @@ export async function applyPlan(ctx, timelineId, plan, { expectedRevision, job }
       const spans = mapSpan(pieces(), x.mediaId, x.fromUs, x.toUs);
       if (!spans.length) { skipped.push(`graphics/${i}: span cut out`); continue; }
       const t0 = spans[0].t0, t1 = spans[spans.length - 1].t1;
-      const r = await op("timeline_add_graphic", { template: x.template, params: x.params || {}, atUs: t0, durationUs: Math.max(400_000, t1 - t0) });
-      if (x.behindPerson) behind.push(r.clipId);
+      const r = await op("timeline_add_graphic", { template: x.template, params: x.params || {}, atUs: t0, durationUs: Math.max(400_000, t1 - t0), behindPerson: false, sfx: !!x.sfx, inline: true });
+      if (x.behindPerson ?? !!GRAPHIC_TEMPLATES[x.template]?.behind) behind.push(r.clipId);
       graphics++;
     }
     if (graphics) done.push(`graphics (${graphics})`);
     if (behind.length) { await exec("setBehindPerson", { ids: behind, value: true }); done.push(`behind the person (${behind.length})`); }
+
+    // Sound effects on source moments (skipped when the moment was cut out).
+    let sounds = 0;
+    for (const [i, x] of (plan.sfx || []).entries()) {
+      const t = mapPoint(pieces(), x.mediaId, x.atUs);
+      if (t === null) { skipped.push(`sfx/${i}: moment cut out`); continue; }
+      await addSfx(ctx, timelineId, x.sound, t, { volumeDb: x.volumeDb });
+      sounds++;
+    }
+    if (sounds) done.push(`sound effects (${sounds})`);
 
     step(0.8, "look & audio");
     if (plan.filter) { await op("timeline_add_layer", { kind: "filter", settings: { preset: plan.filter.preset, intensity: plan.filter.intensity ?? 80 } }); done.push(`look ${plan.filter.preset}`); }

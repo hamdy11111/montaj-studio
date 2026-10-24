@@ -9,6 +9,36 @@ const color = (title, def) => ({ type: "string", pattern: "^#[0-9A-Fa-f]{6}$", d
 const num = (title, min, max, def) => ({ type: "number", minimum: min, maximum: max, default: def, title });
 const pos = (def, values = ["top", "center", "bottom", "lower-third"]) => ({ type: "string", enum: values, default: def, title: "Position" });
 const font = (def) => ({ type: "string", maxLength: 60, default: def, title: "Font" });
+const side = () => ({ type: "string", enum: ["auto", "left", "right"], default: "auto", title: "Side (auto = the free side)" });
+// Filled by the app: { track: [[ms, hx, hy, hw, hh, x0, x1], …] } — head centre/size and person extent, fractions of
+// the frame, 10 samples a second from the graphic's start. Empty: a centred person is assumed.
+const subj = () => ({ type: "object", default: {}, title: "Person track (filled by the app)", properties: { track: { type: "array", maxItems: 2000, items: { type: "array", items: { type: "number" }, minItems: 7, maxItems: 7 } } } });
+
+/**
+ * The side with more free room beside the person over the whole graphic ("left" | "right"), so a graphic does not
+ * jump sides while the person moves. `forced` ("left"/"right") wins.
+ */
+export function freeSide(subject, forced = "auto") {
+  if (forced === "left" || forced === "right") return forced;
+  const tr = subject?.track;
+  if (!tr?.length) return "right";
+  let score = 0;
+  for (const f of tr) score += (1 - f[6]) - f[5]; // room right − room left
+  return score >= 0 ? "right" : "left";
+}
+
+/** Head and person extent at local time t (seconds) from a graphic's subject track, interpolated. */
+export function subjectAt(subject, t) {
+  const tr = subject?.track;
+  if (!tr?.length) return { hx: 0.5, hy: 0.4, hw: 0.26, hh: 0.5, x0: 0.25, x1: 0.75 };
+  const ms = t * 1000;
+  let i = 0;
+  while (i < tr.length - 2 && tr[i + 1][0] <= ms) i++;
+  const a = tr[i], b = tr[Math.min(i + 1, tr.length - 1)];
+  const f = b[0] > a[0] ? Math.max(0, Math.min(1, (ms - a[0]) / (b[0] - a[0]))) : 0;
+  const v = (k) => a[k] + (b[k] - a[k]) * f;
+  return { hx: v(1), hy: v(2), hw: v(3), hh: v(4), x0: v(5), x1: v(6) };
+}
 
 /**
  * Templates. inUs/outUs: intro/outro animation lengths (frames are rendered one by one there; the hold between
@@ -69,6 +99,38 @@ export const GRAPHIC_TEMPLATES = {
     name: "Title behind the person", ar: "عنوان خلف الشخص", use: "A huge word across the frame with the person in front of it (put it behind the person); the head covers its middle",
     inUs: 650_000, outUs: 350_000, loop: false, durUs: 3_000_000,
     params: { text: str("Text", "خارق", 24), font: font("Lalezar"), color: color("Colour", "#FFFFFF"), color2: color("Lower colour (gradient)", "#FFD84D"), style: { type: "string", enum: ["solid", "gradient", "outline"], default: "gradient", title: "Style" }, x: num("Centre across (0 = left, 1 = right): put it on the head", 0.1, 0.9, 0.5), y: num("Centre down (0 = top, 1 = bottom)", 0.1, 0.9, 0.3), width: num("Width of the frame", 0.4, 0.98, 0.9) },
+  },
+  // ---- Kinetic, person-aware templates. `subject` is filled by the app (see agent/subject.js): the head's position
+  // over the graphic's time, from the person matte. `behind`: they are meant to play behind the person.
+  "emerge-side": {
+    name: "Word out from behind the person", ar: "كلمة تطلع من ورا الشخص", use: "A word slides out from behind the head to the free side (overshoot, motion trail), holds, then slides back. Time it to the spoken word (start ~0.1 s before)",
+    inUs: 450_000, outUs: 350_000, loop: true, durUs: 1_600_000, subject: true, behind: true, sfx: { in: "whoosh", out: "swish" },
+    params: { text: str("Text", "فكرة", 30), font: font("Lalezar"), color: color("Text colour", "#FFFFFF"), accent: color("Box colour", "#FF2E63"), style: { type: "string", enum: ["box", "solid", "gradient", "outline"], default: "box", title: "Style" }, side: side(), size: num("Size", 0.5, 2, 1), subject: subj() },
+  },
+  "rise-behind": {
+    name: "Word rising from behind the person", ar: "كلمة تطلع من ورا الكتف لفوق", use: "A big word rises from behind the shoulders and stands above the head, then sinks back. For the key word of a sentence",
+    inUs: 500_000, outUs: 350_000, loop: true, durUs: 1_800_000, subject: true, behind: true, sfx: { in: "riser", out: "swish" },
+    params: { text: str("Text", "واو", 24), font: font("Lalezar"), color: color("Colour", "#FFFFFF"), color2: color("Lower colour (gradient)", "#FFD84D"), style: { type: "string", enum: ["gradient", "solid", "outline"], default: "gradient", title: "Style" }, size: num("Size", 0.5, 2, 1), subject: subj() },
+  },
+  "word-stack": {
+    name: "Words stacking beside the person", ar: "كلمات تتراص جنب الشخص", use: "Up to 4 words come out from behind the head one after another (on the spoken words) and stack on the free side",
+    inUs: 400_000, outUs: 350_000, loop: true, durUs: 3_000_000, subject: true, behind: true, sfx: { in: "pop", each: "pop", out: "swish" },
+    params: { words: { type: "array", items: { type: "string", maxLength: 24 }, minItems: 1, maxItems: 4, default: ["كل", "حاجة", "هنا"], title: "Words" }, times: { type: "array", items: { type: "number", minimum: 0, maximum: 600_000 }, maxItems: 4, default: [], title: "When each word comes (ms from the start; empty = evenly)" }, font: font("Alexandria"), color: color("Text colour", "#FFFFFF"), accent: color("Accent", "#FFD84D"), side: side(), size: num("Size", 0.5, 2, 1), subject: subj() },
+  },
+  "pass-behind": {
+    name: "Text passing behind the person", ar: "نص يعدّي ورا الشخص", use: "Big text travels across the frame at head height and passes behind the person. For a title or a punchline",
+    inUs: 0, outUs: 0, loop: true, durUs: 2_500_000, subject: true, behind: true, sfx: { in: "whoosh" },
+    params: { text: str("Text", "المونتاج الخارق", 40), font: font("Lalezar"), color: color("Colour", "#FFFFFF"), style: { type: "string", enum: ["outline", "solid"], default: "outline", title: "Style" }, direction: { type: "string", enum: ["rtl", "ltr"], default: "rtl", title: "Direction" }, size: num("Size", 0.5, 2, 1), subject: subj() },
+  },
+  "head-emoji": {
+    name: "Emoji by the head", ar: "إيموجي جنب الراس", use: "A 3D emoji pops next to the head and follows it (bounce in, wiggle, pop out). For a reaction on a word",
+    inUs: 350_000, outUs: 250_000, loop: true, durUs: 1_500_000, subject: true, sfx: { in: "pop", out: "blip" },
+    params: { emoji: str("Emoji (🔥 or name)", "🔥", 40), corner: { type: "string", enum: ["auto", "left", "right", "top"], default: "auto", title: "Where" }, size: num("Size", 0.05, 0.4, 0.2), motion: { type: "string", enum: ["wiggle", "bounce", "float", "spin"], default: "wiggle", title: "Motion" }, subject: subj() },
+  },
+  "head-icon": {
+    name: "Icon by the head", ar: "أيقونة جنب الراس", use: "An icon badge (with an optional label) pops next to the head and follows it",
+    inUs: 350_000, outUs: 250_000, loop: true, durUs: 1_800_000, subject: true, sfx: { in: "pop", out: "blip" },
+    params: { icon: str("Icon", "lightbulb", 40), label: str("Label", "", 30), font: font("Cairo"), accent: color("Badge colour", "#7B5CFF"), color: color("Label colour", "#FFFFFF"), corner: { type: "string", enum: ["auto", "left", "right", "top"], default: "auto", title: "Where" }, size: num("Size", 0.05, 0.3, 0.14), subject: subj() },
   },
   quote: {
     name: "Quote", ar: "اقتباس", use: "A key sentence on a card with large quote marks; words appear as spoken",

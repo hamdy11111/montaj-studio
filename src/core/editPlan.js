@@ -2,6 +2,7 @@
 // transcript — and compiled onto the main track. Pure helpers: the plan schema, mapping source time to timeline
 // time through the main-track clips, predicting the result of cuts, and the readable cut sheet shown for approval.
 // Applying a plan (with undo/rollback) lives in src/agent/editPlan.js.
+import { SFX } from "./sfx.js";
 import { TRANSITIONS } from "./layerMath.js";
 import { CANVAS_RATIOS, mainTrack } from "./model.js";
 import { FILTER_PRESETS, TEXT_PRESETS } from "./presets.js";
@@ -24,8 +25,10 @@ export const EDIT_PLAN_SCHEMA = {
     cuts: { type: "array", maxItems: 2000, items: range(), description: "SOURCE ranges removed from the main-track clips of that media" },
     zooms: { type: "array", maxItems: 300, items: range({ scale: { type: "number", minimum: 1.02, maximum: 2.5 }, x: { type: "number", minimum: -0.5, maximum: 0.5 }, y: { type: "number", minimum: -0.5, maximum: 0.5 } }, ["scale"]), description: "Punch-in: the main clip is shown larger during a SOURCE span (cut-zoom)" },
     texts: { type: "array", maxItems: 200, items: range({ content: { type: "string", minLength: 1, maxLength: 300 }, preset: { type: "string", maxLength: 40 }, position: { enum: ["top", "center", "bottom"] }, size: { type: "number", minimum: 4, maximum: 60 }, behindPerson: { type: "boolean" } }, ["content"]), description: "On-screen text during a SOURCE span" },
-    graphics: { type: "array", maxItems: 200, items: range({ template: { enum: Object.keys(GRAPHIC_TEMPLATES) }, params: { type: "object" }, behindPerson: { type: "boolean", description: "Draw it behind the person (big titles, words)" } }, ["template"]), description: "Motion graphics during a SOURCE span (see graphics_templates)" },
+    graphics: { type: "array", maxItems: 200, items: range({ template: { enum: Object.keys(GRAPHIC_TEMPLATES) }, params: { type: "object" }, behindPerson: { type: "boolean", description: "Draw it behind the person (big titles, words)" }, sfx: { type: "boolean", description: "Add the template's own sound effects on its motion" } }, ["template"]), description: "Motion graphics during a SOURCE span (see graphics_templates)" },
     transitions: { type: "array", maxItems: 300, items: { type: "object", additionalProperties: false, required: ["mediaId", "atUs", "type"], properties: { mediaId: { type: "string", pattern: "^[A-Za-z0-9-]+$" }, atUs: { type: "integer", minimum: 0 }, type: { enum: TRANSITIONS }, durationUs: { type: "integer", minimum: 100_000, maximum: 2_000_000 }, reason: { type: "string", maxLength: 200 } } }, description: "A transition at the cut nearest to SOURCE time atUs (typically the fromUs of a cut)" },
+    sfx: { type: "array", maxItems: 300, items: { type: "object", additionalProperties: false, required: ["mediaId", "atUs", "sound"], properties: { mediaId: { type: "string", pattern: "^[A-Za-z0-9-]+$" }, atUs: { type: "integer", minimum: 0 }, sound: { enum: Object.keys(SFX) }, volumeDb: { type: "number", minimum: -40, maximum: 6 } } }, description: "Sound effects whose accent lands on a SOURCE moment (see sfx_list)" },
+    stabilize: { type: "boolean", description: "Stabilize the handheld main-track video (a stabilized copy is made once)" },
     filter: { type: "object", additionalProperties: false, required: ["preset"], properties: { preset: { enum: Object.keys(FILTER_PRESETS) }, intensity: { type: "number", minimum: 0, maximum: 100 } } },
     audio: { type: "object", additionalProperties: false, properties: { enhanceVoice: { type: "boolean" }, denoise: { type: "boolean" }, normalizeLufs: { type: "number", minimum: -30, maximum: -9 } } },
     captions: { type: "object", description: "Animated word-timed captions (see captions_templates)" },

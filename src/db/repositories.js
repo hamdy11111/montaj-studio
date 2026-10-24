@@ -260,7 +260,8 @@ export class MediaRepository {
   add(projectId, meta) {
     return write(this.realm, () => {
       const p = must(this.realm.objectForPrimaryKey("Project", projectId), "err.projectNotFound");
-      let m = meta.origin === "import" ? this.realm.objects("MediaAsset").filtered("path == $0 AND origin == 'import'", meta.path)[0] : null;
+      // An imported file (or a bundled sound effect) is one media item, reused by every project that adds it.
+      let m = meta.origin === "import" || meta.origin === "sfx" ? this.realm.objects("MediaAsset").filtered("path == $0 AND origin == $1", meta.path, meta.origin)[0] : null;
       if (!m) {
         m = this.realm.create("MediaAsset", {
           _id: meta.id || uid(), name: meta.name, path: meta.path, type: meta.type, durationUs: Math.round(meta.durationUs || 0),

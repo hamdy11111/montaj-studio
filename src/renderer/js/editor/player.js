@@ -40,7 +40,8 @@ export class Player {
     this.rasters = new Map();  // key → canvas
     this.luts = new Map();     // assetId → parsed LUT | "loading"
     this.procCache = new Map();
-    this.mattes = new Map();   // mediaId → { el, failedAt, canvas, key } person-matte video (text behind the person)
+    this.mattes = new Map();   // mediaId[|stab] → { el, failedAt, canvas, key } person-matte video (text behind the person)
+    this.noStab = new Set();   // media ids whose stabilized copy is not made (yet): play the original
     this.timeUs = 0;
     this.playing = false;
     this.zoom = 1;
@@ -160,6 +161,9 @@ export class Player {
 
   findSeg(segId) { for (const t of this.ed.tl()?.tracks || []) for (const s of t.segments) if (s.id === segId) return s; return null; }
 
+  /** True when a clip plays from the stabilized copy of its video (made by the app; see StabilizeService). */
+  stabilized(seg) { return seg.kind === "video" && !!seg.videoFx?.stabilize?.enabled && !this.noStab.has(seg.mediaId); }
+
   // ------------------------------------------------------------------ person matte (text behind the person)
   /**
    * The person matte of a video clip at its current frame, as an alpha canvas, with the source region that matches
@@ -169,17 +173,19 @@ export class Player {
   matteFrame(seg, s) {
     const main = this.videos.get(seg.id)?.el;
     if (!main) return null;
-    let m = this.mattes.get(seg.mediaId);
-    if (m?.failedAt && performance.now() - m.failedAt > 5000) { this.mattes.delete(seg.mediaId); m = null; } // made meanwhile?
+    const variant = this.videos.get(seg.id)?.src?.startsWith("media://stab/") ? "stab" : "";
+    const key = variant ? `${seg.mediaId}|stab` : seg.mediaId;
+    let m = this.mattes.get(key);
+    if (m?.failedAt && performance.now() - m.failedAt > 5000) { this.mattes.delete(key); m = null; } // made meanwhile?
     if (!m) {
       const el = document.createElement("video");
       el.crossOrigin = "anonymous"; el.muted = true; el.preload = "auto";
-      el.src = `media://matte/${encodeURIComponent(seg.mediaId)}`;
+      el.src = `media://matte/${encodeURIComponent(seg.mediaId)}${variant ? "?v=stab" : ""}`;
       m = { el, failedAt: 0, canvas: document.createElement("canvas"), key: "" };
       el.addEventListener("seeked", () => this.invalidate());
       el.addEventListener("loadeddata", () => this.invalidate());
       el.addEventListener("error", () => { m.failedAt = performance.now(); });
-      this.mattes.set(seg.mediaId, m);
+      this.mattes.set(key, m);
     }
     const el = m.el;
     m.usedIn = this.stats.renders;
@@ -195,8 +201,8 @@ export class Player {
     }
     const mw = el.videoWidth, mh = el.videoHeight;
     if (!mw || !mh) return null;
-    const key = `${el.currentTime.toFixed(4)}:${mw}x${mh}`;
-    if (m.key !== key) { // luminance → alpha (the matte is white on black)
+    const frameKey = `${el.currentTime.toFixed(4)}:${mw}x${mh}`;
+    if (m.key !== frameKey) { // luminance → alpha (the matte is white on black)
       const c = m.canvas;
       if (c.width !== mw || c.height !== mh) { c.width = mw; c.height = mh; }
       const g = c.getContext("2d", { willReadFrequently: true });
@@ -204,7 +210,7 @@ export class Player {
       const d = g.getImageData(0, 0, mw, mh), px = d.data;
       for (let i = 0; i < px.length; i += 4) { px[i + 3] = px[i]; px[i] = px[i + 1] = px[i + 2] = 255; }
       g.putImageData(d, 0, 0);
-      m.key = key;
+      m.key = frameKey;
     }
     const vw = main.videoWidth || mw, vh = main.videoHeight || mh;
     return { canvas: m.canvas, sx: ((s.sx || 0) * mw) / vw, sy: ((s.sy || 0) * mh) / vh, sw: (s.sw * mw) / vw, sh: (s.sh * mh) / vh };
@@ -214,7 +220,8 @@ export class Player {
   mediaElement(pool, seg, kind) {
     const m = seg.kind === "compound" ? null : this.ed.media(seg.mediaId);
     const useProxy = !!(m?.proxyPath && this.ed.settings().performance.proxy);
-    const src = seg.kind === "compound" ? `media://compound/${seg.compoundTimelineId}?v=${this.ed.compoundVersion(seg.compoundTimelineId)}` : m && m.status !== "missing" ? mediaUrl(m.id, { proxy: useProxy }) : null;
+    const stab = this.stabilized(seg);
+    const src = seg.kind === "compound" ? `media://compound/${seg.compoundTimelineId}?v=${this.ed.compoundVersion(seg.compoundTimelineId)}` : m && m.status !== "missing" ? (stab ? `media://stab/${encodeURIComponent(m.id)}?fps=${this.ed.tl().fps || 30}` : mediaUrl(m.id, { proxy: useProxy })) : null;
     if (!src) return null;
     let v = pool.get(seg.id);
     if (v && v.src !== src) { v.el.pause(); pool.delete(seg.id); v = null; }
@@ -225,7 +232,11 @@ export class Player {
       el.src = src;
       el.addEventListener("seeked", () => this.invalidate());
       el.addEventListener("loadeddata", () => this.invalidate());
-      el.addEventListener("error", () => { v.failed = true; this.invalidate(); });
+      el.addEventListener("error", () => {
+        if (src.startsWith("media://stab/")) { this.noStab.add(seg.mediaId); pool.delete(seg.id); } // not made yet: the original
+        else v.failed = true;
+        this.invalidate();
+      });
       v = { el, src, node: null, gain: null, failed: false };
       if (this.actx) this.connect(v);
       pool.set(seg.id, v);

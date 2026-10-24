@@ -315,3 +315,28 @@ test("motion graphics: templates and frame states; the op checks params; behind 
   assert.deepEqual(correctWords([{ t: "يتزبط.", s: 0, e: 600 }], [{ from: "يتزبط", to: "يتظبط" }]), [{ t: "يتظبط.", s: 0, e: 600 }]);
   assert.deepEqual(correctWords([{ t: "a", s: 0, e: 100 }, { t: "b", s: 100, e: 300 }], [{ from: "a b", to: "x y z" }]).map((w) => [w.t, w.s, w.e]), [["x", 0, 100], ["y", 100, 200], ["z", 200, 300]]);
 });
+
+test("sound effects: a bundled sound lands on its moment; graphics bring their own; one media item per sound", async () => {
+  const list = await call("sfx_list", {});
+  assert.ok(list.some((s) => s.id === "whoosh" && s.leadMs === 300));
+  const r = await call("timeline_add_sfx", { timelineId: tid, sound: "whoosh", atUs: 2_000_000 });
+  assert.equal(r.atUs, 1_700_000, "starts 0.3 s early: the whoosh peaks on the moment");
+  const tl = () => S.timelines.get(tid).timeline;
+  const clip = tl().tracks.flatMap((t) => t.segments).find((s) => s.id === r.clipId);
+  assert.equal(clip.kind, "audio");
+  assert.equal(clip.volumeDb, -11);
+  const media = S.repos.media.get(clip.mediaId);
+  assert.ok(media.durationUs > 500_000 && media.durationUs < 700_000, "the bundled file is a real 0.6 s sound");
+  await call("timeline_add_sfx", { timelineId: tid, sound: "whoosh", atUs: 5_000_000 });
+  const whooshes = tl().tracks.flatMap((t) => t.segments).filter((s) => s.name === "SFX: whoosh");
+  assert.equal(new Set(whooshes.map((s) => s.mediaId)).size, 1, "the sound is imported once");
+  const g = await call("timeline_add_graphic", { timelineId: tid, template: "lower-third", params: { title: "x" }, atUs: 3_000_000, sfx: false });
+  assert.ok(g.clipId);
+  const before = tl().tracks.flatMap((t) => t.segments).filter((s) => s.name?.startsWith("SFX")).length;
+  const { GRAPHIC_TEMPLATES } = await import("../../src/core/graphics.js");
+  GRAPHIC_TEMPLATES["lower-third"].sfx = { in: "pop", out: "swish" }; // a template with sounds
+  try { await call("timeline_add_graphic", { timelineId: tid, template: "lower-third", params: { title: "y" }, atUs: 6_000_000, sfx: true }); }
+  finally { delete GRAPHIC_TEMPLATES["lower-third"].sfx; }
+  assert.equal(tl().tracks.flatMap((t) => t.segments).filter((s) => s.name?.startsWith("SFX")).length, before + 2, "in + out sounds");
+  await assert.rejects(call("timeline_add_sfx", { timelineId: tid, sound: "nope", atUs: 0 }), (e) => e.messageKey === "err.inputsInvalid");
+});

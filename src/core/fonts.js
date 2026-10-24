@@ -15,11 +15,17 @@ export const BUNDLED_FONTS = [
   { family: "Baloo Bhaijaan 2", files: [{ file: "baloobhaijaan2/BalooBhaijaan2[wght].ttf", weight: "400 800" }], arabic: true, style: "playful", label: "Baloo Bhaijaan 2" },
   { family: "Marhey", files: [{ file: "marhey/Marhey[wght].ttf", weight: "300 700" }], arabic: true, style: "playful", label: "Marhey" },
   { family: "Lemonada", files: [{ file: "lemonada/Lemonada[wght].ttf", weight: "300 700" }], arabic: true, style: "playful", label: "Lemonada" },
+  { family: "Noto Sans Arabic", files: [{ file: "notosansarabic/NotoSansArabic[wdth,wght].ttf", weight: "100 900" }], arabic: true, style: "clean", label: "Noto Sans Arabic" },
+  { family: "Almarai", files: [{ file: "almarai/Almarai-Bold.ttf", weight: "700" }, { file: "almarai/Almarai-ExtraBold.ttf", weight: "800" }], arabic: true, style: "modern", label: "Almarai" },
+  { family: "Zain", files: [{ file: "zain/Zain-Bold.ttf", weight: "700" }, { file: "zain/Zain-ExtraBold.ttf", weight: "800" }, { file: "zain/Zain-Black.ttf", weight: "900" }], arabic: true, style: "modern", label: "Zain" },
+  { family: "Kufam", files: [{ file: "kufam/Kufam[wght].ttf", weight: "400 900" }], arabic: true, style: "kufi", label: "Kufam" },
+  { family: "Reem Kufi", files: [{ file: "reemkufi/ReemKufi[wght].ttf", weight: "400 700" }], arabic: true, style: "kufi", label: "Reem Kufi" },
   { family: "Montserrat", files: [{ file: "montserrat/Montserrat[wght].ttf", weight: "100 900" }], arabic: false, style: "modern", label: "Montserrat" },
   { family: "Inter", files: [{ file: "inter/Inter[opsz,wght].ttf", weight: "100 900" }], arabic: false, style: "clean", label: "Inter" },
   { family: "Poppins", files: [{ file: "poppins/Poppins-Bold.ttf", weight: "700" }, { file: "poppins/Poppins-ExtraBold.ttf", weight: "800" }, { file: "poppins/Poppins-Black.ttf", weight: "900" }], arabic: false, style: "modern", label: "Poppins" },
   { family: "Bebas Neue", files: [{ file: "bebasneue/BebasNeue-Regular.ttf", weight: "400" }], arabic: false, style: "display", label: "Bebas Neue" },
   { family: "Anton", files: [{ file: "anton/Anton-Regular.ttf", weight: "400" }], arabic: false, style: "display", label: "Anton" },
+  { family: "Plus Jakarta Sans", files: [{ file: "plusjakartasans/PlusJakartaSans[wght].ttf", weight: "200 800" }], arabic: false, style: "modern", label: "Plus Jakarta Sans" },
 ];
 
 export const BUNDLED_FAMILIES = BUNDLED_FONTS.map((f) => f.family);

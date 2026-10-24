@@ -15,6 +15,10 @@ import { run as runProcess, binaries } from "../services/ffmpeg.js";
 import { CAPTION_TEMPLATES } from "../core/captionTemplates.js";
 import { GRAPHIC_TEMPLATES, EMOJI_ALIASES } from "../core/graphics.js";
 import { cutoutMedia } from "../core/cutout.js";
+import { subjectTrack, subjectReady } from "./subject.js";
+import { SFX } from "../core/sfx.js";
+import { addSfx } from "./sfx.js";
+import { autoEdit } from "./director.js";
 import { DEFAULT_TEXT } from "../core/model.js";
 import { checkInputs } from "./skills/runtime.js";
 import { EDIT_PLAN_SCHEMA } from "../core/editPlan.js";
@@ -72,6 +76,18 @@ function asJob(ctx, kind, label, fn, wait) {
   return wait === false ? ctx.jobs.status(job.jobId, ctx.clientId) : ctx.jobs.wait(job.jobId, WAIT_MS, ctx.clientId);
 }
 const WAIT = { type: "boolean", description: "Wait for the result (default true, up to 50 s; otherwise poll job_status)" };
+
+/** A graphic's own sound effects, on its motion: in (as it arrives), each (word-stack words), out (as it leaves). */
+async function graphicSfx(ctx, timelineId, tpl, params, atUs, durationUs) {
+  const s = tpl.sfx;
+  if (!s) return;
+  if (s.in) await addSfx(ctx, timelineId, s.in, atUs + tpl.inUs * 0.45);
+  if (s.each && params.words?.length > 1) {
+    const n = params.words.length, span = Math.max(200_000, durationUs - tpl.outUs - tpl.inUs - 300_000);
+    for (let i = 1; i < n; i++) await addSfx(ctx, timelineId, s.each, atUs + (params.times?.[i] !== undefined ? params.times[i] * 1000 : (span * i) / (n - 1)) + tpl.inUs * 0.45);
+  }
+  if (s.out && durationUs > tpl.inUs + tpl.outUs + 300_000) await addSfx(ctx, timelineId, s.out, atUs + durationUs - tpl.outUs * 0.5);
+}
 
 /** Person-matte readiness of the videos the cutouts of a timeline use. */
 const matteState = (ctx, tl) => cutoutMedia(tl).map((mediaId) => ({ mediaId, ready: svc(ctx).mattes.ready(mediaId) }));
@@ -459,19 +475,42 @@ export const OPERATIONS = [
   },
   {
     name: "timeline_add_graphic", scope: "edit", title: "Add a motion graphic",
-    description: "Adds an animated graphic (see graphics_templates) at a TIMELINE time. params are checked against the template; missing ones take their defaults. Graphics are drawn full-frame, positions come from the parameters.",
-    input: obj({ ...EDIT, template: S.enumOf(Object.keys(GRAPHIC_TEMPLATES), "Template"), params: { type: "object" }, atUs: S.us("Start"), durationUs: S.us("Length (default: the template's)", 200_000), behindPerson: { type: "boolean", description: "Draw it behind the person (needs a person matte; see timeline_behind_person)" } }, ["timelineId", "template"]),
+    description: "Adds an animated graphic (see graphics_templates) at a TIMELINE time. params are checked against the template; missing ones take their defaults. Person-aware templates (subject: true — emerge-side, rise-behind, word-stack, pass-behind, head-emoji, head-icon) follow the person's head automatically (the app reads it from the person matte; the first time per video this runs as a job) and the kinetic ones go behind the person unless behindPerson is false. Start them ~0.1 s before the spoken word they show.",
+    input: obj({ ...EDIT, template: S.enumOf(Object.keys(GRAPHIC_TEMPLATES), "Template"), params: { type: "object" }, atUs: S.us("Start"), durationUs: S.us("Length (default: the template's)", 200_000), behindPerson: { type: "boolean", description: "Draw it behind the person (default: true for the templates made for it)" }, sfx: { type: "boolean", description: "Add the template's sound effects on its motion (whoosh in, pop, …)" }, wait: WAIT }, ["timelineId", "template"]),
     timeline: (a) => a.timelineId,
     run: async (ctx, a) => {
       const tpl = GRAPHIC_TEMPLATES[a.template];
       const params = checkInputs({ type: "object", properties: tpl.params, additionalProperties: false }, a.params || {}, `${a.template}.params`);
-      const label = String(params.text || params.title || params.label || params.emoji || tpl.name).slice(0, 40);
-      const r = await exec(ctx, a.timelineId, "addSegment", { kind: "text", atUs: a.atUs ?? 0, durationUs: a.durationUs ?? tpl.durUs, expectedRevision: a.expectedRevision,
-        init: { name: `${tpl.name}: ${label}`, text: { ...DEFAULT_TEXT, content: label, graphic: { template: a.template, params } } } });
-      if (!a.behindPerson) return { clipId: r.result, revision: r.revision };
-      const b = await exec(ctx, a.timelineId, "setBehindPerson", { ids: [r.result], value: true });
-      return { clipId: r.result, revision: b.revision, behindPerson: true, mattes: matteState(ctx, b.timeline) };
+      const atUs = a.atUs ?? 0, durationUs = a.durationUs ?? tpl.durUs;
+      const behind = a.behindPerson ?? !!tpl.behind;
+      const add = async () => {
+        if (tpl.subject && !params.subject?.track?.length) params.subject = await subjectTrack(ctx, a.timelineId, atUs, durationUs);
+        const label = String(params.text || params.title || params.label || params.words?.join(" ") || params.emoji || tpl.name).slice(0, 40);
+        const r = await exec(ctx, a.timelineId, "addSegment", { kind: "text", atUs, durationUs, expectedRevision: a.expectedRevision,
+          init: { name: `${tpl.name}: ${label}`, text: { ...DEFAULT_TEXT, content: label, graphic: { template: a.template, params } } } });
+        if (a.sfx) await graphicSfx(ctx, a.timelineId, tpl, params, atUs, durationUs);
+        if (!behind) return { clipId: r.result, revision: r.revision };
+        const b = await exec(ctx, a.timelineId, "setBehindPerson", { ids: [r.result], value: true });
+        if (!svc(ctx).exporter.derivedReady(b.timeline)) await svc(ctx).exporter.prepareDerived(b.timeline);
+        return { clipId: r.result, revision: b.revision, behindPerson: true, mattes: matteState(ctx, b.timeline) };
+      };
+      // A person matte still to make (tens of seconds) → a job; inside an edit plan (already a job) → inline.
+      const slow = (tpl.subject || behind) && !subjectReady(ctx, a.timelineId, atUs, durationUs);
+      return slow && !a.inline ? asJob(ctx, "graphic", tpl.name, add, a.wait) : add();
     },
+  },
+  {
+    name: "sfx_list", scope: "read", title: "Sound effects",
+    description: "The bundled sound effects (ids, what each is for, default level). Add them with timeline_add_sfx, or with sfx: true on timeline_add_graphic (each template has its own in/out sounds).",
+    input: obj({}),
+    run: () => Object.entries(SFX).map(([id, s]) => ({ id, ar: s.ar, use: s.use, volumeDb: s.volumeDb, leadMs: s.leadUs / 1000 })),
+  },
+  {
+    name: "timeline_add_sfx", scope: "edit", title: "Add a sound effect",
+    description: "Adds a bundled sound effect (see sfx_list) so that its accent lands on a TIMELINE moment (e.g. a whoosh peaking as text flies in, an impact on a punch-in). It starts a little earlier by itself. One undo step per call.",
+    input: obj({ ...EDIT, sound: S.enumOf(Object.keys(SFX), "Sound"), atUs: S.us("The moment the sound marks"), volumeDb: S.num("Level (dB, default: the sound's own)", -40, 6) }, ["timelineId", "sound", "atUs"]),
+    timeline: (a) => a.timelineId,
+    run: (ctx, a) => { svc(ctx).timelines.checkRevision(a.timelineId, a.expectedRevision); return addSfx(ctx, a.timelineId, a.sound, a.atUs, { volumeDb: a.volumeDb }); },
   },
   {
     name: "timeline_behind_person", scope: "edit", title: "Text behind the person",
@@ -480,12 +519,21 @@ export const OPERATIONS = [
     timeline: (a) => a.timelineId,
     run: async (ctx, a) => {
       const r = await exec(ctx, a.timelineId, "setBehindPerson", { ids: a.clipIds, value: a.behind !== false, expectedRevision: a.expectedRevision });
-      const need = cutoutMedia(r.timeline).filter((id) => !svc(ctx).mattes.ready(id));
-      if (!need.length) return { moved: r.result, revision: r.revision, mattes: matteState(ctx, r.timeline) };
+      if (svc(ctx).exporter.derivedReady(r.timeline)) return { moved: r.result, revision: r.revision, mattes: matteState(ctx, r.timeline) };
       return asJob(ctx, "matte", "person matte", async (j) => {
-        for (const [i, id] of need.entries()) await svc(ctx).mattes.ensure(id, { onProgress: (p) => j.progress?.((i + p) / need.length, "person matte") });
+        await svc(ctx).exporter.prepareDerived(r.timeline, (stage, p) => j.progress?.(p, stage === "matte" ? "person matte" : "stabilization"));
         return { moved: r.result, revision: r.revision, mattes: matteState(ctx, r.timeline) };
       }, a.wait);
+    },
+  },
+  {
+    name: "edit_auto", scope: "edit", title: "Edit it for me (director)",
+    description: "The built-in director plans a whole edit of a talking video from what is said and where the person is: creator pacing (every pause cut on the words, beats and shown moments kept), alternate framing to hide jump cuts, punch-ins on questions, graphics chosen per sentence (emoji for named concepts, words coming out from behind the person, stacked words), sound effects on every motion, stabilization, voice clean-up, platform loudness, revealed captions. apply=false (default) returns the plan and the reason for each decision — show it, adjust it, then edit_plan_apply; apply=true applies it as one undo step. The timeline must hold one uncut video. Needs the media permission (speech model). Runs as a job.",
+    input: obj({ ...EDIT, style: S.enumOf(["energetic", "calm"], "Pace"), keywords: { type: "array", items: { type: "string", maxLength: 60 }, maxItems: 60, description: "Words to show/emphasise first" }, cta: S.str("Call to action at the end (empty: none)", 80), captionTemplate: S.enumOf(Object.keys(CAPTION_TEMPLATES), "Caption template"), corrections: { type: "array", maxItems: 300, items: { type: "object", additionalProperties: false, required: ["from", "to"], properties: { from: { type: "string", minLength: 1, maxLength: 120 }, to: { type: "string", maxLength: 120 } } } }, language: { type: "string", pattern: "^(auto|[a-z]{2})$" }, apply: { type: "boolean" }, wait: WAIT }, ["timelineId"]),
+    timeline: (a) => a.timelineId,
+    run: (ctx, a) => {
+      if (!ctx.guard.hasScope("media")) throw new AppError("FORBIDDEN", "err.scopeMissing", { scope: "media", op: "edit_auto" });
+      return asJob(ctx, "director", a.apply ? "auto edit" : "auto edit (plan)", (j) => autoEdit(ctx, a.timelineId, a, j), a.wait);
     },
   },
   {

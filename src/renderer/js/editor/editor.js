@@ -22,6 +22,7 @@ import { Inspector } from "./inspector.js";
 import { openExport, overlaysFor } from "./exportDialog.js";
 import { record } from "./recorder.js";
 import { openPilot } from "./pilot.js";
+import { openDirector } from "./director.js";
 import { openSkills } from "./skills.js";
 import { openSettings } from "../dialogs/settings.js";
 import { openShortcuts } from "../dialogs/shortcuts.js";
@@ -70,7 +71,7 @@ export async function openEditor(root, params) {
     compoundVersion: (id) => st.compoundVersions[id] || 0,
     compoundReady: (id) => !!st.compoundReady[id],
     reloadTimeline,
-    select, seek, exec, run, patchLive, dropItem, behindPerson, importDropped, importDialog, importFolder, refreshMedia, globalEdit, autoCaptions, importCaptions, deleteCaptions,
+    select, seek, exec, run, patchLive, dropItem, behindPerson, stabilize, importDropped, importDialog, importFolder, refreshMedia, globalEdit, autoCaptions, importCaptions, deleteCaptions,
     applyFilterToClip, openPanel: (tab) => materials.setTab(tab), openSettings: (tab) => openSettings(tab), relayout: () => { player.lastLayout = null; player.layout(); },
     segmentAtPlayhead, clipMenu, emptyMenu, markerMenu, pickColor, coverMenu,
     onTime: (us) => { timeline.movePlayhead(us); updateTime(); },
@@ -102,6 +103,7 @@ export async function openEditor(root, params) {
   const topbar = h("div", { class: "ed-topbar" },
     h("button", { class: "btn ghost", onclick: (e) => mainMenu(e.currentTarget) }, icon("logo"), t("ed.menu"), icon("chevronDown")),
     savedEl, tlSel, h("div", { class: "grow" }),
+    h("button", { class: "btn primary", title: t("dir.title"), onclick: () => openDirector(ed) }, icon("wand"), t("dir.title")),
     h("button", { class: "btn ghost", title: t("ai.title"), onclick: () => openPilot(ed) }, icon("sparkle"), t("ai.title")),
     h("button", { class: "btn ghost", title: t("sk.title"), onclick: () => openSkills(ed) }, icon("layers"), t("sk.title")),
     h("button", { class: "icon-btn", title: t("ed.layout"), "aria-label": t("ed.layout"), onclick: (e) => layoutMenu(e.currentTarget) }, icon("layout")),
@@ -214,19 +216,32 @@ export async function openEditor(root, params) {
   // Thumbnails / waveforms / proxies finished (or media imported elsewhere, e.g. TTS, recording): reload the list.
   const offMedia = on("media:updated", throttle(() => refreshMedia(), 300));
   // A person matte finished (here or for an agent): the preview loads it at once.
-  const offMatte = on("matte:ready", (e) => { for (const mid of e.mediaIds || []) player.mattes.delete(mid); player.invalidate(); });
+  const offMatte = on("matte:ready", (e) => { for (const mid of e.mediaIds || []) { player.mattes.delete(mid); player.mattes.delete(`${mid}|stab`); } player.invalidate(); });
+  const offStab = on("stab:ready", (e) => { for (const mid of e.mediaIds || []) player.noStab.delete(mid); player.invalidate(); });
 
   /** Put layers behind the person (or back in front); the first time per video, its person matte is made. */
   async function behindPerson(ids, value = true) {
     const res = await exec("setBehindPerson", { ids, value });
-    if (!res || !value) return res;
-    const tst = toast(t("lib.matteWorking", { p: 0 }), "info", { ms: 30 * 60_000 });
-    const offP = on("matte:progress", (e) => { tst.firstChild.textContent = t("lib.matteWorking", { p: Math.round(e.progress * 100) }); });
+    if (res && value) await prepareDerived("lib.matteDone");
+    return res;
+  }
+
+  /** Stabilize a video clip (or stop): the first time per video, a stabilized copy is made. */
+  async function stabilize(segId, value = true) {
+    const res = await exec("updateSegment", { segId, patch: { videoFx: { stabilize: { enabled: !!value } } } });
+    if (res && value) await prepareDerived("lib.stabDone");
+    return res;
+  }
+
+  /** Make the stabilized copies / person mattes the timeline needs, with a progress notice. */
+  async function prepareDerived(doneKey) {
+    const tst = toast(t("lib.stabWorking", { p: 0 }), "info", { ms: 30 * 60_000 });
+    const offP = on("derived:progress", (e) => { tst.firstChild.textContent = t(e.stage === "matte" ? "lib.matteWorking" : "lib.stabWorking", { p: Math.round(e.progress * 100) }); });
     try {
       const r = await call("mattes.prepare", st.timelineId);
-      if (r.made) toast(t("lib.matteDone"), "success");
+      if (r.made) toast(t(doneKey), "success");
+      player.invalidate();
     } catch (err) { toast(errorText(err), "error", { ms: 8000 }); } finally { offP(); tst.remove(); }
-    return res;
   }
 
   // ------------------------------------------------------------------ import
@@ -650,7 +665,7 @@ export async function openEditor(root, params) {
   return async () => {
     player.pause();
     document.removeEventListener("keydown", onKey);
-    offMedia(); offMatte(); offShortcuts(); offSettings(); offAgentEdit();
+    offMedia(); offMatte(); offStab(); offShortcuts(); offSettings(); offAgentEdit();
     player.destroy(); timeline.destroy();
     const editSeconds = Math.round((Date.now() - st.openedAt) / 1000);
     await call("project.finalize", st.project.id, { editSeconds }).catch(() => {});

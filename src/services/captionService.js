@@ -207,6 +207,16 @@ export class CaptionService {
     }
   }
 
+  /** The newest cached word transcript of a media file, or null — never runs recognition (used by the export). */
+  cachedWords(mediaId) {
+    const dir = path.join(this.paths.cache, "transcripts");
+    let files = [];
+    try { files = fs.readdirSync(dir).filter((f) => f.startsWith(`${mediaId}.`) && f.endsWith(".json")).map((f) => path.join(dir, f)); } catch { return null; }
+    files.sort((a, b) => fs.statSync(b).mtimeMs - fs.statSync(a).mtimeMs);
+    for (const f of files) { try { const j = JSON.parse(fs.readFileSync(f, "utf8")); if (j.words?.length) return j.words; } catch { /* next */ } }
+    return null;
+  }
+
   async runFasterWhisper(wav, lang, signal) {
     const p = this.settings.get("providers");
     const out = await exec(this.pythonCmd(), ["-X", "utf8", FW_SCRIPT, "--audio", wav, "--model", p.fwModel || "large-v3-turbo", "--language", lang], { timeoutMs: 60 * 60_000, signal });

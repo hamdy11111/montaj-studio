@@ -2,7 +2,7 @@
 // code feeds the live preview, the template thumbnails and the exporter (frame sequences), so graphics look the
 // same everywhere. Arabic text is laid out right-to-left; emoji are the bundled 3D emoji, icons the bundled
 // line icons tinted per use.
-import { GRAPHIC_TEMPLATES, EMOJI_ALIASES, graphicParams, graphicStates, prog, EASE, clamp01 } from "../../core/graphics.js";
+import { GRAPHIC_TEMPLATES, EMOJI_ALIASES, graphicParams, graphicStates, prog, EASE, clamp01, subjectAt, freeSide } from "../../core/graphics.js";
 import { fontStack } from "../../core/fonts.js";
 import { US } from "../../core/util.js";
 
@@ -47,6 +47,18 @@ const hexA = (hex, a) => { const n = parseInt(String(hex || "#000000").slice(1, 
 const posY = (p, H) => ({ top: 0.14, center: 0.5, bottom: 0.84, "lower-third": 0.78 }[p] ?? 0.5) * H;
 const outFade = (t, D, out) => (out > 0 ? 1 - prog(t, D - out, D, EASE.in) : 1);
 const isRtl = (s) => AR.test(String(s));
+
+/** Where a head-anchored badge goes: beside the top of the head, on the free side (or above it). */
+function headCorner(s, corner, sz, W, H, side0 = "right", extra = 0) {
+  // Beside the head (not far out by the shoulders); the side is decided once per graphic (side0), and a hand or an
+  // arm at head height pushes the badge out past it. `extra`: width of a label on the outer side.
+  const hl = (s.hx - s.hw / 2) * W, hr = (s.hx + s.hw / 2) * W;
+  const side = corner === "left" || corner === "right" || corner === "top" ? corner : side0;
+  const clampX = (x) => Math.max(sz * 0.6 + (side === "left" ? extra : 0), Math.min(W - sz * 0.6 - (side === "right" ? extra : 0), x)), clampY = (y) => Math.max(sz * 0.6, Math.min(H - sz * 0.6, y));
+  if (side === "top") return { cx: clampX(s.hx * W), cy: clampY((s.hy - s.hh / 2) * H - sz * 0.45), side };
+  const edge = side === "right" ? Math.max(hr, s.x1 * W - sz) : Math.min(hl, s.x0 * W + sz);
+  return { cx: clampX(side === "right" ? edge + sz * 0.6 : edge - sz * 0.6), cy: clampY((s.hy - s.hh * 0.3) * H), side };
+}
 
 /** Words laid out on up to `maxLines` balanced lines within maxW: [{ words: [{ w, width }], width }]. */
 function layoutWords(g, text, maxW) {
@@ -350,6 +362,173 @@ const DRAW = {
     } else {
       if (p.style === "gradient") { const gr = g.createLinearGradient(0, -px * 0.45, 0, px * 0.45); gr.addColorStop(0, p.color); gr.addColorStop(1, p.color2); g.fillStyle = gr; } else g.fillStyle = p.color;
       g.fillText(p.text, 0, 0);
+    }
+    g.restore();
+  },
+
+  // ---- kinetic, person-aware (the person is drawn over these: they come out from behind the head)
+  "emerge-side"(g, W, H, p, t, D, tpl, u) {
+    const s = subjectAt(p.subject, t);
+    const L = s.x0 * W, R = s.x1 * W; // the silhouette at head height (a raised arm counts)
+    const side = freeSide(p.subject, p.side);
+    const free = Math.max(W * 0.18, side === "right" ? W - R : L), gap = 0.02 * W;
+    setFont(g, 900, 100, p.font);
+    const m100 = g.measureText(p.text).width || 1;
+    const pad = p.style === "box" ? 0.3 : 0;
+    const px = Math.max(H * 0.05, Math.min(H * 0.17 * p.size, (100 * (free - gap * 2)) / (m100 * (1 + pad * 0.6))));
+    setFont(g, 900, px, p.font);
+    const tw = g.measureText(p.text).width, bw = tw + px * pad * 2, bh = px * (p.style === "box" ? 1.35 : 1.1);
+    // From mostly behind the head to beside it; back again at the end.
+    const inFrame = (x) => Math.max(0.02 * W, Math.min(W - bw - 0.02 * W, x));
+    const final = inFrame(side === "right" ? R + gap : L - gap - bw), start = side === "right" ? Math.min(final, R - bw * 0.9) : Math.max(final, L - bw * 0.1);
+    const kIn = prog(t, 0, tpl.inUs / US), kOut = prog(t, D - tpl.outUs / US, D, EASE.in);
+    const xAt = (tt) => { const a = prog(tt, 0, tpl.inUs / US, EASE.back), b = prog(tt, D - tpl.outUs / US, D, EASE.in); return start + (final - start) * a + (start - final) * b; };
+    const x = xAt(t), y = Math.max(bh / 2 + 0.03 * H, Math.min(H - bh / 2 - 0.03 * H, (s.hy - s.hh * 0.08) * H));
+    const v = Math.abs(xAt(t) - xAt(t - 1 / 30)); // pixels per frame: a light motion trail while moving
+    const alpha = clamp01(t / 0.06) * (1 - kOut * 0.25);
+    const drawAt = (bx, a) => {
+      g.save(); g.globalAlpha = a; g.translate(bx, y);
+      if (p.style === "box") { shadow(g, u, 0.35, 26, 8); g.fillStyle = p.accent; rr(g, 0, -bh / 2, bw, bh, bh * 0.22); g.fill(); noShadow(g); }
+      else shadow(g, u, 0.4, 22, 6);
+      g.textAlign = "center"; g.textBaseline = "middle"; g.direction = isRtl(p.text) ? "rtl" : "ltr";
+      if (p.style === "outline") { g.lineJoin = "round"; g.lineWidth = Math.max(3, px * 0.06); g.strokeStyle = p.color; g.strokeText(p.text, bw / 2, px * 0.04); }
+      else {
+        if (p.style === "gradient") { const gr = g.createLinearGradient(0, -px / 2, 0, px / 2); gr.addColorStop(0, p.color); gr.addColorStop(1, p.accent); g.fillStyle = gr; } else g.fillStyle = p.color;
+        g.fillText(p.text, bw / 2, px * 0.04);
+      }
+      g.restore();
+    };
+    if (v > 4 && kIn < 1) for (let k = 3; k >= 1; k--) drawAt(x + (side === "right" ? -1 : 1) * v * k * 0.6, alpha * 0.12 * (4 - k));
+    drawAt(x, alpha);
+  },
+
+  "rise-behind"(g, W, H, p, t, D, tpl, u) {
+    const s = subjectAt(p.subject, t);
+    setFont(g, 900, 100, p.font);
+    const m100 = g.measureText(p.text).width || 1;
+    const headTop = (s.hy - s.hh / 2) * H, L = s.x0 * W, R = s.x1 * W;
+    // Above the head when there is room for it; otherwise it rises on the free side, beside the head.
+    const aboveRoom = headTop - 0.03 * H;
+    let px = Math.max(H * 0.08, Math.min(H * 0.3 * p.size, (100 * W * 0.86) / m100, aboveRoom / 0.75));
+    const above = aboveRoom >= H * 0.09;
+    let cx = s.hx * W;
+    if (!above) {
+      const right = freeSide(p.subject) === "right", room = Math.max(W * 0.2, right ? W - R : L);
+      px = Math.max(H * 0.06, Math.min(H * 0.24 * p.size, (100 * room * 0.86) / m100));
+      cx = right ? R + room / 2 : room / 2;
+    }
+    setFont(g, 900, px, p.font);
+    const mm = g.measureText(p.text), tw = mm.width, asc = mm.actualBoundingBoxAscent || px * 0.55, desc = mm.actualBoundingBoxDescent || px * 0.3;
+    // Above: stands on the head (its lower edge just behind the hair). Beside: at eye height. Rises from below.
+    const finalY = above ? Math.max(asc + 0.03 * H, headTop + desc * 0.15) : Math.max(asc + 0.03 * H, Math.min(H - desc - 0.03 * H, s.hy * H + asc / 2));
+    const startY = Math.min(H + asc, (above ? (s.hy + s.hh * 0.75) * H : H) + asc);
+    const kIn = prog(t, 0, tpl.inUs / US, EASE.back), kOut = prog(t, D - tpl.outUs / US, D, EASE.in);
+    const y = startY + (finalY - startY) * kIn + (startY - finalY) * kOut;
+    const x = Math.max(tw / 2 + 0.03 * W, Math.min(W - tw / 2 - 0.03 * W, cx));
+    const sc = 0.92 + 0.08 * Math.min(1, kIn);
+    g.save(); g.globalAlpha = clamp01(t / 0.08); g.translate(x, y); g.scale(sc, sc);
+    g.textAlign = "center"; g.textBaseline = "alphabetic"; g.direction = isRtl(p.text) ? "rtl" : "ltr";
+    shadow(g, u, 0.35, 30, 10);
+    if (p.style === "outline") { g.lineJoin = "round"; g.lineWidth = Math.max(4, px * 0.045); g.strokeStyle = p.color; g.strokeText(p.text, 0, 0); }
+    else {
+      if (p.style === "gradient") { const gr = g.createLinearGradient(0, -asc, 0, desc); gr.addColorStop(0, p.color); gr.addColorStop(1, p.color2); g.fillStyle = gr; } else g.fillStyle = p.color;
+      g.fillText(p.text, 0, 0);
+    }
+    g.restore();
+  },
+
+  "word-stack"(g, W, H, p, t, D, tpl, u) {
+    const s = subjectAt(p.subject, t);
+    const L = s.x0 * W, R = s.x1 * W;
+    const side = freeSide(p.subject, p.side);
+    const free = Math.max(W * 0.2, side === "right" ? W - R : L), gap = 0.022 * W;
+    const words = (p.words || []).filter(Boolean).slice(0, 4);
+    if (!words.length) return;
+    const inS = tpl.inUs / US, outS = tpl.outUs / US;
+    const span = Math.max(0.2, D - outS - inS - 0.3);
+    const at = words.map((_, i) => (p.times?.[i] !== undefined ? p.times[i] / 1000 : (span * i) / Math.max(1, words.length - 1 || 1)));
+    // Each word sized to the free width (short words bigger), stacked as a block centred on the head.
+    const sizes = words.map((w) => { setFont(g, 900, 100, p.font); const m = g.measureText(w).width || 1; return Math.max(H * 0.05, Math.min(H * 0.14 * p.size, (100 * (free - gap * 2)) / m)); });
+    const lineH = sizes.map((x) => x * 1.12), total = lineH.reduce((a, b) => a + b, 0);
+    // From the top of the head down (lower down, the shoulders would hide the last words).
+    let y = Math.max(0.04 * H, Math.min(H - total - 0.04 * H, (s.hy - s.hh / 2) * H + 0.02 * H));
+    const kOut = prog(t, D - outS, D, EASE.in);
+    words.forEach((w, i) => {
+      const px = sizes[i];
+      setFont(g, 900, px, p.font);
+      const tw = g.measureText(w).width;
+      const final = Math.max(0.02 * W, Math.min(W - tw - 0.02 * W, side === "right" ? R + gap : L - gap - tw));
+      const start = side === "right" ? Math.min(final, R - tw * 0.9) : Math.max(final, L - tw * 0.1);
+      const k = prog(t, at[i], at[i] + inS, EASE.back);
+      const x = start + (final - start) * k + (start - final) * kOut;
+      const cy = y + lineH[i] / 2;
+      y += lineH[i];
+      if (t < at[i]) return;
+      g.save(); g.globalAlpha = clamp01((t - at[i]) / 0.06);
+      g.textAlign = "left"; g.textBaseline = "middle"; g.direction = "ltr"; // measured box: draw from its left edge
+      shadow(g, u, 0.4, 22, 6);
+      g.fillStyle = i % 2 ? p.accent : p.color;
+      g.fillText(w, x, cy);
+      g.restore();
+    });
+  },
+
+  "pass-behind"(g, W, H, p, t, D, tpl, u) {
+    const s = subjectAt(p.subject, t);
+    setFont(g, 900, 100, p.font);
+    const px = H * 0.24 * p.size;
+    setFont(g, 900, px, p.font);
+    const tw = g.measureText(p.text).width;
+    const k = clamp01(t / D); // constant speed, on screen from the first frame to the last
+    const from = p.direction === "rtl" ? W * 0.82 + tw / 2 : W * 0.18 - tw / 2, to = p.direction === "rtl" ? W * 0.18 - tw / 2 : W * 0.82 + tw / 2;
+    const x = from + (to - from) * k, y = Math.max(px * 0.6, Math.min(H - px * 0.6, (s.hy - s.hh * 0.18) * H));
+    g.save(); g.translate(x, y);
+    g.textAlign = "center"; g.textBaseline = "middle"; g.direction = isRtl(p.text) ? "rtl" : "ltr";
+    if (p.style === "outline") { shadow(g, u, 0.3, 18, 4); g.lineJoin = "round"; g.lineWidth = Math.max(4, px * 0.04); g.strokeStyle = p.color; g.strokeText(p.text, 0, 0); }
+    else { shadow(g, u, 0.35, 24, 6); g.fillStyle = p.color; g.fillText(p.text, 0, 0); }
+    g.restore();
+  },
+
+  "head-emoji"(g, W, H, p, t, D, tpl, u) {
+    const s = subjectAt(p.subject, t);
+    const img = asset(emojiKey(p.emoji));
+    const sz = p.size * H;
+    const { cx, cy } = headCorner(s, p.corner, sz, W, H, freeSide(p.subject));
+    const kIn = prog(t, 0, tpl.inUs / US, EASE.elastic), kOut = prog(t, D - tpl.outUs / US, D, EASE.in);
+    let rot = 0, dy = 0, sc = kIn * (1 - kOut);
+    if (p.motion === "wiggle") rot = Math.sin(t * 9) * 0.18;
+    else if (p.motion === "bounce") dy = -Math.abs(Math.sin(t * 6)) * sz * 0.12;
+    else if (p.motion === "float") dy = -t * sz * 0.25;
+    else if (p.motion === "spin") rot = t * 4;
+    if (sc <= 0.01) return;
+    g.save(); g.translate(cx, cy + dy); g.rotate(rot - kOut * 0.6); g.scale(sc, sc);
+    shadow(g, u, 0.35, 24, 8);
+    if (img) g.drawImage(img, -sz / 2, -sz / 2, sz, sz);
+    else { g.font = `${Math.round(sz * 0.8)}px "Segoe UI Emoji", sans-serif`; g.textAlign = "center"; g.textBaseline = "middle"; g.fillText(p.emoji, 0, 0); }
+    g.restore();
+  },
+
+  "head-icon"(g, W, H, p, t, D, tpl, u) {
+    const s = subjectAt(p.subject, t);
+    const sz = p.size * H;
+    let labelW = 0;
+    if (p.label) { setFont(g, 800, sz * 0.42, p.font); labelW = g.measureText(p.label).width + sz * 0.72; }
+    const { cx, cy, side } = headCorner(s, p.corner, sz, W, H, freeSide(p.subject), labelW);
+    const kIn = prog(t, 0, tpl.inUs / US, EASE.back), kOut = prog(t, D - tpl.outUs / US, D, EASE.in);
+    const sc = Math.max(0, kIn * (1 - kOut));
+    if (sc <= 0.01) return;
+    g.save(); g.translate(cx, cy); g.scale(sc, sc); g.rotate(Math.sin(t * 5) * 0.05);
+    shadow(g, u, 0.35, 24, 8);
+    g.fillStyle = p.accent; g.beginPath(); g.arc(0, 0, sz / 2, 0, Math.PI * 2); g.fill(); noShadow(g);
+    const ic = asset(iconKey(p.icon, "#FFFFFF"));
+    if (ic) g.drawImage(ic, -sz * 0.3, -sz * 0.3, sz * 0.6, sz * 0.6);
+    if (p.label) {
+      setFont(g, 800, sz * 0.42, p.font); g.textBaseline = "middle"; g.direction = isRtl(p.label) ? "rtl" : "ltr";
+      const lw = g.measureText(p.label).width, padX = sz * 0.28, lh = sz * 0.62;
+      const lx = side === "left" ? -sz / 2 - sz * 0.15 - lw - padX * 2 : sz / 2 + sz * 0.15;
+      g.globalAlpha = clamp01((t - 0.15) / 0.2); shadow(g, u, 0.3, 18, 6);
+      g.fillStyle = "rgba(12,12,18,0.82)"; rr(g, lx, -lh / 2, lw + padX * 2, lh, lh / 2); g.fill(); noShadow(g);
+      g.fillStyle = p.color; g.textAlign = "center"; g.fillText(p.label, lx + padX + lw / 2, sz * 0.02);
     }
     g.restore();
   },

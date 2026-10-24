@@ -17,7 +17,8 @@ function layout(text, W, H) {
   const fontFamily = fontStack(ov.font || tpl.font);
   const g = document.createElement("canvas").getContext("2d");
   const maxW = W * (W < H ? 0.84 : 0.7);
-  let px = ((ov.size || tpl.size) * H) / 200;
+  // Landscape frames get larger captions (≈5–6 % of the height, like professional subtitles on 16:9).
+  let px = (((ov.size || tpl.size) * H) / 200) * (W > H ? 1.3 : 1);
   const font = (k) => `${tpl.weight} ${Math.max(4, px * k)}px ${fontFamily}`;
   const wordScale = (i) => (emph.has(i) && tpl.accentScale ? tpl.accentScale : 1);
   const measure = () => words.map((w, i) => { g.font = font(wordScale(i)); return g.measureText(w.t).width; });
@@ -25,7 +26,8 @@ function layout(text, W, H) {
   for (let attempt = 0; attempt < 8; attempt++) { // shrink until the page fits its line budget
     widths = measure();
     g.font = font(1);
-    const gap = g.measureText(" ").width;
+    // Room for the spoken word's pop (drawn up to ~1.2× its size) so it never touches its neighbours.
+    const gap = Math.max(g.measureText(" ").width, px * (tpl.highlight === "box" ? 0.6 : 0.36)); // a box needs its own padding too
     lines = [];
     let cur = [], w = 0;
     words.forEach((_, i) => {
@@ -70,7 +72,15 @@ function drawWord(g, L, i, x, y, k, active) {
   g.textBaseline = "middle";
   const w = g.measureText(t).width;
   if (active && tpl.highlight === "box") {
-    g.save(); g.shadowColor = "transparent"; g.fillStyle = ov.activeBox || tpl.activeBox; roundRect(g, x - w / 2 - px * 0.22, y - px * 0.68 * k, w + px * 0.44, px * 1.32 * k, px * 0.22); g.fill(); g.restore();
+    const r = tpl.pill ? px * 0.66 * k : px * 0.22; // a pill: fully rounded ends
+    g.save(); g.shadowColor = "rgba(0,0,0,0.35)"; g.shadowBlur = px * 0.3; g.shadowOffsetY = px * 0.06; g.fillStyle = ov.activeBox || tpl.activeBox;
+    roundRect(g, x - w / 2 - px * (tpl.pill ? 0.34 : 0.22), y - px * 0.68 * k, w + px * (tpl.pill ? 0.68 : 0.44), px * 1.32 * k, r); g.fill(); g.restore();
+  }
+  if (tpl.extrude) { // a hard 3D shadow: the word stacked down-right in the extrude colour
+    g.save(); g.fillStyle = tpl.extrude; g.shadowColor = "transparent";
+    const steps = Math.max(3, Math.round(px * 0.09 * k));
+    for (let s = steps; s >= 1; s--) g.fillText(t, x + s * 0.7, y + s);
+    g.restore();
   }
   let color = ov.color || tpl.color;
   if (L.emph.has(i)) color = ov.accent || tpl.accent;

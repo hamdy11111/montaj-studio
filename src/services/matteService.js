@@ -11,11 +11,12 @@ import { fileURLToPath } from "node:url";
 import { AppError } from "../core/validation.js";
 import { US } from "../core/util.js";
 import { binaries, run } from "./ffmpeg.js";
+import { decodeRecipe } from "./fastDecode.js";
 
 const VISION_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), "vision").replace(/app\.asar([\\/])/, "app.asar.unpacked$1");
 const SCRIPT = path.join(VISION_DIR, "person_matte.py");
 const MODEL = path.join(VISION_DIR, "models", "selfie_multiclass_256x256.tflite");
-const VERSION = "v1"; // part of the file name: a new mask recipe makes new files
+const VERSION = "v2"; // part of the file name: a new mask recipe makes new files (v2: + face/head boxes)
 const SHORT_SIDE = 360;   // the model sees 256×256; a larger mask only costs time
 const CHUNK_MIN_S = 4;
 const GPU_PARTS = 4;
@@ -31,12 +32,12 @@ export class MatteService {
     fs.mkdirSync(this.dir, { recursive: true });
     this.jobs = new Map(); // mediaId -> Promise<path>
     this.checked = null;   // { python, available, error }
-    this.decoders = new Map(); // source path -> decode recipe (GPU or CPU), see decoder()
   }
 
   pythonCmd() { return this.settings.get("providers").pythonPath || "python"; }
-  file(mediaId) { return path.join(this.dir, `${mediaId}-${VERSION}.mp4`); }
-  ready(mediaId) { return fs.existsSync(this.file(mediaId)); }
+  // variant "stab": the matte of the stabilized copy (StabilizeService), so a stabilized cutout lines up.
+  file(mediaId, variant = "") { return path.join(this.dir, `${mediaId}${variant ? `-${variant}` : ""}-${VERSION}.mp4`); }
+  ready(mediaId, variant = "") { return fs.existsSync(this.file(mediaId, variant)); }
 
   /** Whether python with mediapipe + opencv is available (cached per python path). */
   async status(force = false) {
@@ -51,22 +52,26 @@ export class MatteService {
     return this.checked;
   }
 
-  /** The mask video of a media file; made on first use (shared by concurrent callers). */
-  ensure(mediaId, { onProgress, signal } = {}) {
-    if (this.ready(mediaId)) return Promise.resolve(this.file(mediaId));
-    if (!this.jobs.has(mediaId)) {
-      const p = this.make(mediaId, { onProgress, signal }).finally(() => this.jobs.delete(mediaId));
-      this.jobs.set(mediaId, p);
+  /**
+   * The mask video of a media file; made on first use (shared by concurrent callers). `variant`/`source`: the mask
+   * of another rendition with the same timing (the stabilized copy).
+   */
+  ensure(mediaId, { onProgress, signal, variant = "", source = null } = {}) {
+    if (this.ready(mediaId, variant)) return Promise.resolve(this.file(mediaId, variant));
+    const key = `${mediaId}|${variant}`;
+    if (!this.jobs.has(key)) {
+      const p = this.make(mediaId, { onProgress, signal, variant, source }).finally(() => this.jobs.delete(key));
+      this.jobs.set(key, p);
     }
-    return this.jobs.get(mediaId);
+    return this.jobs.get(key);
   }
 
-  async make(mediaId, { onProgress, signal }) {
+  async make(mediaId, { onProgress, signal, variant = "", source = null }) {
     const m = this.repos.media.get(mediaId);
     if (m.type !== "video") throw new AppError("VALIDATION", "err.matteVideoOnly", { mediaId });
     const st = await this.status();
     if (!st.available) throw new AppError("PROVIDER", "err.matteUnavailable", { error: st.error });
-    const src = m.proxyPath && fs.existsSync(m.proxyPath) ? m.proxyPath : m.path;
+    const src = source || (m.proxyPath && fs.existsSync(m.proxyPath) ? m.proxyPath : m.path);
     if (!fs.existsSync(src)) throw new AppError("IO", "err.fileNotFound", { file: src });
     const fps = Math.min(30, Math.round(m.fps) || 30);
     const landscape = (m.width || 16) >= (m.height || 9);
@@ -76,11 +81,11 @@ export class MatteService {
     const total = Math.max(1, Math.ceil((m.durationUs / US) * fps));
     const workers = Math.max(1, Math.min(8, Math.floor(os.cpus().length / 4) || 1, Math.ceil(total / (CHUNK_MIN_S * fps))));
     const per = Math.ceil(total / workers);
-    const work = fs.mkdtempSync(path.join(this.dir, `tmp-${mediaId}-`));
+    const work = fs.mkdtempSync(path.join(this.dir, `tmp-${mediaId}${variant ? `-${variant}` : ""}-`));
     const done = new Array(workers).fill(0);
     const report = () => onProgress?.(Math.min(0.99, done.reduce((a, b) => a + b, 0) / total));
     const t0 = Date.now();
-    const dec = await this.decoder(src, W, H, Math.min(1, m.durationUs / US / 2));
+    const dec = await decodeRecipe(src, W, H, Math.min(1, m.durationUs / US / 2), this.log);
     try {
       const parts = await Promise.all(Array.from({ length: workers }, (_, k) => {
         const a = k * per, n = Math.min(per, total - a);
@@ -99,47 +104,63 @@ export class MatteService {
       fs.writeFileSync(list, parts.map((p) => `file '${p.replace(/\\/g, "/").replace(/'/g, "'\\''")}'`).join("\n"));
       const tmp = path.join(work, "joined.mp4");
       await run(binaries().ffmpeg, ["-hide_banner", "-loglevel", "error", "-y", "-f", "concat", "-safe", "0", "-i", list, "-c", "copy", "-movflags", "+faststart", tmp], { timeoutMs: 5 * 60_000, signal });
-      fs.renameSync(tmp, this.file(mediaId));
-      this.log("matte ready", mediaId, `${total} frames, ${workers} workers, ${dec.gpu ? "GPU" : "CPU"} decode, ${((Date.now() - t0) / 1000).toFixed(1)} s`);
+      // Face/head boxes of every frame, in part order (written by the model next to each part).
+      const boxes = parts.flatMap((p) => fs.readFileSync(`${p}.boxes.jsonl`, "utf8").split("\n").filter(Boolean).map((l) => JSON.parse(l)));
+      fs.writeFileSync(`${this.file(mediaId, variant)}.boxes.json`, JSON.stringify({ fps, boxes }));
+      fs.renameSync(tmp, this.file(mediaId, variant));
+      this.log("matte ready", mediaId + (variant ? ` (${variant})` : ""), `${total} frames, ${workers} workers, ${dec.gpu ? "GPU" : "CPU"} decode, ${((Date.now() - t0) / 1000).toFixed(1)} s`);
       onProgress?.(1);
       this.notify("matte:ready", { mediaIds: [mediaId] });
-      return this.file(mediaId);
+      return this.file(mediaId, variant);
     } finally {
       try { fs.rmSync(work, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 }); } catch (e) { this.log("matte: temp folder kept", e.message); }
     }
   }
 
   /**
-   * How to decode a file small and fast. 4K HEVC decodes at ~1× real time on the CPU, which dominated the matte
-   * time; NVIDIA decoding with the resize on the GPU is ~4× faster. GPU frames skip FFmpeg's automatic rotation, so
-   * the orientation is chosen by comparing one GPU frame (as is, flipped, turned) with the CPU frame (rotated by
-   * FFmpeg). No NVIDIA GPU, or no match: the CPU path.
+   * Where the person is over time, read from the matte (10 samples a second, source time): frames of
+   * [tUs, x0, y0, x1, y1, hx, hy, hw, hh, area] in fractions of the frame — the person's box (x0/x1: the silhouette's
+   * edges at head height, arms and hands included), the head's centre and
+   * size (face + hair from the model's own classes; the silhouette's top when the face is not seen). Empty frames
+   * (nobody) have area 0 and repeat the last known box. Cached as JSON.
    */
-  async decoder(src, W, H, atS) {
-    const key = `${src}|${W}x${H}`;
-    if (this.decoders.has(key)) return this.decoders.get(key);
-    const { ffmpeg } = binaries();
-    const cpu = { gpu: false, pre: [], vf: `scale=${W}:${H}:flags=bilinear` };
-    cpu.cpu = cpu;
-    const grab = async (pre, vf) => (await run(ffmpeg, ["-hide_banner", "-loglevel", "error", ...pre, "-ss", atS.toFixed(3), "-i", src, "-an", "-vf", `${vf},format=rgb24`, "-frames:v", "1", "-f", "rawvideo", "-pix_fmt", "rgb24", "-"], { timeoutMs: 60_000 })).stdout;
-    let best = cpu;
-    try {
-      const ref = await grab(cpu.pre, cpu.vf);
-      const pre = ["-hwaccel", "cuda", "-hwaccel_output_format", "cuda"];
-      let bestErr = Infinity;
-      for (const [turn, sw, sh] of [["", W, H], [",hflip,vflip", W, H], [",transpose=clock", H, W], [",transpose=cclock", H, W]]) {
-        const vf = `scale_cuda=${sw}:${sh}:format=yuv420p,hwdownload,format=yuv420p${turn}`;
-        const img = await grab(pre, vf).catch(() => null);
-        if (!img || img.length !== ref.length) continue;
-        let err = 0;
-        for (let i = 0; i < ref.length; i += 7) { const d = ref[i] - img[i]; err += d * d; }
-        err /= ref.length / 7;
-        if (err < bestErr) { bestErr = err; best = { gpu: true, pre, vf, cpu }; }
-      }
-      if (bestErr > 120) best = cpu; // PSNR under ~27 dB: not the same picture
-    } catch (e) { this.log("matte decoder probe failed", e.message); best = cpu; }
-    this.decoders.set(key, best);
-    return best;
+  async track(mediaId, { variant = "", source = null, onProgress } = {}) {
+    const file = await this.ensure(mediaId, { variant, source, onProgress });
+    const cache = `${file}.track3.json`;
+    if (fs.existsSync(cache)) { try { return JSON.parse(fs.readFileSync(cache, "utf8")); } catch { /* remake */ } }
+    const W = 160, H = 90;
+    const { stdout } = await run(binaries().ffmpeg, ["-hide_banner", "-loglevel", "error", "-i", file, "-vf", `fps=10,scale=${W}:${H}:flags=area,format=gray`, "-f", "rawvideo", "-"], { timeoutMs: 10 * 60_000 });
+    const n = Math.floor(stdout.length / (W * H));
+    let faces = null;
+    try { faces = JSON.parse(fs.readFileSync(`${file}.boxes.json`, "utf8")); } catch { /* an older matte: silhouette only */ }
+    const headAt = (i) => { const b = faces?.boxes[Math.min(faces.boxes.length - 1, Math.round((i / 10) * faces.fps))]; return b?.[1] || null; };
+    const frames = [];
+    let last = [0.3, 0.1, 0.7, 1, 0.5, 0.3, 0.2, 0.25];
+    const r3 = (x) => Math.round(x * 1000) / 1000;
+    for (let i = 0; i < n; i++) {
+      const px = stdout.subarray(i * W * H, (i + 1) * W * H);
+      let x0 = W, x1 = -1, y0 = H, y1 = -1, count = 0;
+      for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) if (px[y * W + x] > 128) { count++; if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y; }
+      if (count < W * H * 0.01) { frames.push([Math.round((i * US) / 10), ...last, 0]); continue; }
+      // Head: the silhouette's top band (≈ a head height: a quarter of the person's height, at most 30 % of the frame).
+      const band = Math.max(3, Math.min(Math.round(H * 0.3), Math.round((y1 - y0 + 1) * 0.28)));
+      let hx0 = W, hx1 = -1, sx = 0, sc = 0;
+      for (let y = y0; y < Math.min(H, y0 + band); y++) for (let x = 0; x < W; x++) if (px[y * W + x] > 128) { sc++; sx += x; if (x < hx0) hx0 = x; if (x > hx1) hx1 = x; }
+      const hw = Math.min(hx1 - hx0 + 1, Math.round(band * 1.3)); // a raised arm widens the band: keep a head-like width
+      const hx = sc ? sx / sc : (x0 + x1) / 2;
+      last = [x0 / W, y0 / H, (x1 + 1) / W, (y1 + 1) / H, hx / W, (y0 + band / 2) / H, hw / W, band / H].map(r3);
+      const head = headAt(i); // face + hair box from the model
+      if (head) last.splice(4, 4, ...[(head[0] + head[2]) / 2, (head[1] + head[3]) / 2, head[2] - head[0], head[3] - head[1]].map(r3));
+      // The silhouette's left/right edges at head height (a raised arm or a hand counts): where the free side starts.
+      // Upper part of the head only (where words sit): lower rows reach the shoulders in a close-up.
+      const ya = Math.max(0, Math.floor((last[5] - last[7] / 2) * H)), yb = Math.min(H - 1, Math.ceil((last[5] + last[7] * 0.1) * H));
+      let bx0 = W, bx1 = -1;
+      for (let y = ya; y <= yb; y++) for (let x = 0; x < W; x++) if (px[y * W + x] > 128) { if (x < bx0) bx0 = x; if (x > bx1) bx1 = x; }
+      if (bx1 >= 0) { last[0] = r3(bx0 / W); last[2] = r3((bx1 + 1) / W); }
+      frames.push([Math.round((i * US) / 10), ...last, r3(count / (W * H))]);
+    }
+    fs.writeFileSync(cache, JSON.stringify(frames));
+    return frames;
   }
 
   /** Frames [startFrame, startFrame + frames) of the media at `fps`: decode → model → encode. */
@@ -148,7 +169,7 @@ export class MatteService {
     return new Promise((resolve, reject) => {
       const dec = spawn(ffmpeg, ["-hide_banner", "-loglevel", "error", ...how.pre, "-ss", (startFrame / fps).toFixed(6), "-i", src, "-an", "-vf", `${how.vf},fps=${fps}`,
         "-frames:v", String(frames), "-f", "rawvideo", "-pix_fmt", "rgb24", "-"], { windowsHide: true });
-      const py = spawn(this.pythonCmd(), ["-X", "utf8", SCRIPT, "--width", String(W), "--height", String(H), "--fps", String(fps), "--step", "2", "--model", MODEL], { windowsHide: true });
+      const py = spawn(this.pythonCmd(), ["-X", "utf8", SCRIPT, "--width", String(W), "--height", String(H), "--fps", String(fps), "--step", "2", "--boxes", `${out}.boxes.jsonl`, "--model", MODEL], { windowsHide: true });
       const enc = spawn(ffmpeg, ["-hide_banner", "-loglevel", "error", "-y", "-f", "rawvideo", "-pix_fmt", "gray", "-s", `${W}x${H}`, "-r", String(fps), "-i", "-",
         "-c:v", "libx264", "-preset", "veryfast", "-crf", "14", "-g", String(fps), "-pix_fmt", "yuv420p", out], { windowsHide: true });
       const procs = [dec, py, enc];

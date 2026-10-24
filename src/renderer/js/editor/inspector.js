@@ -131,8 +131,8 @@ export class Inspector {
       if (isMain) parts.push(this.canvasSection());
       parts.push(
         section({ title: t("in.crop"), children: this.cropControls(seg) }),
-        section({ title: t("in.stabilize"), enabled: fx.stabilize.enabled, onToggle: (v) => ed.exec("updateSegment", { segId: seg.id, patch: { videoFx: { stabilize: { enabled: v } } } }), open: fx.stabilize.enabled, children: [
-          segmented({ value: fx.stabilize.level, options: [{ value: "recommended", label: t("ex.recommended") }, { value: "most_stable", label: "Most stable" }], onChange: (v) => ed.exec("updateSegment", { segId: seg.id, patch: { videoFx: { stabilize: { level: v, enabled: true } } } }) })] }),
+        // A stabilized copy of the video is made once (two-pass, 0.75 s smoothing) and used by preview and export.
+        section({ title: t("in.stabilize"), enabled: fx.stabilize.enabled, onToggle: (v) => ed.stabilize(seg.id, v), open: false, children: [] }),
         section({ title: t("in.denoise"), enabled: fx.denoise.enabled, onToggle: (v) => ed.exec("updateSegment", { segId: seg.id, patch: { videoFx: { denoise: { enabled: v } } } }), open: fx.denoise.enabled, children: [
           slider({ label: t("in.intensity"), min: 0, max: 100, value: fx.denoise.level, ...this.bind(seg, (v) => ({ videoFx: { denoise: { level: v, enabled: true } } }), { coalesce: "denoise" }) })] }),
         section({ title: t("in.motionBlur"), enabled: fx.motionBlur.enabled, onToggle: (v) => ed.exec("updateSegment", { segId: seg.id, patch: { videoFx: { motionBlur: { enabled: v } } } }), open: fx.motionBlur.enabled, children: [
@@ -409,7 +409,7 @@ export class Inspector {
       if (sch.type === "array") {
         const area = h("textarea", { rows: Math.min(6, (P[k] || []).length + 1), dir: "auto", style: { width: "100%" } });
         area.value = (P[k] || []).join("\n");
-        const lines = () => area.value.split("\n").map((x) => x.trim()).filter(Boolean).slice(0, sch.maxItems || 6).map((x) => x.slice(0, sch.items?.maxLength || 50));
+        const lines = () => area.value.split("\n").map((x) => x.trim()).filter(Boolean).slice(0, sch.maxItems || 6).map((x) => (sch.items?.type === "number" ? Number(x) || 0 : x.slice(0, sch.items?.maxLength || 50)));
         area.addEventListener("input", () => live(k, lines()));
         area.addEventListener("change", () => commit(k, lines()));
         return h("div", { class: "col" }, h("span", { class: "muted" }, label), area);
@@ -434,7 +434,7 @@ export class Inspector {
     this.body.append(
       h("div", { class: "col" }, h("strong", {}, `${t("in.graphic")} · ${getLang() === "ar" ? tpl.ar : tpl.name}`), h("p", { class: "muted small" }, tpl.use)),
       this.behindRow(seg),
-      section({ title: t("in.basic"), children: Object.entries(tpl.params).map(([k, sch]) => field(k, sch)) }),
+      section({ title: t("in.basic"), children: Object.entries(tpl.params).filter(([k]) => k !== "subject").map(([k, sch]) => field(k, sch)) }),
       section({ title: t("in.transform"), open: false, children: [
         slider({ label: t("in.opacity"), min: 0, max: 100, unit: "%", value: Math.round((seg.transform?.opacity ?? 1) * 100), ...this.bind(seg, (v) => ({ transform: { opacity: v / 100 } }), { coalesce: "opacity" }) })] }),
       h("button", { class: "btn block", onclick: () => ed.exec("updateSegment", { segId: seg.id, patch: { text: { graphic: { template: gr.template, params: Object.fromEntries(Object.entries(tpl.params).map(([k, s]) => [k, s.default])) } } } }) }, t("in.reset")));

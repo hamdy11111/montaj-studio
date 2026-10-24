@@ -3,12 +3,17 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { buildExport, planSegments, outputSize, videoBitrateKbps, estimateSizeBytes, pickVideoEncoder } from "../core/exportGraph.js";
-import { capabilities, ffmpegJob } from "./ffmpeg.js";
+import { fileURLToPath } from "node:url";
+import { capabilities, ffmpegJob, run, binaries } from "./ffmpeg.js";
+import { speechRegions } from "../core/speech.js";
 import { cuesFromTimeline, formatSrt, formatTxt } from "../core/srt.js";
 import { AppError, validateName, validateEnum } from "../core/validation.js";
 import { uid, US, deepClone } from "../core/util.js";
 import { timelineDuration } from "../core/model.js";
-import { cutoutMedia } from "../core/cutout.js";
+import { cutoutLayers } from "../core/cutout.js";
+
+// RNNoise speech model ("somnolent-hogwash": speech in recording noise; GregorR/rnnoise-models, not copyrightable).
+const RNN_MODEL = path.join(path.dirname(fileURLToPath(import.meta.url)), "audio", "models", "sh.rnnn").replace(/app\.asar([\\/])/, "app.asar.unpacked$1");
 
 // Parts rendered at once (each FFmpeg filter graph is mostly single-threaded; NVENC allows several sessions).
 const PART_CONCURRENCY = Math.max(1, Math.min(4, Math.floor(os.cpus().length / 4)));
@@ -201,6 +206,54 @@ export class ExportService {
   }
 
   /**
+   * Files derived from the media that a timeline needs: stabilized copies of stabilized clips' videos, and person
+   * mattes for cutouts (of the stabilized copy when the clip is stabilized). Made once per media file and cached.
+   * onProgress(stage: "stabilize" | "matte", 0..1). Returns { stabilized: {mediaId: media}, mattes: {key: path} }.
+   */
+  async prepareDerived(timeline, onProgress = () => {}) {
+    const stabilized = {};
+    for (const id of stabilizedMedia(timeline)) {
+      if (!this.stabilizer) continue; // deshake in the graph instead
+      await this.stabilizer.ensure(id, { fps: timeline.fps || 30, onProgress: (p) => onProgress("stabilize", p) });
+      stabilized[id] = await this.stabilizer.info(id, timeline.fps || 30);
+    }
+    const mattes = {};
+    for (const [id, stab] of mattedMedia(timeline)) {
+      if (!this.mattes) throw new AppError("PROVIDER", "err.matteUnavailable", {});
+      const opts = { onProgress: (p) => onProgress("matte", p) };
+      if (stab && stabilized[id]) mattes[`${id}|stab`] = await this.mattes.ensure(id, { ...opts, variant: "stab", source: stabilized[id].path });
+      else mattes[id] = await this.mattes.ensure(id, opts);
+    }
+    return { stabilized, mattes };
+  }
+
+  /** Whether everything prepareDerived() would make already exists. */
+  derivedReady(timeline) {
+    return stabilizedMedia(timeline).every((id) => !this.stabilizer || this.stabilizer.ready(id, timeline.fps || 30))
+      && mattedMedia(timeline).every(([id, stab]) => this.mattes?.ready(id, stab && this.stabilizer ? "stab" : ""));
+  }
+
+  /** Voice clean-up data for the export: the RNNoise model and, per media, where its words are (cached transcripts). */
+  voiceFor(tl) {
+    const speech = {};
+    for (const t of tl.tracks) for (const s of t.segments) {
+      if (!s.mediaId || !s.audioFx?.denoise?.enabled || speech[s.mediaId] !== undefined) continue;
+      const words = this.captions?.cachedWords?.(s.mediaId);
+      speech[s.mediaId] = words?.length ? speechRegions(words) : null;
+    }
+    return { speech, rnnModel: fs.existsSync(RNN_MODEL) ? RNN_MODEL : null };
+  }
+
+  /** Static gain (dB) that brings the mix to `target` LUFS: renders the audio once and measures it (EBU R128). */
+  async masterGain(timeline, common, target, graphArg) {
+    const b = buildExport(timeline, { ...common, mode: "audio", audio: { enabled: true, format: "aac" }, measureLoudness: true });
+    const { stderr } = await run(binaries().ffmpeg, ["-hide_banner", "-nostats", ...b.inputs, ...graphArg(b.graph), "-map", "[aout]", "-f", "null", "-"], { timeoutMs: 30 * 60_000 });
+    const m = [...String(stderr).matchAll(/I:\s+(-?[\d.]+) LUFS/g)].pop();
+    const measured = m ? Number(m[1]) : NaN;
+    return Number.isFinite(measured) && measured > -70 ? Math.max(-20, Math.min(30, target - measured)) : 0;
+  }
+
+  /**
    * The picture parts; fills `list` with concat-demuxer entries in timeline order. Several parts render at once:
    * a filter graph mostly runs on one core, so independent parts in parallel use the machine (a timeline of many
    * short clips with transitions was 3× slower than CapCut one part at a time). 8K-class frames stay sequential.
@@ -267,20 +320,16 @@ export class ExportService {
         if (!this.compoundFresh(cid)) await this.renderCompound(cid, { overlays: compoundOverlays?.[cid] || {}, compoundOverlays });
         compoundFiles[cid] = this.compoundPath(cid);
       }
-      // Person cutouts need their mask videos (made once per media file, then cached).
-      const mattes = {};
-      for (const id of mattedMedia(timeline)) {
-        if (!this.mattes) throw new AppError("PROVIDER", "err.matteUnavailable", {});
-        mattes[id] = await this.mattes.ensure(id, { onProgress: (p) => notify("export:progress", { jobId, progress: 0, stage: "matte", stageProgress: p }) });
-      }
+      const { stabilized, mattes } = await this.prepareDerived(timeline, (stage, p) => notify("export:progress", { jobId, progress: 0, stage, stageProgress: p }));
       const size = outputSize(timeline.canvas, opts.resolution || "1080p");
+      const voice = this.voiceFor(timeline);
       // Started without the editor's rasters (agents, compounds): rasterize here with the same drawing code.
       if ((!overlays || !Object.keys(overlays).length) && this.rasterize && needsRaster(timeline)) overlays = await this.rasterize(timeline, size.width, size.height);
       // Renderer rasters (text, stickers at the export size) win; original sticker files are the fallback.
       const files = { ...this.stickerFiles(timeline), ...this.writeOverlays(jobDir, overlays) };
       const fps = Number(opts.fps) || timeline.fps || 30;
       const common = {
-        media: this.mediaMap(projectId), overlays: files, luts: this.lutMap(timeline), compoundFiles, mattes, caps,
+        media: this.mediaMap(projectId), overlays: files, luts: this.lutMap(timeline), compoundFiles, mattes, stabilized, caps, ...voice,
         width: size.width, height: size.height, fps, range: opts.range || null, mode,
         video: { codec: opts.codec || "h264", format: opts.format || "mp4", bitrate: opts.bitrate || "recommended", hw: this.settings.get("performance").hwEncode },
         audio: { enabled: opts.audioEnabled !== false, format: opts.audioFormat || "flac" },
@@ -295,6 +344,9 @@ export class ExportService {
         return major >= 7 ? ["-/filter_complex", graphFile] : ["-filter_complex_script", graphFile];
       };
       const report = (p) => { notify("export:progress", { jobId, progress: p }); if (recId) this.repos.exports.update(recId, { progress: p }); };
+      // Loudness in two passes: measure the finished mix, then one static gain (+ limiter) on the whole of it.
+      const target = loudnessTarget(timeline);
+      if (target !== null && (mode === "video" || mode === "audio")) common.masterGainDb = await this.masterGain(timeline, common, target, graphArg);
       const step = async (args, durationUs, onProgress) => {
         if (job.cancelled) throw new AppError("MEDIA", "err.cancelled");
         if (process.env.MONTAJ_KEEP_EXPORT_GRAPH) fs.writeFileSync(path.join(jobDir, `args${graphs}.json`), JSON.stringify(args, null, 1));
@@ -326,8 +378,23 @@ export class ExportService {
   }
 }
 
-/** Media ids of the clips shown as person cutouts (videoFx.matte = person). */
-export const mattedMedia = (tl) => [...new Set([...tl.tracks.flatMap((t) => t.segments.filter((s) => s.kind === "video" && !s.disabled && s.videoFx?.matte?.type === "person").map((s) => s.mediaId)), ...cutoutMedia(tl)])];
+/** [mediaId, stabilized] pairs of the clips shown as person cutouts (videoFx.matte = person, or behind-person). */
+export function mattedMedia(tl) {
+  const out = new Map();
+  const add = (s) => out.set(`${s.mediaId}|${!!s.videoFx?.stabilize?.enabled}`, [s.mediaId, !!s.videoFx?.stabilize?.enabled]);
+  for (const t of tl.tracks) for (const s of t.segments) if (s.kind === "video" && !s.disabled && s.videoFx?.matte?.type === "person") add(s);
+  for (const c of cutoutLayers(tl)) add(c.seg);
+  return [...out.values()];
+}
+
+/** Media ids of visible video clips with stabilization on. */
+export const stabilizedMedia = (tl) => [...new Set(tl.tracks.filter((t) => !t.hidden).flatMap((t) => t.segments.filter((s) => s.kind === "video" && !s.disabled && s.videoFx?.stabilize?.enabled).map((s) => s.mediaId)))];
+
+/** Target loudness (LUFS) when a clip asks for normalization, else null. */
+export function loudnessTarget(tl) {
+  for (const t of tl.tracks) if (!t.muted) for (const s of t.segments) if (!s.disabled && s.audioFx?.normalize?.enabled) return s.audioFx.normalize.targetLufs ?? -14;
+  return null;
+}
 
 /** True when a timeline has text or sticker layers that must be rasterized for export. */
 export const needsRaster = (tl) => tl.tracks.some((t) => t.segments.some((s) => s.kind === "text" || s.kind === "sticker"));
