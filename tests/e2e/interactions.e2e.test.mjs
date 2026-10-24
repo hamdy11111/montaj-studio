@@ -23,7 +23,7 @@ before(async () => {
   const make = (name, src, d) => run(ff, ["-hide_banner", "-y", "-f", "lavfi", "-i", `${src}=size=640x360:rate=30:duration=${d}`, "-c:v", "libx264", "-pix_fmt", "yuv420p", path.join(ud, name)], { timeoutMs: 120_000 });
   await make("long.mp4", "testsrc2", 8);
   await make("short.mp4", "smptebars", 3);
-  app = await electron.launch({ args: [APP], cwd: APP, env: { ...process.env, MONTAJ_USER_DATA: ud, REALM_DISABLE_ANALYTICS: "1" } });
+  app = await electron.launch({ args: [APP], cwd: APP, env: { ...process.env, MONTAJ_USER_DATA: ud, REALM_DISABLE_ANALYTICS: "1", MONTAJ_BENCH: "1" } });
   win = await app.firstWindow();
   win.on("pageerror", (e) => errors.push(e.message));
   await win.waitForSelector(".home");
@@ -59,6 +59,20 @@ test("dragging the second main clip to the start reorders the track (magnet on)"
   const after = (await main()).map((s) => s.mediaId);
   assert.deepEqual(after, [before[1], before[0]]);
   assert.equal((await main())[0].start, 0);
+});
+
+test("a re-render in the middle of a drag (waveform loaded, agent edit) does not drop the drag", async () => {
+  const before = (await main()).map((s) => s.mediaId);
+  const b2 = await box(1), b1 = await box(0);
+  await win.mouse.move(b2.x + b2.width / 2, b2.y + b2.height / 2);
+  await win.mouse.down();
+  await win.mouse.move(b2.x + b2.width / 2 - 20, b2.y + b2.height / 2, { steps: 4 });
+  await win.evaluate(() => window.__montaj.ed.refreshMedia()); // re-renders the timeline, as a finished waveform does
+  await win.waitForTimeout(200);
+  await win.mouse.move(b1.x + b2.width / 2 + 2, b2.y + b2.height / 2, { steps: 10 });
+  await win.mouse.up();
+  await win.waitForTimeout(600);
+  assert.deepEqual((await main()).map((s) => s.mediaId), [before[1], before[0]], "the drag completed after the re-render");
 });
 
 test("the right edge of a clip followed by another clip can be trimmed by dragging", async () => {

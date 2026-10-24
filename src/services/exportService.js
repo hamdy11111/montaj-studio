@@ -1,5 +1,6 @@
 // Export jobs (FEAT-113..119, FEAT-030 export selected, FEAT-028 compound pre-processing).
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { buildExport, planSegments, outputSize, videoBitrateKbps, estimateSizeBytes, pickVideoEncoder } from "../core/exportGraph.js";
 import { capabilities, ffmpegJob } from "./ffmpeg.js";
@@ -7,6 +8,20 @@ import { cuesFromTimeline, formatSrt, formatTxt } from "../core/srt.js";
 import { AppError, validateName, validateEnum } from "../core/validation.js";
 import { uid, US, deepClone } from "../core/util.js";
 import { timelineDuration } from "../core/model.js";
+
+// Parts rendered at once (each FFmpeg filter graph is mostly single-threaded; NVENC allows several sessions).
+const PART_CONCURRENCY = Math.max(1, Math.min(4, Math.floor(os.cpus().length / 4)));
+
+/** Parts for a video export: the graph-size split, made finer (still ≥ 3 s each) when cores can run them at once. */
+function planParts(timeline, range, fps) {
+  let parts = planSegments(timeline, { range, fps });
+  const total = parts.reduce((n, p) => n + (p.endUs - p.startUs), 0);
+  for (const maxItems of [5, 3]) {
+    if (parts.length >= PART_CONCURRENCY || total < PART_CONCURRENCY * 3 * US) break;
+    parts = planSegments(timeline, { range, fps, maxItems, minUs: 3 * US });
+  }
+  return parts;
+}
 
 const GIF_HEIGHT = { "240p": 240, "320p": 320, "480p": 480 };
 
@@ -17,6 +32,9 @@ export class ExportService {
     this.settings = settings;
     this.notify = notify; // (event, payload) → renderer
     this.jobs = new Map();
+    // (timeline, W, H) → {segId: PNG data URL}: rasterizes text/stickers when an export is started without the
+    // editor's rasters (agents, frame previews). Set by the app (src/main/rasterHost.js); null in tests.
+    this.rasterize = null;
   }
 
   mediaMap(projectId) {
@@ -35,12 +53,28 @@ export class ExportService {
     const out = {};
     for (const [segId, b64] of Object.entries(overlays)) {
       if (!/^[A-Za-z0-9-]+$/.test(segId)) continue;
+      if (b64 && typeof b64 === "object" && b64.caption) { out[segId] = this.writeCaptionSequence(jobDir, segId, b64); continue; }
       const data = String(b64).replace(/^data:image\/png;base64,/, "");
       const file = path.join(jobDir, `${segId}.png`);
       fs.writeFileSync(file, Buffer.from(data, "base64"));
       out[segId] = file;
     }
     return out;
+  }
+
+  /** A word-timed caption page: its state images + an ffconcat sequence (played as one overlay stream). */
+  writeCaptionSequence(jobDir, segId, seq) {
+    const files = seq.images.map((img, i) => {
+      const file = path.join(jobDir, `${segId}-${i}.png`);
+      fs.writeFileSync(file, Buffer.from(String(img).replace(/^data:image\/png;base64,/, ""), "base64"));
+      return file.replace(/\\/g, "/").replace(/'/g, "'\\''");
+    });
+    const lines = ["ffconcat version 1.0"];
+    for (const f of seq.frames) lines.push(`file '${files[f.img]}'`, `duration ${(f.durUs / US).toFixed(6)}`);
+    if (seq.frames.length) lines.push(`file '${files[seq.frames[seq.frames.length - 1].img]}'`); // the demuxer needs the last file again
+    const list = path.join(jobDir, `${segId}.ffconcat`);
+    fs.writeFileSync(list, lines.join("\n") + "\n", "utf8");
+    return list;
   }
 
   stickerFiles(tl) {
@@ -165,22 +199,61 @@ export class ExportService {
     await step(join, total, (p) => report(0.96 + p * 0.04));
   }
 
-  /** The picture parts, in order; fills `list` with concat-demuxer entries. */
+  /**
+   * The picture parts; fills `list` with concat-demuxer entries in timeline order. Several parts render at once:
+   * a filter graph mostly runs on one core, so independent parts in parallel use the machine (a timeline of many
+   * short clips with transitions was 3× slower than CapCut one part at a time). 8K-class frames stay sequential.
+   */
   async renderParts({ timeline, common, parts, jobDir, graphArg, step, report, ts, total, list }) {
-    let done = 0;
-    for (const [i, part] of parts.entries()) {
+    const big = common.width * common.height > 4096 * 2304;
+    const width = big ? 1 : Math.max(1, Math.min(PART_CONCURRENCY, parts.length));
+    const progress = new Array(parts.length).fill(0);
+    const files = [];
+    const renderOne = async (i) => {
+      const part = parts[i];
       const built = buildExport(timeline, { ...common, range: part, audio: { ...common.audio, enabled: false } });
       // Container-specific flags go on the final file only.
       const encode = built.encode.filter((x, k, a) => !(x === "-movflags" || a[k - 1] === "-movflags" || (x === "-tag:v" || a[k - 1] === "-tag:v")));
       const file = path.join(jobDir, `part${i}.${ts ? "ts" : "mov"}`);
       const dur = part.endUs - part.startUs;
-      await step([...built.inputs, ...graphArg(built.graph), ...encode, "-f", ts ? "mpegts" : "mov", file], built.durationUs, (p) => report(((done + p * dur) / total) * 0.96));
-      list.push(`file '${file.replace(/\\/g, "/").replace(/'/g, "'\\''")}'`, `duration ${(dur / US).toFixed(6)}`);
-      done += dur;
-    }
+      files[i] = { file, dur };
+      await step([...built.inputs, ...graphArg(built.graph), ...encode, "-f", ts ? "mpegts" : "mov", file], built.durationUs, (p) => {
+        progress[i] = p * dur;
+        report((progress.reduce((a, b) => a + b, 0) / total) * 0.96);
+      });
+      progress[i] = dur;
+    };
+    let next = 0;
+    const worker = async () => { while (next < parts.length) await renderOne(next++); };
+    await Promise.all(Array.from({ length: width }, worker));
+    for (const { file, dur } of files) list.push(`file '${file.replace(/\\/g, "/").replace(/'/g, "'\\''")}'`, `duration ${(dur / US).toFixed(6)}`);
   }
 
-  async runJob({ jobId = uid(), projectId, projectName = "", timeline, mode, out, overlays = {}, compoundOverlays = {}, opts = {}, record }) {
+  /**
+   * Render frames of a timeline as JPEG files (for agents to look at): the same graph as a still export, at a small
+   * size, without notifications or export records. Returns [{ atUs, file }]; the caller deletes the files.
+   */
+  async renderFrames(timelineId, timesUs, { short = 360 } = {}) {
+    let tl = this.repos.timelines.get(timelineId);
+    const size = outputSize(tl.canvas, short);
+    const overlays = this.rasterize && needsRaster(tl) ? await this.rasterize(tl, size.width, size.height) : {};
+    const textOmitted = !this.rasterize && needsRaster(tl);
+    if (textOmitted) tl = { ...tl, tracks: tl.tracks.map((t) => ({ ...t, segments: t.segments.filter((s) => s.kind !== "text" && s.kind !== "sticker") })) }; // no raster window (tests)
+    const dir = path.join(this.paths.cache, "frames");
+    fs.mkdirSync(dir, { recursive: true });
+    const total = timelineDuration(tl);
+    const out = [];
+    for (const t of timesUs) {
+      const atUs = Math.max(0, Math.min(Math.round(t), Math.max(0, total - 1)));
+      const file = path.join(dir, `${uid()}.jpg`);
+      await this.runJob({ projectId: tl.projectId, timeline: tl, mode: "still", out: file, overlays, opts: { resolution: short, stillAtUs: atUs }, record: false, quiet: true });
+      out.push({ atUs, file, textOmitted });
+    }
+    return out;
+  }
+
+  async runJob({ jobId = uid(), projectId, projectName = "", timeline, mode, out, overlays = {}, compoundOverlays = {}, opts = {}, record, quiet = false }) {
+    const notify = quiet ? () => {} : this.notify;
     const caps = await this.loadCaps();
     const job = { cancel: null, cancelled: false, runs: new Set() };
     this.jobs.set(jobId, job);
@@ -193,9 +266,11 @@ export class ExportService {
         if (!this.compoundFresh(cid)) await this.renderCompound(cid, { overlays: compoundOverlays?.[cid] || {}, compoundOverlays });
         compoundFiles[cid] = this.compoundPath(cid);
       }
+      const size = outputSize(timeline.canvas, opts.resolution || "1080p");
+      // Started without the editor's rasters (agents, compounds): rasterize here with the same drawing code.
+      if ((!overlays || !Object.keys(overlays).length) && this.rasterize && needsRaster(timeline)) overlays = await this.rasterize(timeline, size.width, size.height);
       // Renderer rasters (text, stickers at the export size) win; original sticker files are the fallback.
       const files = { ...this.stickerFiles(timeline), ...this.writeOverlays(jobDir, overlays) };
-      const size = outputSize(timeline.canvas, opts.resolution || "1080p");
       const fps = Number(opts.fps) || timeline.fps || 30;
       const common = {
         media: this.mediaMap(projectId), overlays: files, luts: this.lutMap(timeline), compoundFiles, caps,
@@ -212,7 +287,7 @@ export class ExportService {
         fs.writeFileSync(graphFile, graph, "utf8");
         return major >= 7 ? ["-/filter_complex", graphFile] : ["-filter_complex_script", graphFile];
       };
-      const report = (p) => { this.notify("export:progress", { jobId, progress: p }); if (recId) this.repos.exports.update(recId, { progress: p }); };
+      const report = (p) => { notify("export:progress", { jobId, progress: p }); if (recId) this.repos.exports.update(recId, { progress: p }); };
       const step = async (args, durationUs, onProgress) => {
         if (job.cancelled) throw new AppError("MEDIA", "err.cancelled");
         if (process.env.MONTAJ_KEEP_EXPORT_GRAPH) fs.writeFileSync(path.join(jobDir, `args${graphs}.json`), JSON.stringify(args, null, 1));
@@ -221,20 +296,20 @@ export class ExportService {
         job.cancel = () => { for (const r of job.runs) r.cancel(); };
         try { await run.promise; } finally { job.runs.delete(run); }
       };
-      if (mode === "video") await this.renderVideo({ timeline, common, parts: planSegments(timeline, { range: common.range, fps }), out, jobDir, graphArg, step, report, job });
+      if (mode === "video") await this.renderVideo({ timeline, common, parts: planParts(timeline, common.range, fps), out, jobDir, graphArg, step, report, job });
       else {
         const built = buildExport(timeline, common);
         await step([...built.inputs, ...graphArg(built.graph), ...built.encode, out], built.durationUs, report);
       }
       const sizeBytes = fs.existsSync(out) ? fs.statSync(out).size : 0;
       if (recId) this.repos.exports.update(recId, { status: "done", progress: 1, sizeBytes });
-      this.notify("export:done", { jobId, path: out, sizeBytes, mode });
+      notify("export:done", { jobId, path: out, sizeBytes, mode });
       return out;
     } catch (err) {
       const cancelled = job.cancelled || err?.messageKey === "err.cancelled";
       if (recId) this.repos.exports.update(recId, { status: cancelled ? "cancelled" : "failed", error: cancelled ? "cancelled" : String(err?.details?.stderr || err?.message || err).slice(-2000) });
       if (fs.existsSync(out) && cancelled) fs.rmSync(out, { force: true });
-      this.notify("export:error", { jobId, cancelled, error: err instanceof AppError ? err.toJSON() : { code: "INTERNAL", messageKey: "err.exportFailed", details: { message: String(err?.message || err) } } });
+      notify("export:error", { jobId, cancelled, error: err instanceof AppError ? err.toJSON() : { code: "INTERNAL", messageKey: "err.exportFailed", details: { message: String(err?.message || err) } } });
       throw err;
     } finally {
       this.jobs.delete(jobId);
@@ -243,6 +318,9 @@ export class ExportService {
     }
   }
 }
+
+/** True when a timeline has text or sticker layers that must be rasterized for export. */
+export const needsRaster = (tl) => tl.tracks.some((t) => t.segments.some((s) => s.kind === "text" || s.kind === "sticker"));
 
 export function uniquePath(file) {
   if (!fs.existsSync(file)) return file;

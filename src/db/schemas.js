@@ -3,7 +3,7 @@
 //   Segment n─1 Timeline (compound clips);  Workspace n─n Project;  ExportRecord/ShareRecord n─1 Project.
 // Embedded objects hold value-typed parameter blocks (transform, adjust, effects...).
 
-export const SCHEMA_VERSION = 2;
+export const SCHEMA_VERSION = 3;
 
 const emb = (name, properties) => ({ name, embedded: true, properties });
 
@@ -52,6 +52,7 @@ export const TextStyle = emb("TextStyle", {
   strokeColor: { type: "string", default: "#000000" }, strokeWidth: { type: "double", default: 0 }, bgColor: { type: "string", default: "#000000" },
   bgOpacity: { type: "double", default: 0 }, shadow: { type: "bool", default: false }, preset: { type: "string", default: "none" },
   isCaption: { type: "bool", default: false },
+  caption: "string?", // v3: word-timed caption page (template, words, emphasis) as JSON — see core/captionTemplates.js
 });
 export const CanvasSpec = emb("CanvasSpec", {
   ratio: { type: "string", default: "original" }, width: { type: "int", default: 1920 }, height: { type: "int", default: 1080 },

@@ -2,7 +2,7 @@
 // Adjustment, Templates and AI avatar. Items are added at the playhead by click or dragged onto the timeline.
 import { h, mount, clear, debounce } from "../dom.js";
 import { icon } from "../icons.js";
-import { t } from "../i18n.js";
+import { t, getLang, errorText, has } from "../i18n.js";
 import { call, guard, thumbUrl, stickerUrl, libUrl, coverUrl } from "../api.js";
 import { toast } from "../ui/toast.js";
 import { showMenu, dropdown } from "../ui/menu.js";
@@ -11,6 +11,17 @@ import { formatDuration, US } from "../../core/util.js";
 import { FILTER_PRESETS, FILTER_CATEGORIES, EFFECTS, EFFECT_CATEGORIES, TEXT_PRESETS, BUILTIN_STICKERS, TRANSITION_CATEGORIES } from "../../core/presets.js";
 import { DEFAULT_TEXT } from "../../core/model.js";
 import { openProviderOnly } from "../dialogs/tools.js";
+import { CAPTION_TEMPLATES } from "../../core/captionTemplates.js";
+import { captionCanvas } from "./captionRaster.js";
+
+/** Small static preview of a caption template (second word spoken). */
+function templatePreview(id) {
+  const words = (getLang() === "ar" ? "أهم حاجة في الفيديو" : "this changes everything").split(" ");
+  const text = { content: words.join(" "), caption: { template: id, words: words.map((w, i) => ({ t: w, s: i * 300_000, e: (i + 1) * 300_000 })), emphasis: [2] } };
+  const c = captionCanvas(text, 300, 560, { active: 1, pop: 1, wordPop: 1 });
+  c.className = "cap-preview";
+  return c;
+}
 
 export const TABS = [
   ["media", "media"], ["audio", "audio"], ["text", "text"], ["stickers", "sticker"], ["effects", "effect"], ["transitions", "transition"],
@@ -221,12 +232,39 @@ export class Materials {
     const status = await guard(() => call("captions.status"));
     const lang = h("select", {}, [["auto", "Auto"], ["ar", "العربية"], ["en", "English"], ["fr", "Français"], ["tr", "Türkçe"], ["es", "Español"], ["de", "Deutsch"]].map(([v, l]) => h("option", { value: v, selected: v === ed.settings().providers.whisperLanguage }, l)));
     const hasCaptions = ed.tl().tracks.some((x) => x.segments.some((s) => s.kind === "text" && s.text?.isCaption));
+    const hasAnimated = ed.tl().tracks.some((x) => x.segments.some((s) => s.kind === "text" && s.text?.caption));
+    let chosen = ed.tl().tracks.flatMap((x) => x.segments).find((s) => s.text?.caption)?.text.caption.template || "karaoke-yellow";
+    const tiles = h("div", { class: "tiles cap-tiles" });
+    const drawTiles = () => mount(tiles, ...Object.entries(CAPTION_TEMPLATES).map(([id, tp]) => h("button", { class: ["tile", "cap-tile", chosen === id && "active"], title: tp.use, onclick: () => { chosen = id; drawTiles(); } },
+      h("div", { class: "tile-art cap-art" }, templatePreview(id)), h("div", { class: "tile-label nowrap" }, has(`cap.${id}`) ? t(`cap.${id}`) : tp.name))));
+    drawTiles();
+    const keywords = h("input", { type: "text", maxlength: 300, placeholder: t("lib.keywordsPh") });
+    const generate = async () => {
+      const tst = toast(t("lib.captionsWorking"), "info", { ms: 30 * 60_000 });
+      try {
+        const r = await call("captions.generatePro", ed.timelineId(), { template: chosen, language: lang.value, keywords: keywords.value.split(/[,،]/).map((x) => x.trim()).filter(Boolean) });
+        await ed.reloadTimeline();
+        toast(t("lib.captionsDone", { pages: r.pages, words: r.words }), "success");
+        if (r.qc?.issues?.length) toast(t("lib.captionsFast", { n: r.qc.issues.length, cps: r.qc.maxCps }), "warning", { ms: 6000 });
+        this.draw();
+      } catch (err) { toast(errorText(err), "error"); } finally { tst.remove(); }
+    };
+    const restyle = async () => { if (await guard(() => call("captions.restyle", ed.timelineId(), { template: chosen }))) { await ed.reloadTimeline(); this.draw(); } };
     this.body.append(
+      h("div", { class: "card pad col" },
+        h("strong", {}, t("lib.animatedCaptions"), " ", h("span", { class: "badge local" }, t("c.local"))),
+        h("p", { class: "muted small" }, t("lib.animatedHint")),
+        tiles,
+        h("div", { class: "row" }, h("span", { class: "muted" }, t("lib.spokenLanguage")), lang),
+        keywords,
+        h("div", { class: "row wrap" },
+          h("button", { class: "btn primary", disabled: !status?.words, onclick: generate }, icon("captions"), hasAnimated ? t("lib.regenerate") : t("lib.generate")),
+          hasAnimated ? h("button", { class: "btn", onclick: restyle }, t("lib.applyStyle")) : null),
+        status?.words ? null : h("button", { class: "btn small", onclick: () => ed.openSettings("providers") }, t("set.providers"))),
       h("div", { class: "card pad col" },
         h("strong", {}, t("lib.autoCaptions"), " ", h("span", { class: "badge local" }, t("c.local"))),
         status?.autoCaptions ? null : h("p", { class: "muted small" }, t("lib.whisperMissing")),
-        h("div", { class: "row" }, h("span", { class: "muted" }, t("lib.spokenLanguage")), lang),
-        h("button", { class: "btn primary", disabled: !status?.autoCaptions, onclick: () => ed.autoCaptions(lang.value) }, icon("captions"), t("lib.generate")),
+        h("button", { class: "btn", disabled: !status?.autoCaptions, onclick: () => ed.autoCaptions(lang.value) }, icon("captions"), t("lib.generatePlain")),
         status?.autoCaptions ? null : h("button", { class: "btn small", onclick: () => ed.openSettings("providers") }, t("set.providers"))),
       h("div", { class: "card pad col" },
         h("strong", {}, t("lib.localCaptions")),

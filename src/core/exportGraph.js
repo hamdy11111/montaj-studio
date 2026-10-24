@@ -36,6 +36,8 @@ export const sourceMatrix = (media) => media?.colorMatrix || ((media?.height || 
 const toRgba = (matrix) => `scale=in_color_matrix=${matrix}:in_range=tv,format=rgba`;
 // Overlays composite in RGB (format=auto): their yuv420 default would re-encode every layer with BT.601.
 const OUT_YUV = "scale=out_color_matrix=bt709:out_range=tv,format=yuv420p";
+// A composited RGBA layer going onto a YUV composite: same matrix and range as OUT_YUV, alpha kept.
+const TO_YUVA = "scale=out_color_matrix=bt709:out_range=tv,format=yuva420p";
 const BLEND_NEUTRAL = { screen: "black", add: "black", lighten: "black", multiply: "white", darken: "white" };
 const BLEND_MODE = { screen: "screen", add: "addition", lighten: "lighten", multiply: "multiply", darken: "darken" };
 const isGrade = (k) => k === "effect" || k === "filter" || k === "adjust";
@@ -46,7 +48,7 @@ const OUT_IDLE = new Set(["dissolve", "slide_left", "slide_right", "slide_up", "
 
 /** Output frame size for a timeline at a resolution preset (short side), keeping the canvas ratio. */
 export function outputSize(canvas, resolution = "1080p") {
-  const short = RESOLUTIONS[resolution] || 1080;
+  const short = typeof resolution === "number" ? resolution : RESOLUTIONS[resolution] || 1080;
   const w = canvas.width, h = canvas.height;
   const k = short / Math.min(w, h);
   const even = (n) => Math.max(2, Math.round(n / 2) * 2);
@@ -115,6 +117,7 @@ export function buildExport(tl, o) {
   const hasPixels = (seg) => seg.kind === "video" || seg.kind === "image" || seg.kind === "compound";
   // True when the whole picture stays in the sources' YUV (no RGBA round trip): see mainSequence.
   let yuv = false;
+  let rgbCompositeNeeded = true; // set before the main sequence is built
 
   /** Solid colour stream of `frames` frames whose timestamps start at timeline time `startUs`. */
   function colorStream(color, startUs, frames) {
@@ -149,7 +152,10 @@ export function buildExport(tl, o) {
     if (seg.kind === "image" || seg.kind === "text" || seg.kind === "sticker") {
       const file = seg.kind === "image" ? media.path : o.overlays?.[seg.id];
       if (!file) throw new AppError("MEDIA", "err.overlayMissing", { segId: seg.id });
-      if (/\.gif$/i.test(file)) { // animated: keep its own clock from the visible start
+      if (/\.ffconcat$/i.test(file)) { // word-timed caption: a timed image sequence from the segment start
+        const ii = addInput(["-f", "concat", "-safe", "0", "-i", file]);
+        chains.push(`[${ii}:v]format=rgba,fps=${FPS},${at(visStart)}${toWindow}[${out}]`);
+      } else if (/\.gif$/i.test(file)) { // animated: keep its own clock from the visible start
         const ii = addInput(["-ignore_loop", "0", "-t", String(s(visEnd - visStart)), "-i", file]);
         chains.push(`[${ii}:v]fps=${FPS},${at(visStart)}${toWindow}[${out}]`);
       } else {
@@ -305,6 +311,10 @@ export function buildExport(tl, o) {
       chains.push(`[${comp}]split[${split1}][${split2}]`);
       chains.push(`[${split2}][${padded}]blend=all_mode=${BLEND_MODE[mode]}[${blended}]`);
       chains.push(`[${split1}][${blended}]overlay=enable='${enable}':format=auto[${next}]`);
+    } else if (yuv) {
+      const yl = L();
+      chains.push(`[${placed}]${TO_YUVA}[${yl}]`);
+      chains.push(`[${comp}][${yl}]overlay=x='${x}':y='${y}':eval=frame:format=yuv420:eof_action=pass:enable='${enable}'[${next}]`);
     } else {
       chains.push(`[${comp}][${placed}]overlay=x='${x}':y='${y}':eval=frame:format=auto:eof_action=pass:enable='${enable}'[${next}]`);
     }
@@ -319,7 +329,8 @@ export function buildExport(tl, o) {
   }
   function overlayFull(inLbl, w0, w1) {
     const next = L();
-    chains.push(`[${comp}][${inLbl}]overlay=enable='${during(w0, w1)}':format=auto:eof_action=pass[${next}]`);
+    if (yuv) { const yl = L(); chains.push(`[${inLbl}]${TO_YUVA}[${yl}]`); inLbl = yl; }
+    chains.push(`[${comp}][${inLbl}]overlay=enable='${during(w0, w1)}':format=${yuv ? "yuv420" : "auto"}:eof_action=pass[${next}]`);
     comp = next;
   }
 
@@ -376,7 +387,7 @@ export function buildExport(tl, o) {
    * frames in memory. Each clip is decoded once (an incoming window, then the clip itself in the sequence),
    * except an outgoing window that has to be composited, which seeks separately.
    */
-  function mainSequence(track, alone) {
+  function mainSequence(track) {
     const segs = [...track.segments].filter((x) => !x.disabled).sort((a, b) => a.start - b.start);
     const clips = [];
     segs.forEach((seg, i) => {
@@ -413,7 +424,11 @@ export function buildExport(tl, o) {
     // no RGBA round trip, the source values are kept exactly, and the graph is ~1.5× faster.
     const untouched = (c) => (c.seg.kind === "video" || c.seg.kind === "compound") && sourceMatrix(c.media) === "bt709" && isDefaultAdjust(c.seg.adjust)
       && !c.seg.clipEffects?.length && !temporal(c.seg);
-    yuv = o.mode === "video" && alone && bgColor === "0x000000" && groups.every((g) => g.uses.every((x) => x.kind === "seq" && !x.fade)) && clips.every(untouched);
+    // The composite can also stay YUV when layers are composited over that sequence (transition windows, text,
+    // captions, blurred backgrounds): each layer is converted to YUVA with the BT.709 matrix and blended in YUV,
+    // which is what the encoder receives anyway. Only RGB grading (grade layers, colour fades, blend modes) needs
+    // an RGBA composite. A timeline of many clips with transitions renders ~2× faster this way.
+    yuv = o.mode === "video" && bgColor === "0x000000" && !rgbCompositeNeeded && groups.every((g) => g.uses.every((x) => !x.fade)) && clips.every(untouched);
     // Decode each group once and fan it out to its uses (an overlay window first, then the sequence part).
     const lead = Math.round(US / FRAME) * FRAME;
     const cut = (label, u, v) => { const out = L(); chains.push(`[${label}]trim=start_pts=${frameAt(u)}:end_pts=${frameAt(v)}[${out}]`); return out; };
@@ -436,7 +451,16 @@ export function buildExport(tl, o) {
         src = a;
         fan(blurStream(c.seg, c.media, b), blurs.length).forEach((lb, k) => { blurs[k].blurLbl = cut(lb, blurs[k].u, blurs[k].v); });
       }
-      fan(yuv ? yuvLook(c.seg, src) : layerLook(c.seg, src, c.media), g.uses.length).forEach((lb, k) => { g.uses[k].lbl = cut(lb, g.uses[k].u, g.uses[k].v); });
+      if (!yuv) fan(layerLook(c.seg, src, c.media), g.uses.length).forEach((lb, k) => { g.uses[k].lbl = cut(lb, g.uses[k].u, g.uses[k].v); });
+      else {
+        // Sequence parts stay YUV; composited windows get the RGBA look (placeLayer converts them back to YUVA).
+        const seqUses = g.uses.filter((x) => x.kind === "seq"), overUses = g.uses.filter((x) => x.kind !== "seq");
+        let ys = src, rs = src;
+        if (seqUses.length && overUses.length) { ys = L(); rs = L(); chains.push(`[${src}]split[${ys}][${rs}]`); }
+        if (seqUses.length) fan(yuvLook(c.seg, ys), seqUses.length).forEach((lb, k) => { seqUses[k].lbl = cut(lb, seqUses[k].u, seqUses[k].v); });
+        // Trim first: only the window's frames are converted to RGBA (untouched clips have no time-based look).
+        if (overUses.length) fan(rs, overUses.length).forEach((lb, k) => { overUses[k].lbl = layerLook(c.seg, cut(lb, overUses[k].u, overUses[k].v), c.media); });
+      }
     }
     // The sequence: clip parts and canvas-colour gaps, frame-exact.
     const pieces = [];
@@ -493,7 +517,8 @@ export function buildExport(tl, o) {
     const shows = (t) => !t.hidden && t.segments.some((x) => !x.disabled && (isVisualKind(x.kind) || isGrade(x.kind)));
     const sequence = main && !main.hidden && !main.segments.some((x) => !x.disabled && isGrade(x.kind)) && !tracks.some((t) => t !== main && t.order <= main.order && shows(t));
     const span = { startUs: T0, frames: frameAt(rangeEnd) + FPS };
-    const inSequence = sequence && mainSequence(main, !tracks.some((t) => t !== main && shows(t))) !== null;
+    rgbCompositeNeeded = tracks.some((t) => !t.hidden && t.segments.some((x) => !x.disabled && inRange(x.start, x.start + x.duration) && (isGrade(x.kind) || (x.transform?.blend && x.transform.blend !== "normal"))));
+    const inSequence = sequence && mainSequence(main) !== null;
     if (!inSequence) comp = colorStream(bgColor, T0, span.frames);
     for (const track of tracks) {
       if (track.hidden || (inSequence && track === main)) continue;
@@ -513,7 +538,35 @@ export function buildExport(tl, o) {
 
   // ------------------------------------------------------------------ audio
   const audioLabels = [];
+  // Constant-speed segments cut from the same file share ONE audio input (opened at the earliest part used and
+  // split), instead of one demuxer per segment: a 30-cut timeline opened the file 30 times. Video is not demuxed.
+  const sharedAudio = new Map(); // path -> { base, end, n, labels: [], next }
+  const audioSpan = (seg) => {
+    const a0 = Math.max(seg.start, rangeStart), a1 = Math.min(seg.start + seg.duration, rangeEnd), speed = seg.speed || 1;
+    const from = seg.sourceStart + (a0 - seg.start) * speed;
+    return { from, srcDur: (a1 - a0) * speed };
+  };
   if (wantAudio) {
+    for (const track of tracks) {
+      if (track.muted) continue;
+      for (const seg of track.segments) {
+        const audible = seg.kind === "audio" || ((seg.kind === "video" || seg.kind === "compound") && !seg.audioDetached);
+        if (seg.disabled || !audible || seg.speedMode === "curve" || !inRange(seg.start, seg.start + seg.duration)) continue;
+        const media = mediaOf(seg);
+        if (!media.hasAudio) continue;
+        const { from, srcDur } = audioSpan(seg);
+        const e = sharedAudio.get(media.path) || { base: Infinity, end: 0, n: 0 };
+        e.base = Math.min(e.base, from); e.end = Math.max(e.end, Math.min(from + srcDur, media.durationUs || from + srcDur)); e.n++;
+        sharedAudio.set(media.path, e);
+      }
+    }
+    for (const [p, e] of sharedAudio) {
+      if (e.n < 2) { sharedAudio.delete(p); continue; }
+      const ii = addInput(["-vn", "-ss", String(s(e.base)), "-t", String(s(e.end - e.base + US / 10)), "-i", p]);
+      e.labels = Array.from({ length: e.n }, () => L("as"));
+      e.next = 0;
+      chains.push(`[${ii}:a]asplit=${e.n}${e.labels.map((x) => `[${x}]`).join("")}`);
+    }
     for (const track of tracks) {
       if (track.muted) continue;
       for (const seg of track.segments) {
@@ -548,10 +601,16 @@ export function buildExport(tl, o) {
     } else {
       const speed = seg.speed || 1;
       const from = seg.sourceStart + skip * speed, srcDur = (a1 - a0) * speed;
-      const ii = addInput(["-ss", String(s(from)), "-t", String(s(Math.max(US / 100, Math.min(srcDur, (media.durationUs || srcDur + from) - from)))), "-i", media.path]);
       head = L("a");
       const sp = Math.abs(speed - 1) < 1e-6 ? "" : seg.changePitch ? `,asetrate=${Math.round(sr * speed)},aresample=${sr}` : `,${atempoChain(speed)}`;
-      chains.push(`[${ii}:a]asetpts=PTS-STARTPTS,aresample=48000${sp}[${head}]`);
+      const shared = sharedAudio.get(media.path);
+      if (shared) {
+        const lb = shared.labels[shared.next++];
+        chains.push(`[${lb}]atrim=start=${s(from - shared.base)}:duration=${s(Math.max(US / 100, srcDur))},asetpts=PTS-STARTPTS,aresample=48000${sp}[${head}]`);
+      } else {
+        const ii = addInput(["-vn", "-ss", String(s(from)), "-t", String(s(Math.max(US / 100, Math.min(srcDur, (media.durationUs || srcDur + from) - from)))), "-i", media.path]);
+        chains.push(`[${ii}:a]asetpts=PTS-STARTPTS,aresample=48000${sp}[${head}]`);
+      }
       tail = `atrim=duration=${s(a1 - a0)}`;
     }
     const a = seg.audioFx;

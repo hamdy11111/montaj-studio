@@ -2,6 +2,7 @@
 // (PNG overlays at the export resolution), so text looks identical in both. Sizes are relative to the frame:
 // font px = text.size × H / 200, sticker box = 25 % of the frame's short side, both × the layer scale.
 import { stickerUrl, libUrl } from "../api.js";
+import { captionFrames } from "./captionRaster.js";
 
 export const textFontPx = (text, H) => Math.max(4, (text.size || 15) * H / 200);
 export const stickerBasePx = (W, H) => Math.round(Math.min(W, H) * 0.25);
@@ -98,7 +99,8 @@ export async function buildOverlays(timeline, W, H, { onlyIds = null } = {}) {
   const out = {};
   for (const tr of timeline.tracks) for (const s of tr.segments) {
     if (onlyIds && !onlyIds.includes(s.id)) continue;
-    if (s.kind === "text" && s.text) { const c = rasterText(s.text, W, H); if (c) out[s.id] = c.toDataURL("image/png"); else out[s.id] = blankPng(); }
+    if (s.kind === "text" && s.text?.caption) out[s.id] = captionFrames(s.text, W, H, s.duration, timeline.fps || 30);
+    else if (s.kind === "text" && s.text) { const c = rasterText(s.text, W, H); if (c) out[s.id] = c.toDataURL("image/png"); else out[s.id] = blankPng(); }
     else if (s.kind === "sticker" && s.sticker) { try { const c = await rasterSticker(s.sticker, W, H); out[s.id] = c ? c.toDataURL("image/png") : blankPng(); } catch { out[s.id] = blankPng(); } }
   }
   return out;

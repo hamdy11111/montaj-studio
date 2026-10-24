@@ -10,6 +10,12 @@ import { FILTER_PRESETS, EFFECTS } from "../core/presets.js";
 import { TRANSITIONS } from "../core/layerMath.js";
 import { CANVAS_RATIOS } from "../core/model.js";
 import { US } from "../core/util.js";
+import { analyzeSpeech, sentences } from "../core/speech.js";
+import { run as runProcess, binaries } from "../services/ffmpeg.js";
+import { CAPTION_TEMPLATES } from "../core/captionTemplates.js";
+import { EDIT_PLAN_SCHEMA } from "../core/editPlan.js";
+import { inspectPlan, applyPlan } from "./editPlan.js";
+import { applyCaptions, restyleCaptions, transact } from "./captions.js";
 
 // ------------------------------------------------------------------ schema helpers
 const S = {
@@ -51,6 +57,15 @@ export function summarizeTimeline(tl, revision, history) {
     markers: tl.markers,
   };
 }
+
+// Long operations run as jobs: the call waits up to WAIT_MS (below common MCP client tool timeouts) and otherwise
+// returns the running job for job_status.
+const WAIT_MS = 50_000;
+function asJob(ctx, kind, label, fn, wait) {
+  const job = ctx.jobs.start({ kind, clientId: ctx.clientId, label, run: (j) => fn(j) });
+  return wait === false ? ctx.jobs.status(job.jobId, ctx.clientId) : ctx.jobs.wait(job.jobId, WAIT_MS, ctx.clientId);
+}
+const WAIT = { type: "boolean", description: "Wait for the result (default true, up to 50 s; otherwise poll job_status)" };
 
 const projectOfTimeline = (ctx, timelineId) => svc(ctx).repos.timelines.get(timelineId).projectId;
 
@@ -124,6 +139,22 @@ export const OPERATIONS = [
     input: obj({ jobId: S.str("Job id", 64) }, ["jobId"]),
     run: (ctx, a) => ctx.jobs.status(a.jobId, ctx.clientId),
   },
+  {
+    name: "timeline_frames", scope: "read", title: "Look at the timeline",
+    description: "Renders frames of the edited timeline exactly as they will be exported (all layers, text, captions, effects) and returns them as JPEG images, at the given TIMELINE times or `count` evenly spaced ones. Use it to check your edit visually.",
+    input: obj({ ...TIMELINE, timesUs: { type: "array", items: { type: "integer", minimum: 0 }, minItems: 1, maxItems: 12, description: "Timeline times (µs)" }, count: { type: "integer", minimum: 1, maximum: 12 }, short: { type: "integer", minimum: 120, maximum: 720 } }, ["timelineId"]),
+    timeline: (a) => a.timelineId,
+    run: async (ctx, a) => {
+      const total = durationOf(tlState(ctx, a.timelineId).timeline);
+      if (!total) throw new AppError("VALIDATION", "err.timelineEmpty");
+      const n = a.count || 4;
+      const times = a.timesUs?.length ? a.timesUs : Array.from({ length: n }, (_, i) => Math.round((total * (i + 0.5)) / n));
+      const rendered = await svc(ctx).exporter.renderFrames(a.timelineId, times, { short: a.short || 360 });
+      try {
+        return { timelineId: a.timelineId, textOmitted: rendered[0]?.textOmitted || undefined, frames: rendered.map((r) => ({ atUs: r.atUs })), images: rendered.map((r) => ({ mimeType: "image/jpeg", data: fs.readFileSync(r.file).toString("base64") })) };
+      } finally { for (const r of rendered) fs.rmSync(r.file, { force: true }); }
+    },
+  },
 
   // ---------------------------------------------------------------- media (reads files the user allowed)
   {
@@ -158,6 +189,57 @@ export const OPERATIONS = [
     input: obj({ mediaId: S.id("Media id") }, ["mediaId"]),
     media: (a) => a.mediaId,
     run: async (ctx, a) => ({ lufs: await svc(ctx).analysis.loudness(a.mediaId) }),
+  },
+  {
+    name: "media_frames", scope: "media", title: "Look at a media file",
+    description: "Returns still images (JPEG) of a source media file at the given SOURCE times (or `count` evenly spaced ones), so you can see what is in the footage. short = size of the image's short side in px.",
+    input: obj({ mediaId: S.id("Media id"), timesUs: { type: "array", items: { type: "integer", minimum: 0 }, minItems: 1, maxItems: 12, description: "Source times (µs)" }, count: { type: "integer", minimum: 1, maximum: 12 }, short: { type: "integer", minimum: 120, maximum: 720 } }, ["mediaId"]),
+    media: (a) => a.mediaId,
+    run: async (ctx, a) => {
+      const m = svc(ctx).repos.media.get(a.mediaId);
+      if (!m.hasVideo && m.type !== "image") throw new AppError("VALIDATION", "err.noVideo", { mediaId: a.mediaId });
+      const dur = m.durationUs || 0;
+      const n = a.count || 4;
+      const times = a.timesUs?.length ? a.timesUs : m.type === "image" ? [0] : Array.from({ length: n }, (_, i) => Math.round((dur * (i + 0.5)) / n));
+      const short = a.short || 360;
+      const dir = path.join(svc(ctx).paths.cache, "frames");
+      fs.mkdirSync(dir, { recursive: true });
+      const frames = [], images = [];
+      for (const t of times) {
+        const file = path.join(dir, `m-${a.mediaId}-${t}-${Date.now()}.jpg`);
+        try {
+          await runProcess(binaries().ffmpeg, ["-hide_banner", "-y", ...(m.type === "image" ? [] : ["-ss", String(Math.min(t, Math.max(0, dur - 50_000)) / US)]), "-i", m.path, "-frames:v", "1",
+            "-vf", `scale='if(gt(iw,ih),-2,${short})':'if(gt(iw,ih),${short},-2)'`, "-q:v", "4", file], { timeoutMs: 60_000 });
+          frames.push({ atUs: t });
+          images.push({ mimeType: "image/jpeg", data: fs.readFileSync(file).toString("base64") });
+        } finally { fs.rmSync(file, { force: true }); }
+      }
+      return { mediaId: a.mediaId, frames, images };
+    },
+  },
+  {
+    name: "media_transcribe", scope: "media", provider: "whisper", title: "Transcribe speech (word timings)",
+    description: "Word-level transcript of a media file in SOURCE time (µs from the start of the file), with sentences. Uses the local speech model (Settings › Providers); cached per file, so repeated calls are instant. Optional window fromUs/toUs. Words are [text, startUs, endUs]. Runs as a job (see wait).",
+    input: obj({ mediaId: S.id("Media id"), language: { type: "string", pattern: "^(auto|[a-z]{2})$", description: "Spoken language code or auto" }, fromUs: S.us("Optional window start"), toUs: S.us("Optional window end"), words: { type: "boolean", description: "Include the word list (default true)" }, wait: WAIT }, ["mediaId"]),
+    media: (a) => a.mediaId,
+    run: (ctx, a) => asJob(ctx, "transcribe", a.mediaId, async () => {
+      const tr = await svc(ctx).captions.transcribeWords({ mediaId: a.mediaId, language: a.language || "auto" });
+      const from = a.fromUs ?? 0, to = a.toUs ?? Infinity;
+      const ws = tr.words.filter((w) => w.startUs >= from && w.endUs <= to);
+      return { mediaId: a.mediaId, language: tr.language, engine: tr.engine, model: tr.model, durationUs: tr.durationUs,
+        sentences: sentences(ws).map((s) => ({ startUs: s.startUs, endUs: s.endUs, text: s.text })),
+        words: a.words === false ? undefined : ws.map((w) => [w.text, w.startUs, w.endUs]) };
+    }, a.wait),
+  },
+  {
+    name: "media_analyze_speech", scope: "media", provider: "whisper", title: "Analyze speech for editing",
+    description: "From the word transcript: sentences, filler words (sure = hesitation sounds; maybe = words like 'so'/'يعني' that can carry meaning — never cut automatically), pauses, retakes (a sentence restarted by the next one; the first attempt is listed) and suggestedCuts as SOURCE ranges to remove, each with a reason. style: tight (reels) or natural. Runs as a job (see wait).",
+    input: obj({ mediaId: S.id("Media id"), language: { type: "string", pattern: "^(auto|[a-z]{2})$" }, style: S.enumOf(["tight", "natural"], "Cut style"), pauseMinS: S.num("Report pauses at least this long (s)", 0.2, 5), wait: WAIT }, ["mediaId"]),
+    media: (a) => a.mediaId,
+    run: (ctx, a) => asJob(ctx, "speech", a.mediaId, async () => {
+      const tr = await svc(ctx).captions.transcribeWords({ mediaId: a.mediaId, language: a.language || "auto" });
+      return { mediaId: a.mediaId, ...analyzeSpeech(tr, { style: a.style || "natural", pauseMinUs: Math.round((a.pauseMinS ?? 0.5) * US) }) };
+    }, a.wait),
   },
 
   // ---------------------------------------------------------------- edit
@@ -334,16 +416,56 @@ export const OPERATIONS = [
     run: async (ctx, a) => { const r = await exec(ctx, a.timelineId, "redo", {}); return { redone: r.result, revision: r.revision }; },
   },
 
+  // ---------------------------------------------------------------- captions & edit plans
+  {
+    name: "captions_templates", scope: "read", title: "Caption templates",
+    description: "Word-timed caption templates (id, name, when to use, how it animates).",
+    input: obj({}),
+    run: () => Object.entries(CAPTION_TEMPLATES).map(([id, t]) => ({ id, name: t.name, use: t.use, mode: t.mode, highlight: t.highlight, pop: t.pop, maxWords: t.maxWords })),
+  },
+  {
+    name: "timeline_add_captions_pro", scope: "edit", needs: ["media"], provider: "whisper", title: "Animated captions",
+    description: "Adds word-timed animated captions for everything spoken on the main track (after cuts), using the local speech model, as one undo step. template: see captions_templates. keywords: words to emphasize in the accent colour (numbers are emphasized automatically). replace (default true) removes earlier captions. Returns pages, words and a reading-speed check (qc). Runs as a job (see wait).",
+    input: obj({ ...EDIT, template: S.enumOf(Object.keys(CAPTION_TEMPLATES), "Template"), language: { type: "string", pattern: "^(auto|[a-z]{2})$" }, keywords: { type: "array", items: { type: "string", maxLength: 60 }, maxItems: 200 }, autoEmphasis: { type: "boolean" }, replace: { type: "boolean" }, positionY: S.num("Vertical position (fraction of the frame from the centre, + = lower)", -0.45, 0.45), overrides: { type: "object", additionalProperties: false, properties: { color: { type: "string", pattern: "^#[0-9A-Fa-f]{6}$" }, active: { type: "string", pattern: "^#[0-9A-Fa-f]{6}$" }, accent: { type: "string", pattern: "^#[0-9A-Fa-f]{6}$" }, activeBox: { type: "string", pattern: "^#[0-9A-Fa-f]{6}$" }, size: { type: "number", minimum: 3, maximum: 30 } } }, wait: WAIT }, ["timelineId"]),
+    timeline: (a) => a.timelineId,
+    run: (ctx, a) => asJob(ctx, "captions", a.template || "captions", () => transact(ctx, a.timelineId, `captions:${a.template || "karaoke-yellow"}`, a.expectedRevision, () => applyCaptions(ctx, a.timelineId, a)), a.wait),
+  },
+  {
+    name: "timeline_captions_style", scope: "edit", title: "Restyle captions",
+    description: "Changes the template, colours, size or position of every animated caption page of a timeline (one undo step).",
+    input: obj({ ...EDIT, template: S.enumOf(Object.keys(CAPTION_TEMPLATES), "Template"), positionY: S.num("Vertical position", -0.45, 0.45), overrides: { type: "object" } }, ["timelineId"]),
+    timeline: (a) => a.timelineId,
+    run: (ctx, a) => { svc(ctx).timelines.checkRevision(a.timelineId, a.expectedRevision); return restyleCaptions(ctx, a.timelineId, a); },
+  },
+  {
+    name: "edit_plan_schema", scope: "read", title: "Edit plan format",
+    description: "The JSON Schema of an edit plan (montaj.editplan/1) with an example. A plan describes a whole edit in SOURCE time (the times in media_transcribe / media_analyze_speech): cuts, punch-in zooms, on-screen texts, transitions at cuts, a colour look, audio clean-up and animated captions.",
+    input: obj({}),
+    run: () => ({ schema: EDIT_PLAN_SCHEMA, example: { schema: "montaj.editplan/1", title: "Reel v1", canvas: { ratio: "9:16", bgType: "blur" }, cuts: [{ mediaId: "<id>", fromUs: 1760000, toUs: 2480000, reason: "filler" }], zooms: [{ mediaId: "<id>", fromUs: 6060000, toUs: 9060000, scale: 1.2, reason: "key sentence" }], texts: [{ mediaId: "<id>", fromUs: 0, toUs: 2500000, content: "3 editing tricks", preset: "outline_white", position: "top" }], transitions: [{ mediaId: "<id>", atUs: 10040000, type: "push_left", durationUs: 250000 }], filter: { preset: "vivid", intensity: 60 }, audio: { denoise: true, enhanceVoice: true, normalizeLufs: -14 }, captions: { template: "karaoke-yellow", keywords: ["three"] } },
+      notes: ["Times are SOURCE times of the media file; the plan maps them through the cuts.", "Validate with edit_plan_validate and show the cutSheet to the user before applying.", "edit_plan_apply makes the whole plan ONE undo step and restores everything if a step fails."] }),
+  },
+  {
+    name: "edit_plan_validate", scope: "read", title: "Check an edit plan",
+    description: "Validates an edit plan against its schema and the timeline (media on the main track, ranges, presets, speech model for captions) WITHOUT changing anything. Returns valid, errors, warnings, a summary (duration before/after) and a readable cutSheet to show the user for approval.",
+    input: obj({ ...TIMELINE, plan: { type: "object", description: "montaj.editplan/1 (see edit_plan_schema)" } }, ["timelineId", "plan"]),
+    timeline: (a) => a.timelineId,
+    run: (ctx, a) => inspectPlan(ctx, a.timelineId, a.plan),
+  },
+  {
+    name: "edit_plan_apply", scope: "edit", title: "Apply an edit plan",
+    description: "Applies a validated edit plan to the timeline as ONE undo step (label plan:<title>); if any step fails the timeline is restored. Pass expectedRevision from timeline_inspect. Captions in the plan need the media permission. Returns what was applied, skipped items, duration before/after. Runs as a job (see wait).",
+    input: obj({ ...EDIT, plan: { type: "object", description: "montaj.editplan/1" }, wait: WAIT }, ["timelineId", "plan"]),
+    timeline: (a) => a.timelineId,
+    run: (ctx, a) => asJob(ctx, "plan", a.plan?.title || "plan", (j) => applyPlan(ctx, a.timelineId, a.plan, { expectedRevision: a.expectedRevision, job: j }), a.wait),
+  },
+
   // ---------------------------------------------------------------- skills
   {
     name: "skills_execute", scope: "skills.run", title: "Run a skill",
-    description: "Runs an installed skill on a timeline. All its edits form one undo step; on failure the timeline is restored. Returns a job: wait=true (default) waits up to 110 s, otherwise poll job_status.",
-    input: obj({ skillId: S.str("Skill id", 80), version: S.str("Optional version", 40), ...EDIT, inputs: { type: "object", description: "Skill inputs (see skills_inspect)" }, wait: { type: "boolean" } }, ["skillId", "timelineId"]),
+    description: "Runs an installed skill on a timeline. All its edits form one undo step; on failure the timeline is restored. Returns a job: wait=true (default) waits up to 50 s, otherwise poll job_status.",
+    input: obj({ skillId: S.str("Skill id", 80), version: S.str("Optional version", 40), ...EDIT, inputs: { type: "object", description: "Skill inputs (see skills_inspect)" }, wait: WAIT }, ["skillId", "timelineId"]),
     timeline: (a) => a.timelineId,
-    run: async (ctx, a) => {
-      const job = ctx.jobs.start({ kind: "skill", clientId: ctx.clientId, label: a.skillId, run: (j) => ctx.skills.run({ skillId: a.skillId, version: a.version, timelineId: a.timelineId, inputs: a.inputs || {}, ctx, job: j, expectedRevision: a.expectedRevision }) });
-      return a.wait === false ? ctx.jobs.status(job.jobId, ctx.clientId) : ctx.jobs.wait(job.jobId, 110_000, ctx.clientId);
-    },
+    run: (ctx, a) => asJob(ctx, "skill", a.skillId, (j) => ctx.skills.run({ skillId: a.skillId, version: a.version, timelineId: a.timelineId, inputs: a.inputs || {}, ctx, job: j, expectedRevision: a.expectedRevision }), a.wait),
   },
   {
     name: "skills_save", scope: "skills.write", title: "Save a skill",

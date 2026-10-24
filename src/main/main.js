@@ -9,6 +9,7 @@ import { registerIpc } from "./ipc.js";
 import { createServices } from "../services/index.js";
 import { closeDatabase } from "../db/realmClient.js";
 import { AgentHub } from "../agent/controlServer.js";
+import { RasterHost } from "./rasterHost.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const SRC = path.join(here, "..");
@@ -20,6 +21,7 @@ if (process.env.MONTAJ_USER_DATA) app.setPath("userData", process.env.MONTAJ_USE
 
 let services = null;
 let agents = null;
+const rasterHost = new RasterHost();
 let mainWindow = null;
 const pendingOpen = process.argv.find((a) => /\.(mstudio)$/i.test(a)) || null;
 
@@ -97,6 +99,7 @@ app.whenReady().then(async () => {
     return;
   }
   // Agents (MCP bridge): same services, same history. The pipe only listens while Settings › Agents is on.
+  services.exporter.rasterize = (tl, W, H) => rasterHost.overlays(tl, W, H);
   const notifyAll = (event, payload) => { for (const w of BrowserWindow.getAllWindows()) if (!w.isDestroyed()) w.webContents.send("api:event", event, payload); };
   const approvals = new Map();
   agents = new AgentHub({
@@ -130,6 +133,7 @@ app.on("window-all-closed", () => { app.quit(); });
 
 app.on("will-quit", () => {
   try { agents?.close(); } catch { /* not listening */ }
+  rasterHost.close();
   try { closeDatabase({ shutdown: true }); } catch { /* already closed */ }
 });
 

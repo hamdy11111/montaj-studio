@@ -99,3 +99,8 @@ code.token { user-select: all; }
 .audit-log { max-height: 220px; overflow-y: auto; gap: 2px; }
 .audit-row { font-size: var(--fs-xs); padding: 2px 0; }
 .audit-row.failed b { color: var(--danger); }
+
+/* Animated caption templates */
+.cap-tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.cap-art { background: linear-gradient(135deg, #2c3e50, #4b6a88); display: grid; place-items: center; overflow: hidden; }
+.cap-preview { max-width: 100%; max-height: 100%; }

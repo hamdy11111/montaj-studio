@@ -62,7 +62,7 @@ export class SkillRuntime {
     const skill = this.registry.get(skillId, version);
     // Permissions: the caller must hold every scope the skill declares.
     for (const s of skill.permissions) if (!ctx.guard.hasScope(s)) throw new AppError("FORBIDDEN", "err.scopeMissing", { scope: s, skillId });
-    for (const p of skill.requires?.providers || []) if (p === "whisper" && !ctx.services.captions.providerStatus().autoCaptions) throw new AppError("PROVIDER", "err.whisperNotConfigured", { skillId });
+    for (const p of skill.requires?.providers || []) if (p === "whisper" && !(await ctx.services.captions.status()).autoCaptions) throw new AppError("PROVIDER", "err.whisperNotConfigured", { skillId });
     const args = checkInputs(skill.inputs, inputs, `${skillId}.inputs`);
 
     // Composition: a key set differently by two composed skills is a conflict unless the composing skill sets it.

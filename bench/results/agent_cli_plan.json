@@ -1,0 +1,77 @@
+{
+ "date": "2026-10-24T15:27:22.241Z",
+ "versions": {
+  "claude": "2.1.216 (Claude Code)",
+  "codex": "codex-cli 0.153.4"
+ },
+ "results": [
+  {
+   "agent": "Claude Code",
+   "flow": "plan",
+   "exitCode": 0,
+   "seconds": 55,
+   "reply": {
+    "before": 19427000,
+    "after": 12400000,
+    "undoLabel": "plan:CLI test Claude — Vertical Reel",
+    "cuts": 5,
+    "captionText": "three editing tricks."
+   },
+   "app": {
+    "undoLabel": "plan:CLI test Claude — Vertical Reel",
+    "durationUs": 12400000,
+    "captionPages": 10,
+    "captionAt3s": "three editing tricks.",
+    "calls": [
+     "hello:ok",
+     "project_list:ok",
+     "project_inspect:ok",
+     "timeline_inspect:ok",
+     "media_analyze_speech:ok",
+     "media_frames:ok",
+     "edit_plan_schema:ok",
+     "captions_templates:ok",
+     "edit_plan_validate:ok",
+     "edit_plan_apply:ok",
+     "timeline_frames:ok"
+    ]
+   },
+   "pass": true,
+   "readCaptionWordsMatching": 3
+  },
+  {
+   "agent": "Codex",
+   "flow": "plan",
+   "exitCode": 0,
+   "seconds": 419,
+   "reply": {
+    "before": 19427000,
+    "after": 12400000,
+    "undoLabel": "plan:Vertical reel — natural speech cleanup",
+    "cuts": 5,
+    "captionText": "three editing tricks."
+   },
+   "app": {
+    "undoLabel": "plan:Vertical reel — natural speech cleanup",
+    "durationUs": 12400000,
+    "captionPages": 10,
+    "captionAt3s": "three editing tricks.",
+    "calls": [
+     "hello:ok",
+     "project_list:ok",
+     "project_inspect:ok",
+     "timeline_inspect:ok",
+     "media_analyze_speech:ok",
+     "media_frames:ok",
+     "edit_plan_schema:ok",
+     "edit_plan_validate:ok",
+     "edit_plan_apply:ok",
+     "timeline_frames:ok"
+    ]
+   },
+   "pass": true,
+   "readCaptionWordsMatching": 3,
+   "note": "model override gpt-5.6-sol via -c (configured gpt-6-sol unavailable on ChatGPT account)"
+  }
+ ]
+}

@@ -56,5 +56,7 @@ export function validateId(v, field = "id") {
 
 export function toErrorEnvelope(err) {
   if (err instanceof AppError) return err.toJSON();
-  return { code: "INTERNAL", messageKey: "err.internal", details: { message: String(err?.message || err) }, retryable: false };
+  // Unexpected errors keep only their message — and whether a transaction was rolled back (skills, edit plans).
+  const rb = err?.details?.rolledBack ? { rolledBack: true, failedStep: err.details.failedStep } : {};
+  return { code: "INTERNAL", messageKey: "err.internal", details: { message: String(err?.message || err), ...rb }, retryable: false };
 }

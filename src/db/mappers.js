@@ -74,7 +74,7 @@ export function segmentToRealm(s, realm) {
     animIn: s.animation?.in, animOut: s.animation?.out, animCombo: s.animation?.combo, transitionOut: s.transitionOut,
     clipEffects: (s.clipEffects || []).map((e) => ({ type: e.type, intensity: e.intensity ?? 50, velocity: !!e.velocity })),
     keyframes: (s.keyframes || []).map((k) => ({ id: k.id, prop: k.prop, timeUs: Math.round(k.timeUs), value: k.value, easing: k.easing || "linear" })),
-    text: s.text ? { ...DEFAULT_TEXT, ...s.text } : null,
+    text: s.text ? { ...DEFAULT_TEXT, ...s.text, caption: s.text.caption ? JSON.stringify(s.text.caption) : null } : null,
     effectType: s.effect?.type ?? null, effectIntensity: s.effect?.intensity ?? 50,
     filterPreset: s.filter?.preset ?? null, filterIntensity: s.filter?.intensity ?? 100,
     stickerAssetId: s.sticker?.assetId ?? null, stickerBuiltin: s.sticker?.builtin ?? null,
@@ -84,6 +84,12 @@ export function segmentToRealm(s, realm) {
 }
 
 const anim = (a) => (a ? { type: a.type, durationUs: a.durationUs } : { type: "none", durationUs: 500_000 });
+
+function textFromRealm(t) {
+  const out = pick(t, Object.keys(DEFAULT_TEXT));
+  if (t.caption) { try { out.caption = JSON.parse(t.caption); } catch { /* unreadable caption data: plain text */ } }
+  return out;
+}
 
 export function segmentFromRealm(r) {
   return {
@@ -97,7 +103,7 @@ export function segmentFromRealm(r) {
     transitionOut: anim(r.transitionOut),
     clipEffects: r.clipEffects.map((e) => ({ type: e.type, intensity: e.intensity, velocity: e.velocity })),
     keyframes: r.keyframes.map((k) => ({ id: k.id, prop: k.prop, timeUs: k.timeUs, value: k.value, easing: k.easing })),
-    text: r.text ? pick(r.text, Object.keys(DEFAULT_TEXT)) : null,
+    text: r.text ? textFromRealm(r.text) : null,
     effect: r.effectType ? { type: r.effectType, intensity: r.effectIntensity } : null,
     filter: r.filterPreset ? { preset: r.filterPreset, intensity: r.filterIntensity } : null,
     sticker: r.kind === "sticker" ? { assetId: r.stickerAssetId ?? null, builtin: r.stickerBuiltin ?? null } : null,

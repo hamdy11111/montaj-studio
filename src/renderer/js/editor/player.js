@@ -12,6 +12,7 @@ import { makePixelProcessor, applyFilterPreset, isDefaultAdjust } from "../../co
 import { parseCube } from "../../core/lut.js";
 import { mediaUrl, call } from "../api.js";
 import { rasterText, rasterSticker, stickerSrc } from "./raster.js";
+import { captionCanvas, captionStateAt, captionLayout, stateKey } from "./captionRaster.js";
 
 const BLEND = { normal: "source-over", screen: "screen", add: "lighter", multiply: "multiply", darken: "darken", lighten: "lighten", overlay: "overlay" };
 const VISUAL = new Set(["video", "image", "text", "sticker", "compound"]);
@@ -288,6 +289,21 @@ export class Player {
   /** Returns a drawable + its base (fit) size, or null if not ready yet. */
   source(seg) {
     const W = this.W, H = this.H;
+    if (seg.kind === "text" && seg.text?.caption) {
+      // Word-timed caption: the state (spoken word, pop) at the playhead, drawn like the export draws it.
+      const base = `c:${JSON.stringify(seg.text)}:${seg.duration}:${W}x${H}`;
+      const st = captionStateAt(seg.text, seg.duration, this.ed.tl().fps || 30, this.timeUs - seg.start);
+      const key = `${base}:${stateKey(st)}`;
+      let c = this.rasters.get(key);
+      if (c === undefined) {
+        let L = this.rasters.get(`${base}:L`);
+        if (!L) { L = captionLayout(seg.text, W, H); this.rasters.set(`${base}:L`, L); }
+        c = captionCanvas(seg.text, W, H, st, L);
+        if (this.rasters.size > 400) for (const k of [...this.rasters.keys()]) if (k.startsWith("c:")) this.rasters.delete(k); // bound the cache
+        this.rasters.set(key, c);
+      }
+      return { img: c, w: c.width, h: c.height, sw: c.width, sh: c.height };
+    }
     if (seg.kind === "text") {
       const key = `t:${JSON.stringify(seg.text)}:${W}x${H}`;
       let c = this.rasters.get(key);

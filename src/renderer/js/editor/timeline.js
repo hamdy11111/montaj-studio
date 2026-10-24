@@ -117,6 +117,10 @@ export class TimelineView {
   }
 
   render() {
+    // A clip drag/trim owns its element: re-rendering now (a waveform or thumbnail arriving, an agent's edit) would
+    // replace that element and drop the gesture, so the render waits for the pointer to be released.
+    if (this.gesture) { this.pendingRender = true; return; }
+    this.pendingRender = false;
     const tl = this.ed.tl();
     if (!tl) return;
     const dur = this.ed.duration();
@@ -298,6 +302,19 @@ export class TimelineView {
     return snapTime(this.ed.tl(), us, (8 / this.pxPerSec) * US, { exclude, playheadUs: this.ed.playhead() });
   }
 
+  /** Mark a pointer gesture on a clip; returns end() which releases it (and renders if something waited). */
+  holdRender(target) {
+    this.gesture = true;
+    let ended = false;
+    const end = (renderNow = false) => {
+      if (ended) return; ended = true;
+      this.gesture = false;
+      if (renderNow || this.pendingRender) this.render();
+    };
+    target.addEventListener("lostpointercapture", () => end(), { once: true });
+    return end;
+  }
+
   clipDown(e, track, seg) {
     if (e.button !== 0) return;
     e.stopPropagation();
@@ -310,6 +327,7 @@ export class TimelineView {
     const offsetUs = this.xToUs(e.clientX) - seg.start;
     let moved = false, targetRow = null;
     el.setPointerCapture(e.pointerId);
+    const release = this.holdRender(el);
     const move = (ev) => {
       if (!moved && Math.hypot(ev.clientX - startX, ev.clientY - startY) < 4) return;
       moved = true;
@@ -332,10 +350,11 @@ export class TimelineView {
     const up = () => {
       el.removeEventListener("pointermove", move);
       el.removeEventListener("pointerup", up);
-      if (!moved) { this.render(); return; }
+      if (!moved) { release(true); return; }
       const ns = Number(el.dataset.newStart);
       const trackId = el.dataset.newTrack || null;
-      if (ns === seg.start && !trackId) { this.render(); return; }
+      if (ns === seg.start && !trackId) { release(true); return; }
+      release();
       this.ed.exec("move", { segId: seg.id, start: ns, trackId });
     };
     el.addEventListener("pointermove", move);
@@ -349,6 +368,7 @@ export class TimelineView {
     const el = e.currentTarget.parentElement;
     const handle = e.currentTarget;
     handle.setPointerCapture(e.pointerId);
+    const release = this.holdRender(handle);
     let timeUs = edge === "start" ? seg.start : seg.start + seg.duration;
     const tip = h("div", { class: "tl-tip" });
     el.append(tip);
@@ -363,7 +383,8 @@ export class TimelineView {
       handle.removeEventListener("pointerup", up);
       tip.remove();
       const cur = edge === "start" ? seg.start : seg.start + seg.duration;
-      if (Math.abs(timeUs - cur) < 1000) { this.render(); return; }
+      if (Math.abs(timeUs - cur) < 1000) { release(true); return; }
+      release();
       this.ed.exec("trim", { segId: seg.id, edge, timeUs: Math.round(timeUs) });
     };
     handle.addEventListener("pointermove", move);

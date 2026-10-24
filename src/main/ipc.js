@@ -10,6 +10,8 @@ import { dirSize, clearDir } from "../services/paths.js";
 import { defaultBindings, applyBinding, findConflicts, COMMANDS, checkBinding } from "../core/shortcuts.js";
 import { planFromText } from "../core/assistant.js";
 import { uid } from "../core/util.js";
+import { CAPTION_TEMPLATES } from "../core/captionTemplates.js";
+import { applyCaptions, restyleCaptions, transact } from "../agent/captions.js";
 
 const str = (v, field) => { if (typeof v !== "string") throw new AppError("VALIDATION", "err.string", { field }); return v; };
 const id = (v, field = "id") => validateId(v, field);
@@ -24,7 +26,7 @@ export function registerIpc({ getServices, getAgents = () => null, getWindow, ap
   const methods = {
     // ---------------------------------------------------------------- app
     "app.info": () => ({ ...appInfo(), paths: { media: S().paths.media, backups: S().paths.backups }, startup: S().startup }),
-    "app.capabilities": async () => ({ ffmpeg: capsSummary(await capabilities()), tts: S().tts.available(), captions: S().captions.providerStatus() }),
+    "app.capabilities": async () => ({ ffmpeg: capsSummary(await capabilities()), tts: S().tts.available(), captions: await S().captions.status() }),
     "app.showInFolder": (p) => { const f = str(p, "path"); if (fs.existsSync(f)) shell.showItemInFolder(f); return true; },
     "app.openPath": async (p) => { const f = str(p, "path"); if (!fs.existsSync(f)) throw new AppError("IO", "err.fileNotFound"); await shell.openPath(f); return true; },
     // Low memory / disk warnings (FEAT-142): free RAM and free space on the media and export drives.
@@ -160,7 +162,11 @@ export function registerIpc({ getServices, getAgents = () => null, getWindow, ap
     "export.compoundStatus": (tid) => S().exporter.compoundFresh(id(tid)),
 
     // ---------------------------------------------------------------- captions, tts, analysis, assistant
-    "captions.status": () => S().captions.providerStatus(),
+    "captions.status": (force) => S().captions.status(!!force),
+    "captions.templates": () => Object.entries(CAPTION_TEMPLATES).map(([tid, t]) => ({ id: tid, name: t.name, use: t.use })),
+    // Animated word-timed captions for the open timeline (same code path as agents; one undo step).
+    "captions.generatePro": async (tid, o) => { const ctx = A().userContext(); const q = obj(o); return transact(ctx, id(tid), `captions:${q.template || "karaoke-yellow"}`, undefined, () => applyCaptions(ctx, id(tid), { template: q.template ? str(q.template, "template") : undefined, language: q.language ? str(q.language, "language") : "auto", keywords: q.keywords ? arr(q.keywords, "keywords").map(String) : [] })); },
+    "captions.restyle": (tid, o) => restyleCaptions(A().userContext(), id(tid), obj(o)),
     "captions.importFile": (file) => S().captions.importFile(str(file, "file")),
     "captions.segmentsFromCues": (cues, o) => S().captions.segmentsFromCues(arr(cues, "cues"), obj(o)),
     "captions.transcribe": (o) => S().captions.transcribe(obj(o)),

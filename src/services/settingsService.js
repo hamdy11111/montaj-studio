@@ -15,7 +15,7 @@ export function defaultSettings(paths) {
     },
     performance: { hwEncode: true, hwDecode: true, gpuUI: true, autoOptimize: "smart", proxy: false, autoClearGB: 10, autoRender: false, outputDevice: "default", ffmpegPath: "", ffprobePath: "" },
     general: { language: "ar", notifications: true, updates: "notify", shellMenu: false, layout: "default", onboarded: false },
-    providers: { whisperPath: "", whisperModel: "", whisperLanguage: "auto" },
+    providers: { whisperPath: "", whisperModel: "", whisperLanguage: "auto", asrEngine: "auto", pythonPath: "", fwModel: "large-v3-turbo" },
     export: { resolution: "1080p", bitrate: "recommended", codec: "h264", format: "mp4", fps: 30, audioFormat: "flac", gifResolution: "320p", captionsFormat: "srt", dir: paths.media },
     // Agent Control Server (local named pipe for MCP / external agents) — off until the user enables it.
     agents: { enabled: false },
@@ -42,6 +42,9 @@ const RULES = {
   "export.format": (v) => validateEnum(v, ["mp4", "mov"], "format"),
   "export.audioFormat": (v) => validateEnum(v, ["flac", "mp3", "wav", "aac"], "audioFormat"),
   "providers.whisperLanguage": (v) => String(v).slice(0, 12),
+  "providers.asrEngine": (v) => validateEnum(v, ["auto", "whispercpp", "fasterwhisper"], "asrEngine"),
+  "providers.pythonPath": (v) => String(v).slice(0, 500),
+  "providers.fwModel": (v) => { if (!/^[A-Za-z0-9._/-]{1,120}$/.test(String(v))) throw new AppError("VALIDATION", "err.enum", { field: "fwModel" }); return String(v); },
 };
 
 export class SettingsService {

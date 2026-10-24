@@ -97,7 +97,12 @@ test("settings are validated; captions import and auto-captions need a local pro
   assert.equal(segs[0].text.isCaption, true);
   assert.equal(segs[0].transform.y, 0.36);
   const m = S.repos.media.listByProject(project.id)[0];
+  // whisper.cpp chosen but not configured → a clear PROVIDER error (faster-whisper may exist on this machine).
+  S.settings.set("providers", { asrEngine: "whispercpp" });
   await assert.rejects(S.captions.transcribe({ mediaId: m.id }), (e) => e.code === "PROVIDER" && e.messageKey === "err.whisperNotConfigured");
+  await assert.rejects(S.captions.transcribeWords({ mediaId: m.id }), (e) => e.code === "PROVIDER" && e.messageKey === "err.whisperNotConfigured");
+  assert.throws(() => S.settings.set("providers", { asrEngine: "cloud" }), (e) => e.code === "VALIDATION");
+  S.settings.set("providers", { asrEngine: "auto" });
 });
 
 test("package export/import round trip keeps media and timeline structure", async () => {

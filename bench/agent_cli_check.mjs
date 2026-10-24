@@ -4,7 +4,10 @@
 // report as JSON), then verifies the result from the app side (timeline history + audit log).
 // Uses the CLIs' own accounts (model usage is billed to them). The user's global CLI configuration is not modified:
 // Claude Code gets --mcp-config/--strict-mcp-config, Codex gets -c overrides.
-//   node bench/agent_cli_check.mjs [claude|codex|both]     (CODEX_MODEL=<slug> overrides the Codex model for this run)
+//   node bench/agent_cli_check.mjs [claude|codex|both] [skill|plan]   (CODEX_MODEL=<slug> overrides the Codex model)
+//   "skill": find a project, run the podcast-cleanup skill. "plan" (needs a local speech model): analyse the speech,
+//   look at a frame, apply an edit plan with cuts + animated captions, look at the rendered result and report the
+//   caption words it SEES in the image (proves the agent receives the frames).
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -15,6 +18,7 @@ import { binaries, run } from "../src/services/ffmpeg.js";
 
 const APP = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const which = process.argv[2] || "both";
+const flow = process.argv[3] || "skill";
 const ud = fs.mkdtempSync(path.join(os.tmpdir(), "montaj-cli-"));
 const work = fs.mkdtempSync(path.join(os.tmpdir(), "montaj-cli-work-")); // empty cwd for the CLIs
 const allowed = path.join(ud, "_allowed");
@@ -41,11 +45,26 @@ function exec(cmd, args, opts = {}) {
     p.on("error", (e) => { clearTimeout(timer); resolve({ code: -1, out, err: String(e), ms: Date.now() - t0 }); });
   });
 }
+const TASK_PLAN = (project) => `You can use the "montaj-studio" MCP tools (a local video editor). Edit the talking video in project "${project}" into a vertical reel:
+1) project_list → find "${project}"; project_inspect → its mediaId and mainTimelineId; timeline_inspect → revision.
+2) media_analyze_speech (language "en", style "natural") and media_frames (count 1) to understand the footage.
+3) Write ONE edit plan (edit_plan_schema shows the format): canvas 9:16 with blur background, cuts = the suggestedCuts (with their reasons), captions with template "karaoke-yellow".
+4) edit_plan_validate, then edit_plan_apply with expectedRevision.
+5) timeline_frames with timesUs [3000000] and look at the image.
+Then reply with only one line of JSON: {"before": <durationUs before>, "after": <durationUs after>, "undoLabel": "<undoLabel>", "cuts": <number of cuts>, "captionText": "<the caption words you can read in the rendered frame>"}`;
+
 const lastJson = (text) => { const m = [...String(text).matchAll(/\{[^{}]*"before"[^{}]*\}/g)].pop(); try { return m ? JSON.parse(m[0]) : null; } catch { return null; } };
 const toml = (v) => (Array.isArray(v) ? `[${v.map(toml).join(", ")}]` : typeof v === "object" ? `{ ${Object.entries(v).map(([k, x]) => `${k} = ${toml(x)}`).join(", ")} }` : JSON.stringify(v));
 
 const ff = binaries().ffmpeg;
-await run(ff, ["-hide_banner", "-y", "-f", "lavfi", "-i", "testsrc2=size=640x360:rate=30:duration=5", "-f", "lavfi", "-i", "sine=frequency=440:duration=5",
+if (flow === "plan") {
+  const ssml = `<speak version="1.0" xmlns="http://www.w3.org/2001/10/synthesis" xml:lang="en-US">So today I want to show you, um, three editing tricks. <break time="1500ms"/> The first trick is to cut the silence. The first trick is to cut every silence between sentences. <break time="800ms"/> The second trick is to add captions, because most people watch without sound.</speak>`;
+  const wav = path.join(allowed, "talk.wav");
+  await exec("powershell", ["-NoProfile", "-Command", `Add-Type -AssemblyName System.Speech; $s = New-Object System.Speech.Synthesis.SpeechSynthesizer; $s.SetOutputToWaveFile('${wav}'); $s.SpeakSsml(@'
+${ssml}
+'@); $s.Dispose()`]);
+  await run(ff, ["-hide_banner", "-y", "-f", "lavfi", "-i", "testsrc2=size=1280x720:rate=30:duration=25", "-i", wav, "-shortest", "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac", path.join(allowed, "talk.mp4")], { timeoutMs: 120_000 });
+} else await run(ff, ["-hide_banner", "-y", "-f", "lavfi", "-i", "testsrc2=size=640x360:rate=30:duration=5", "-f", "lavfi", "-i", "sine=frequency=440:duration=5",
   "-filter_complex", "[1:a]volume='if(between(t,1.6,3.0),0,1)':eval=frame[a]", "-map", "0:v", "-map", "[a]", "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac", path.join(allowed, "talk.mp4")], { timeoutMs: 120_000 });
 
 const app = await electron.launch({ args: [APP], cwd: APP, env: { ...process.env, MONTAJ_USER_DATA: ud, MONTAJ_PIPE: PIPE, REALM_DISABLE_ANALYTICS: "1" } });
@@ -60,6 +79,7 @@ async function prepare(label) {
   const imp = await api("media.import", p.id, [path.join(allowed, "talk.mp4")]);
   await api("timeline.exec", p.mainTimelineId, "addMedia", { mediaId: imp.imported[0].id });
   const c = await api("agents.createClient", { name: `${label} CLI`, scopes: ["read", "media", "edit", "skills.run"], projects: [p.id], importRoots: [] });
+  if (flow === "plan") await api("timeline.exec", p.mainTimelineId, "setCanvas", { ratio: "original" });
   return { project: p, client: c };
 }
 
@@ -68,6 +88,21 @@ async function verify(label, { project, client }, res) {
   const audit = (await api("agents.audit", 500)).filter((e) => e.clientId === client.client.id);
   const reply = lastJson(res.out);
   const durationUs = tl.timeline.tracks.reduce((m, t) => Math.max(m, ...t.segments.map((s) => s.start + s.duration), 0), 0);
+  if (flow === "plan") {
+    const caps = tl.timeline.tracks.flatMap((t) => t.segments).filter((s) => s.text?.caption);
+    const ok = (op) => audit.some((e) => e.op === op && e.ok);
+    // The caption shown at 3.0 s, to compare with what the agent says it read in the image.
+    const shown = caps.find((s) => s.start <= 3_000_000 && s.start + s.duration > 3_000_000)?.text.content || "";
+    const norm = (x) => String(x || "").toLowerCase().replace(/[^a-z0-9 ]/g, "").split(/\s+/).filter(Boolean);
+    const overlap = norm(reply?.captionText).filter((w) => norm(shown).includes(w)).length;
+    return {
+      agent: label, flow, exitCode: res.code, seconds: Math.round(res.ms / 1000), reply,
+      app: { undoLabel: tl.history.undoLabel, durationUs, captionPages: caps.length, captionAt3s: shown, calls: audit.map((e) => `${e.op}:${e.ok ? "ok" : e.code}`) },
+      pass: /^plan:/.test(tl.history.undoLabel || "") && durationUs < 19_000_000 && caps.length > 0 && ["media_analyze_speech", "media_frames", "edit_plan_validate", "edit_plan_apply", "timeline_frames"].every(ok) && overlap >= 2,
+      readCaptionWordsMatching: overlap,
+      stderrTail: res.code ? res.err.slice(-1500) : undefined, stdoutTail: res.code ? String(res.out).slice(-1500) : undefined,
+    };
+  }
   return {
     agent: label, exitCode: res.code, seconds: Math.round(res.ms / 1000), reply,
     app: { undoLabel: tl.history.undoLabel, durationUs, calls: audit.map((e) => `${e.op}:${e.ok ? "ok" : e.code}`), hello: audit.some((e) => e.op === "hello" && e.ok) },
@@ -85,7 +120,7 @@ try {
     fs.writeFileSync(cfgFile, JSON.stringify(ctx.client.config.json, null, 1));
     // Run it as from the user's own terminal: drop variables inherited from a host Claude session (they redirect auth).
     const env = Object.fromEntries(Object.entries(process.env).filter(([k]) => !/^(CLAUDE|ANTHROPIC)/i.test(k)));
-    const res = await exec("claude", ["-p", TASK(ctx.project.name), "--mcp-config", cfgFile, "--strict-mcp-config", "--allowedTools", "mcp__montaj-studio", "--output-format", "json", "--max-turns", "20"], { env });
+    const res = await exec("claude", ["-p", (flow === "plan" ? TASK_PLAN : TASK)(ctx.project.name), "--mcp-config", cfgFile, "--strict-mcp-config", "--allowedTools", "mcp__montaj-studio", "--output-format", "json", "--max-turns", flow === "plan" ? "40" : "20"], { env });
     let text = res.out;
     try { text = JSON.parse(res.out).result; } catch { /* plain text */ }
     results.push(await verify("Claude Code", ctx, { ...res, out: text }));
@@ -94,7 +129,7 @@ try {
     const ctx = await prepare("Codex");
     const srv = ctx.client.config.json.mcpServers["montaj-studio"];
     const o = (k, v) => ["-c", `mcp_servers.montaj-studio.${k}=${toml(v)}`];
-    const res = await exec("codex", ["exec", "--skip-git-repo-check", "-s", "read-only", ...o("command", srv.command), ...o("args", srv.args), ...o("env", srv.env), "-c", 'approval_policy="never"', ...(process.env.CODEX_MODEL ? ["-c", `model=${JSON.stringify(process.env.CODEX_MODEL)}`, "-c", 'model_reasoning_effort="medium"'] : []), TASK(ctx.project.name)], {});
+    const res = await exec("codex", ["exec", "--skip-git-repo-check", "-s", "read-only", ...o("command", srv.command), ...o("args", srv.args), ...o("env", srv.env), "-c", 'approval_policy="never"', ...(process.env.CODEX_MODEL ? ["-c", `model=${JSON.stringify(process.env.CODEX_MODEL)}`, "-c", 'model_reasoning_effort="medium"'] : []), (flow === "plan" ? TASK_PLAN : TASK)(ctx.project.name)], {});
     results.push(await verify("Codex", ctx, res));
   }
 } finally {
@@ -102,6 +137,6 @@ try {
 }
 const out = { date: new Date().toISOString(), versions: { claude: (await exec("claude", ["--version"], { shell: true })).out.trim(), codex: (await exec("codex", ["--version"], { shell: true })).out.trim() }, results };
 fs.mkdirSync(path.join(APP, "bench", "results"), { recursive: true });
-fs.writeFileSync(path.join(APP, "bench", "results", "agent_cli_check.json"), JSON.stringify(out, null, 1));
+fs.writeFileSync(path.join(APP, "bench", "results", flow === "plan" ? "agent_cli_plan.json" : "agent_cli_check.json"), JSON.stringify(out, null, 1));
 console.log(JSON.stringify(out, null, 1));
 try { fs.rmSync(ud, { recursive: true, force: true }); fs.rmSync(work, { recursive: true, force: true }); } catch { /* best effort */ }

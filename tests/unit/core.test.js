@@ -279,8 +279,16 @@ test("export graph: only the range is processed; the main track is a concat sequ
   assert.ok(seeks.includes(8), "clip 1 is decoded from the range start");
   assert.ok(!seeks.some((x) => x < 0));
   assert.match(graph, /\[vout\]/);
-  assert.match(graph, /trim=end=14,setpts=PTS-STARTPTS,scale=out_color_matrix/);
-  assert.doesNotMatch(graph, /trim=start=8/); // nothing before the range is rendered and thrown away
+  // Untouched BT.709 clips: the composite stays YUV. Only the dissolve windows are trimmed, THEN converted to RGBA
+  // for the opacity ramp, then to YUVA with the BT.709 matrix and blended in YUV.
+  assert.match(graph, /trim=end=14,setpts=PTS-STARTPTS,format=yuv420p\[vout\]/);
+  assert.match(graph, /trim=start_pts=53:end_pts=68\[(v\d+)\];\n\[\1\]scale=in_color_matrix=bt709:in_range=tv,format=rgba/);
+  assert.equal((graph.match(/scale=out_color_matrix=bt709:out_range=tv,format=yuva420p/g) || []).length, 2);
+  assert.equal((graph.match(/overlay=[^;]*format=yuv420:/g) || []).length, 2);
+  assert.doesNotMatch(graph, /[^a]trim=start=8/); // no video before the range is rendered and thrown away
+  // Audio: clips cut from the same file share one input (m1 is used twice), each part cut from it with atrim.
+  assert.equal(inputs.filter((x, i) => x === "-vn" && inputs[i + 5] === "-i" && inputs[i + 6] === "m1.mp4").length, 1);
+  assert.match(graph, /asplit=2/);
   assert.match(graph, /adelay=12000\|12000/); // clip 3 audio at its range-local position
   // A range that starts inside a transition window: the ramp starts where the window already is (p = 0.3).
   const inside = buildExport(tl, { ...opts, range: { startUs: 9.9e6, endUs: 11e6 } }).graph;

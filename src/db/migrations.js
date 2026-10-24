@@ -14,6 +14,11 @@ export const MIGRATIONS = [
       for (const s of newRealm.objects("Segment")) if (!s.colorTag) s.colorTag = "";
     },
   },
+  {
+    from: 2,
+    description: "v3: TextStyle.caption (optional JSON of a word-timed caption page). New optional field; existing data is unchanged.",
+    run() { /* nothing to convert */ },
+  },
 ];
 
 export function onMigration(oldRealm, newRealm) {
@@ -21,9 +26,14 @@ export function onMigration(oldRealm, newRealm) {
   for (const step of MIGRATIONS) if (step.from >= from && step.from < newRealm.schemaVersion) step.run(oldRealm, newRealm);
 }
 
+const withoutCaption = (s) => { if (s.name !== "TextStyle") return s; const p = { ...s.properties }; delete p.caption; return { ...s, properties: p }; };
+
+/** The v2 schema (before TextStyle.caption), for the v2 → v3 upgrade test. */
+export function legacySchemaV2() { return ALL_SCHEMAS.map(withoutCaption); }
+
 /** The v1 schema, kept so tests can create a legacy database and verify the upgrade path. */
 export function legacySchemaV1() {
-  return ALL_SCHEMAS.map((s) => {
+  return legacySchemaV2().map((s) => {
     if (s.name === "Project") { const p = { ...s.properties }; delete p.lastOpenedAt; return { ...s, properties: p }; }
     if (s.name === "Segment") { const p = { ...s.properties }; delete p.colorTag; delete p.audioDetached; return { ...s, properties: p }; }
     return s;
