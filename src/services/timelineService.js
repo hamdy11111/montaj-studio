@@ -185,6 +185,7 @@ export class TimelineService {
       }
       case "pasteSegments": return this.commit(timelineId, "paste", (tl) => ops.pasteSegments(tl, a.clips, a.atUs, o));
       case "pasteAttributes": return this.commit(timelineId, "pasteAttributes", (tl) => ops.pasteAttributes(tl, a.ids, a.attrs));
+      case "setBehindPerson": return this.commit(timelineId, a.value === false ? "frontOfPerson" : "behindPerson", (tl) => ops.setBehindPerson(tl, a.ids || [], a.value !== false));
       case "group": return this.commit(timelineId, "group", (tl) => ops.group(tl, a.ids));
       case "ungroup": return this.commit(timelineId, "ungroup", (tl) => ops.ungroup(tl, a.ids));
       case "setDisabled": return this.commit(timelineId, "disable", (tl) => { for (const id of a.ids) { const f = findSegment(tl, id); if (f) f.segment.disabled = !!a.value; } return a.ids.length; });

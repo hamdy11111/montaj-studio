@@ -3,6 +3,7 @@
 // size (room for the pop scale), so the exporter can play the states as one image sequence at a fixed position.
 // Words are drawn one by one (each shaped on its own, so Arabic joins correctly) and lines run right-to-left when
 // the page is Arabic.
+import { fontStack } from "../../core/fonts.js";
 import { CAPTION_TEMPLATES, captionWords, captionStates, stateKey, isArabicText, emphasisFor } from "../../core/captionTemplates.js";
 
 const MAX_POP = 1.25;
@@ -13,7 +14,7 @@ function layout(text, W, H) {
   const words = captionWords(text, 0);
   const rtl = isArabicText(words.map((w) => w.t).join(" "));
   const emph = new Set(text.caption.emphasis ?? emphasisFor(words, [], { auto: true }));
-  const fontFamily = `"${(ov.font || tpl.font).replace(/"/g, "")}", "Segoe UI", Tahoma, Arial, sans-serif`;
+  const fontFamily = fontStack(ov.font || tpl.font);
   const g = document.createElement("canvas").getContext("2d");
   const maxW = W * (W < H ? 0.84 : 0.7);
   let px = ((ov.size || tpl.size) * H) / 200;

@@ -4,6 +4,7 @@ import { uid, US, clamp, deepClone } from "./util.js";
 import { newSegment, newTrack, TRACK_ACCEPTS, KIND_TO_TRACK, findSegment, mainTrack, sortSegments, timelineDuration } from "./model.js";
 import { timelineDurationFor } from "./speed.js";
 import { AppError } from "./validation.js";
+import { BEHIND, isBehindTrack, canGoBehind } from "./cutout.js";
 
 export const MIN_DUR = Math.round(US / 30); // one frame at 30fps
 const end = (s) => s.start + s.duration;
@@ -98,7 +99,8 @@ export function cleanupTracks(tl) {
 /** Find a track of `type` free over [start, start+dur) or create a new one above. */
 export function trackFor(tl, type, start, dur, excludeId) {
   const probe = { start, duration: dur };
-  const candidates = tl.tracks.filter((t) => t.type === type && !t.isMain && !t.locked).sort((a, b) => a.order - b.order);
+  // Tracks with a role (behind the person) only take what is put there on purpose.
+  const candidates = tl.tracks.filter((t) => t.type === type && !t.isMain && !t.locked && !t.role).sort((a, b) => a.order - b.order);
   for (const t of candidates) if (!t.segments.some((s) => s.id !== excludeId && overlaps(s, probe))) return t;
   const track = newTrack(type, { order: tl.tracks.length });
   tl.tracks.push(track);
@@ -137,6 +139,41 @@ export function addMediaSegment(tl, media, { atUs = null, toMain = true, setting
   }
   cleanupTracks(tl);
   return seg;
+}
+
+/**
+ * Put layers behind the person (or back in front): behind layers move to "behind" tracks right above the main
+ * track, under every other track; the cutout of the person is drawn over them at render time (core/cutout.js).
+ * Returns the ids moved.
+ */
+export function setBehindPerson(tl, ids, behind = true) {
+  const main = mainTrack(tl);
+  const moved = [];
+  for (const id of ids) {
+    const f = findSegment(tl, id);
+    if (!f) throw new AppError("NOT_FOUND", "err.segmentNotFound", { segId: id });
+    const { track, segment: seg } = f;
+    if (track.isMain || !canGoBehind(seg)) throw new AppError("VALIDATION", "err.cannotGoBehind", { segId: id, kind: seg.kind });
+    if (isBehindTrack(track) === behind) continue;
+    assertUnlocked(track);
+    track.segments = track.segments.filter((s) => s.id !== id);
+    const type = KIND_TO_TRACK[seg.kind];
+    let dest;
+    if (behind) {
+      // A free behind track of this type, else a new one on top of the behind stack (still under everything else).
+      const stack = tl.tracks.filter((t) => isBehindTrack(t)).sort((a, b) => a.order - b.order);
+      dest = stack.find((t) => t.type === type && !t.locked && !t.segments.some((s) => overlaps(s, seg)));
+      if (!dest) {
+        const top = Math.max(main.order, ...stack.map((t) => t.order));
+        dest = newTrack(type, { order: top + 0.5, role: BEHIND });
+        tl.tracks.push(dest);
+      }
+    } else dest = trackFor(tl, type, seg.start, seg.duration);
+    dest.segments.push(seg);
+    moved.push(id);
+  }
+  cleanupTracks(tl);
+  return moved;
 }
 
 /** Insert an already-built segment (text, sticker, effect, filter, adjust, audio...). */

@@ -94,14 +94,29 @@ export async function applyPlan(ctx, timelineId, plan, { expectedRevision, job }
     // On-screen text tied to source spans.
     step(0.7, "texts");
     let texts = 0;
+    const behind = []; // texts / graphics drawn behind the person
     for (const [i, x] of (plan.texts || []).entries()) {
       const spans = mapSpan(pieces(), x.mediaId, x.fromUs, x.toUs);
       if (!spans.length) { skipped.push(`texts/${i}: span cut out`); continue; }
       const t0 = spans[0].t0, t1 = spans[spans.length - 1].t1;
-      await exec("addSegment", { kind: "text", atUs: t0, durationUs: Math.max(300_000, t1 - t0), init: { name: x.content.slice(0, 40), text: { ...DEFAULT_TEXT, ...(TEXT_PRESETS[x.preset] || {}), content: x.content, ...(x.size ? { size: x.size } : {}) }, transform: { y: TEXT_Y[x.position || "center"] } } });
+      const r = await exec("addSegment", { kind: "text", atUs: t0, durationUs: Math.max(300_000, t1 - t0), init: { name: x.content.slice(0, 40), text: { ...DEFAULT_TEXT, ...(TEXT_PRESETS[x.preset] || {}), content: x.content, ...(x.size ? { size: x.size } : {}) }, transform: { y: TEXT_Y[x.position || "center"] } } });
+      if (x.behindPerson) behind.push(r.result);
       texts++;
     }
     if (texts) done.push(`texts (${texts})`);
+
+    // Motion graphics tied to source spans (validated by the timeline_add_graphic operation).
+    let graphics = 0;
+    for (const [i, x] of (plan.graphics || []).entries()) {
+      const spans = mapSpan(pieces(), x.mediaId, x.fromUs, x.toUs);
+      if (!spans.length) { skipped.push(`graphics/${i}: span cut out`); continue; }
+      const t0 = spans[0].t0, t1 = spans[spans.length - 1].t1;
+      const r = await op("timeline_add_graphic", { template: x.template, params: x.params || {}, atUs: t0, durationUs: Math.max(400_000, t1 - t0) });
+      if (x.behindPerson) behind.push(r.clipId);
+      graphics++;
+    }
+    if (graphics) done.push(`graphics (${graphics})`);
+    if (behind.length) { await exec("setBehindPerson", { ids: behind, value: true }); done.push(`behind the person (${behind.length})`); }
 
     step(0.8, "look & audio");
     if (plan.filter) { await op("timeline_add_layer", { kind: "filter", settings: { preset: plan.filter.preset, intensity: plan.filter.intensity ?? 80 } }); done.push(`look ${plan.filter.preset}`); }

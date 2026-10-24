@@ -11,6 +11,7 @@ import { defaultBindings, applyBinding, findConflicts, COMMANDS, checkBinding } 
 import { planFromText } from "../core/assistant.js";
 import { uid } from "../core/util.js";
 import { CAPTION_TEMPLATES } from "../core/captionTemplates.js";
+import { cutoutMedia } from "../core/cutout.js";
 import { applyCaptions, restyleCaptions, transact } from "../agent/captions.js";
 
 const str = (v, field) => { if (typeof v !== "string") throw new AppError("VALIDATION", "err.string", { field }); return v; };
@@ -165,8 +166,15 @@ export function registerIpc({ getServices, getAgents = () => null, getWindow, ap
     "captions.status": (force) => S().captions.status(!!force),
     "captions.templates": () => Object.entries(CAPTION_TEMPLATES).map(([tid, t]) => ({ id: tid, name: t.name, use: t.use })),
     // Animated word-timed captions for the open timeline (same code path as agents; one undo step).
-    "captions.generatePro": async (tid, o) => { const ctx = A().userContext(); const q = obj(o); return transact(ctx, id(tid), `captions:${q.template || "karaoke-yellow"}`, undefined, () => applyCaptions(ctx, id(tid), { template: q.template ? str(q.template, "template") : undefined, language: q.language ? str(q.language, "language") : "auto", keywords: q.keywords ? arr(q.keywords, "keywords").map(String) : [], reveal: !!q.reveal })); },
+    "captions.generatePro": async (tid, o) => { const ctx = A().userContext(); const q = obj(o); return transact(ctx, id(tid), `captions:${q.template || "karaoke-yellow"}`, undefined, () => applyCaptions(ctx, id(tid), { template: q.template ? str(q.template, "template") : undefined, language: q.language ? str(q.language, "language") : "auto", keywords: q.keywords ? arr(q.keywords, "keywords").map(String) : [], reveal: !!q.reveal, corrections: q.corrections ? arr(q.corrections, "corrections").map((c) => ({ from: String(c?.from ?? ""), to: String(c?.to ?? "") })) : undefined })); },
     "captions.restyle": (tid, o) => restyleCaptions(A().userContext(), id(tid), obj(o)),
+    // Text behind the person: person mattes of the videos the cutouts of a timeline use (made once, cached).
+    "mattes.status": (force) => S().mattes.status(!!force),
+    "mattes.prepare": async (tid) => {
+      const need = cutoutMedia(S().timelines.get(id(tid)).timeline).filter((m) => !S().mattes.ready(m));
+      for (const [i, m] of need.entries()) await S().mattes.ensure(m, { onProgress: (p) => notifyAll("matte:progress", { mediaId: m, progress: (i + p) / need.length }) });
+      return { made: need.length };
+    },
     "captions.importFile": (file) => S().captions.importFile(str(file, "file")),
     "captions.segmentsFromCues": (cues, o) => S().captions.segmentsFromCues(arr(cues, "cues"), obj(o)),
     "captions.transcribe": (o) => S().captions.transcribe(obj(o)),

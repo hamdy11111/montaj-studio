@@ -6,12 +6,14 @@ import { call, on } from "./api.js";
 import { app, pushNotification } from "./state.js";
 import { toast } from "./ui/toast.js";
 import { modal } from "./ui/modal.js";
+import { installFonts } from "./fonts.js";
 import { renderHome } from "./pages/home.js";
 import { formatBytes } from "../core/util.js";
 
 let disposeRoute = null;
 
 async function boot() {
+  installFonts();
   try {
     const [info, settings, caps] = await Promise.all([call("app.info"), call("settings.all"), call("app.capabilities").catch(() => null)]);
     app.info = info; app.settings = settings; app.caps = caps;

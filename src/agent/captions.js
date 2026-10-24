@@ -5,11 +5,15 @@ import { AppError } from "../core/validation.js";
 import { deepClone } from "../core/util.js";
 import { DEFAULT_TEXT } from "../core/model.js";
 import { mainPieces } from "../core/editPlan.js";
+import { correctWords } from "../core/speech.js";
 import { CAPTION_TEMPLATES, paginate, emphasisFor, captionPosY, captionQc, isArabicText } from "../core/captionTemplates.js";
 
 export async function checkCaptions(ctx, opts = {}) {
   const errors = [];
   if (opts.template && !CAPTION_TEMPLATES[opts.template]) errors.push({ path: "captions/template", message: `unknown template ${opts.template} (see captions_templates)` });
+  const cor = opts.corrections;
+  if (cor !== undefined && (!Array.isArray(cor) || cor.length > 300 || cor.some((c) => !c || typeof c.from !== "string" || typeof c.to !== "string" || !c.from.trim() || c.from.length > 120 || c.to.length > 120)))
+    errors.push({ path: "captions/corrections", message: "corrections: up to 300 { from, to } strings (≤ 120 characters)" });
   if (!(await ctx.services.captions.status()).words) errors.push({ path: "captions", message: "no local speech model is configured (Settings › Providers)" });
   return errors;
 }
@@ -45,7 +49,7 @@ export async function applyCaptions(ctx, timelineId, opts = {}) {
   if (errors.length) throw new AppError(errors.some((e) => e.path === "captions") ? "PROVIDER" : "VALIDATION", errors.some((e) => e.path === "captions") ? "err.whisperNotConfigured" : "err.planInvalid", { errors });
   const T = ctx.services.timelines;
   const exec = (cmd, args) => T.execAs(ctx.source, timelineId, cmd, args);
-  const words = await timelineWords(ctx, timelineId, { language: opts.language || "auto" });
+  const words = correctWords(await timelineWords(ctx, timelineId, { language: opts.language || "auto" }), opts.corrections || []);
   if (!words.length) throw new AppError("VALIDATION", "err.noSpeech");
   const tl = T.get(timelineId).timeline;
   if (opts.replace !== false) {

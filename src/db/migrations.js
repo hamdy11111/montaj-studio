@@ -19,6 +19,16 @@ export const MIGRATIONS = [
     description: "v3: TextStyle.caption (optional JSON of a word-timed caption page). New optional field; existing data is unchanged.",
     run() { /* nothing to convert */ },
   },
+  {
+    from: 3,
+    description: "v4: TextStyle.graphic (optional JSON of a motion-graphics template and its parameters). New optional field.",
+    run() { /* nothing to convert */ },
+  },
+  {
+    from: 4,
+    description: "v5: VideoFx.matte (\"none\" | \"person\") and Track.role (\"behind\" = behind the person). New fields with defaults.",
+    run(oldRealm, newRealm) { for (const s of newRealm.objects("Segment")) if (s.videoFx && !s.videoFx.matte) s.videoFx.matte = "none"; },
+  },
 ];
 
 export function onMigration(oldRealm, newRealm) {
@@ -26,10 +36,17 @@ export function onMigration(oldRealm, newRealm) {
   for (const step of MIGRATIONS) if (step.from >= from && step.from < newRealm.schemaVersion) step.run(oldRealm, newRealm);
 }
 
-const withoutCaption = (s) => { if (s.name !== "TextStyle") return s; const p = { ...s.properties }; delete p.caption; return { ...s, properties: p }; };
+const without = (name, ...keys) => (s) => { if (s.name !== name) return s; const p = { ...s.properties }; for (const k of keys) delete p[k]; return { ...s, properties: p }; };
+const withoutText = (...keys) => without("TextStyle", ...keys);
+
+/** The v4 schema (before VideoFx.matte), for the v4 → v5 upgrade test. */
+export function legacySchemaV4() { return ALL_SCHEMAS.map(without("VideoFx", "matte")).map(without("Track", "role")); }
+
+/** The v3 schema (before TextStyle.graphic), for the v3 → v4 upgrade test. */
+export function legacySchemaV3() { return legacySchemaV4().map(withoutText("graphic")); }
 
 /** The v2 schema (before TextStyle.caption), for the v2 → v3 upgrade test. */
-export function legacySchemaV2() { return ALL_SCHEMAS.map(withoutCaption); }
+export function legacySchemaV2() { return legacySchemaV4().map(withoutText("graphic", "caption")); }
 
 /** The v1 schema, kept so tests can create a legacy database and verify the upgrade path. */
 export function legacySchemaV1() {

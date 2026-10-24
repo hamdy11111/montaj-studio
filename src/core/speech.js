@@ -154,3 +154,29 @@ export function analyzeSpeech(tr, { style = "natural", pauseMinUs = 500_000 } = 
     suggestedCuts: cuts,
   };
 }
+
+/**
+ * Fix recognition mistakes in timed words ([{ t, s, e }]) before captions are built: corrections are
+ * [{ from, to }] — a word or phrase matched ignoring case, diacritics and punctuation. The replacement takes the
+ * matched words' time span (split evenly between its words) and keeps the sentence-ending punctuation.
+ */
+export function correctWords(words, corrections = []) {
+  let out = words.slice();
+  for (const c of corrections) {
+    const from = String(c.from || "").split(/\s+/).map(normWord).filter(Boolean);
+    const to = String(c.to ?? "").split(/\s+/).filter(Boolean);
+    if (!from.length) continue;
+    const next = [];
+    for (let i = 0; i < out.length;) {
+      if (from.every((f, k) => out[i + k] && normWord(out[i + k].t) === f)) {
+        const last = out[i + from.length - 1], s = out[i].s, e = last.e;
+        const end = /[.!?؟،,…]+$/.exec(last.t)?.[0] || "";
+        to.forEach((w, k) => next.push({ ...out[i], t: k === to.length - 1 && end && !/[.!?؟،,…]$/.test(w) ? w + end : w, s: Math.round(s + ((e - s) * k) / to.length), e: Math.round(s + ((e - s) * (k + 1)) / to.length) }));
+        i += from.length;
+      } else next.push(out[i++]);
+    }
+    out = next;
+  }
+  return out;
+}
+

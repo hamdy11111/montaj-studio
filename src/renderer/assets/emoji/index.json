@@ -1,0 +1,427 @@
+{
+"fire": {
+"name": "Fire",
+"file": "fire.png",
+"bytes": 26826
+},
+"thinking-face": {
+"name": "Thinking face",
+"file": "thinking-face.png",
+"bytes": 45573
+},
+"red-heart": {
+"name": "Red heart",
+"file": "red-heart.png",
+"bytes": 29389
+},
+"thumbs-up": {
+"name": "Thumbs up",
+"file": "thumbs-up.png",
+"bytes": 29710
+},
+"clapping-hands": {
+"name": "Clapping hands",
+"file": "clapping-hands.png",
+"bytes": 34774
+},
+"rocket": {
+"name": "Rocket",
+"file": "rocket.png",
+"bytes": 36274
+},
+"star": {
+"name": "Star",
+"file": "star.png",
+"bytes": 24449
+},
+"sparkles": {
+"name": "Sparkles",
+"file": "sparkles.png",
+"bytes": 21948
+},
+"check-mark-button": {
+"name": "Check mark button",
+"file": "check-mark-button.png",
+"bytes": 34052
+},
+"cross-mark": {
+"name": "Cross mark",
+"file": "cross-mark.png",
+"bytes": 23713
+},
+"warning": {
+"name": "Warning",
+"file": "warning.png",
+"bytes": 22076
+},
+"light-bulb": {
+"name": "Light bulb",
+"file": "light-bulb.png",
+"bytes": 22450
+},
+"money-bag": {
+"name": "Money bag",
+"file": "money-bag.png",
+"bytes": 34132
+},
+"hundred-points": {
+"name": "Hundred points",
+"file": "hundred-points.png",
+"bytes": 35871
+},
+"face-with-tears-of-joy": {
+"name": "Face with tears of joy",
+"file": "face-with-tears-of-joy.png",
+"bytes": 44153
+},
+"exploding-head": {
+"name": "Exploding head",
+"file": "exploding-head.png",
+"bytes": 47230
+},
+"face-screaming-in-fear": {
+"name": "Face screaming in fear",
+"file": "face-screaming-in-fear.png",
+"bytes": 45002
+},
+"pleading-face": {
+"name": "Pleading face",
+"file": "pleading-face.png",
+"bytes": 44074
+},
+"party-popper": {
+"name": "Party popper",
+"file": "party-popper.png",
+"bytes": 42512
+},
+"trophy": {
+"name": "Trophy",
+"file": "trophy.png",
+"bytes": 31910
+},
+"eyes": {
+"name": "Eyes",
+"file": "eyes.png",
+"bytes": 38982
+},
+"backhand-index-pointing-down": {
+"name": "Backhand index pointing down",
+"file": "backhand-index-pointing-down.png",
+"bytes": 24723
+},
+"backhand-index-pointing-right": {
+"name": "Backhand index pointing right",
+"file": "backhand-index-pointing-right.png",
+"bytes": 24304
+},
+"backhand-index-pointing-left": {
+"name": "Backhand index pointing left",
+"file": "backhand-index-pointing-left.png",
+"bytes": 24532
+},
+"backhand-index-pointing-up": {
+"name": "Backhand index pointing up",
+"file": "backhand-index-pointing-up.png",
+"bytes": 24750
+},
+"raising-hands": {
+"name": "Raising hands",
+"file": "raising-hands.png",
+"bytes": 32215
+},
+"flexed-biceps": {
+"name": "Flexed biceps",
+"file": "flexed-biceps.png",
+"bytes": 30206
+},
+"brain": {
+"name": "Brain",
+"file": "brain.png",
+"bytes": 37483
+},
+"alarm-clock": {
+"name": "Alarm clock",
+"file": "alarm-clock.png",
+"bytes": 42751
+},
+"hourglass-done": {
+"name": "Hourglass done",
+"file": "hourglass-done.png",
+"bytes": 33015
+},
+"chart-increasing": {
+"name": "Chart increasing",
+"file": "chart-increasing.png",
+"bytes": 42157
+},
+"chart-decreasing": {
+"name": "Chart decreasing",
+"file": "chart-decreasing.png",
+"bytes": 45753
+},
+"gem-stone": {
+"name": "Gem stone",
+"file": "gem-stone.png",
+"bytes": 18806
+},
+"crown": {
+"name": "Crown",
+"file": "crown.png",
+"bytes": 32050
+},
+"camera": {
+"name": "Camera",
+"file": "camera.png",
+"bytes": 35211
+},
+"movie-camera": {
+"name": "Movie camera",
+"file": "movie-camera.png",
+"bytes": 34661
+},
+"clapper-board": {
+"name": "Clapper board",
+"file": "clapper-board.png",
+"bytes": 29193
+},
+"scissors": {
+"name": "Scissors",
+"file": "scissors.png",
+"bytes": 37231
+},
+"sparkling-heart": {
+"name": "Sparkling heart",
+"file": "sparkling-heart.png",
+"bytes": 36392
+},
+"collision": {
+"name": "Collision",
+"file": "collision.png",
+"bytes": 30796
+},
+"zany-face": {
+"name": "Zany face",
+"file": "zany-face.png",
+"bytes": 44995
+},
+"smiling-face-with-sunglasses": {
+"name": "Smiling face with sunglasses",
+"file": "smiling-face-with-sunglasses.png",
+"bytes": 47859
+},
+"nerd-face": {
+"name": "Nerd face",
+"file": "nerd-face.png",
+"bytes": 44701
+},
+"loudly-crying-face": {
+"name": "Loudly crying face",
+"file": "loudly-crying-face.png",
+"bytes": 38405
+},
+"face-with-monocle": {
+"name": "Face with monocle",
+"file": "face-with-monocle.png",
+"bytes": 45911
+},
+"victory-hand": {
+"name": "Victory hand",
+"file": "victory-hand.png",
+"bytes": 27342
+},
+"waving-hand": {
+"name": "Waving hand",
+"file": "waving-hand.png",
+"bytes": 34079
+},
+"folded-hands": {
+"name": "Folded hands",
+"file": "folded-hands.png",
+"bytes": 23407
+},
+"red-question-mark": {
+"name": "Red question mark",
+"file": "red-question-mark.png",
+"bytes": 20217
+},
+"red-exclamation-mark": {
+"name": "Red exclamation mark",
+"file": "red-exclamation-mark.png",
+"bytes": 9853
+},
+"bell": {
+"name": "Bell",
+"file": "bell.png",
+"bytes": 25849
+},
+"wrapped-gift": {
+"name": "Wrapped gift",
+"file": "wrapped-gift.png",
+"bytes": 31757
+},
+"high-voltage": {
+"name": "High voltage",
+"file": "high-voltage.png",
+"bytes": 15517
+},
+"sun": {
+"name": "Sun",
+"file": "sun.png",
+"bytes": 34812
+},
+"rainbow": {
+"name": "Rainbow",
+"file": "rainbow.png",
+"bytes": 34967
+},
+"glowing-star": {
+"name": "Glowing star",
+"file": "glowing-star.png",
+"bytes": 28165
+},
+"locked": {
+"name": "Locked",
+"file": "locked.png",
+"bytes": 30342
+},
+"unlocked": {
+"name": "Unlocked",
+"file": "unlocked.png",
+"bytes": 30397
+},
+"mobile-phone": {
+"name": "Mobile phone",
+"file": "mobile-phone.png",
+"bytes": 26886
+},
+"laptop": {
+"name": "Laptop",
+"file": "laptop.png",
+"bytes": 29028
+},
+"microphone": {
+"name": "Microphone",
+"file": "microphone.png",
+"bytes": 25256
+},
+"headphone": {
+"name": "Headphone",
+"file": "headphone.png",
+"bytes": 27986
+},
+"musical-notes": {
+"name": "Musical notes",
+"file": "musical-notes.png",
+"bytes": 29610
+},
+"sparkle": {
+"name": "Sparkle",
+"file": "sparkle.png",
+"bytes": 34900
+},
+"grinning-face-with-sweat": {
+"name": "Grinning face with sweat",
+"file": "grinning-face-with-sweat.png",
+"bytes": 42538
+},
+"face-with-open-mouth": {
+"name": "Face with open mouth",
+"file": "face-with-open-mouth.png",
+"bytes": 36399
+},
+"shushing-face": {
+"name": "Shushing face",
+"file": "shushing-face.png",
+"bytes": 41453
+},
+"partying-face": {
+"name": "Partying face",
+"file": "partying-face.png",
+"bytes": 50583
+},
+"smiling-face-with-hearts": {
+"name": "Smiling face with hearts",
+"file": "smiling-face-with-hearts.png",
+"bytes": 52432
+},
+"lipstick": {
+"name": "Lipstick",
+"file": "lipstick.png",
+"bytes": 20120
+},
+"barber-pole": {
+"name": "Barber pole",
+"file": "barber-pole.png",
+"bytes": 26441
+},
+"broom": {
+"name": "Broom",
+"file": "broom.png",
+"bytes": 17391
+},
+"paintbrush": {
+"name": "Paintbrush",
+"file": "paintbrush.png",
+"bytes": 18094
+},
+"artist-palette": {
+"name": "Artist palette",
+"file": "artist-palette.png",
+"bytes": 36311
+},
+"magic-wand": {
+"name": "Magic wand",
+"file": "magic-wand.png",
+"bytes": 18117
+},
+"hammer-and-wrench": {
+"name": "Hammer and wrench",
+"file": "hammer-and-wrench.png",
+"bytes": 34618
+},
+"gear": {
+"name": "Gear",
+"file": "gear.png",
+"bytes": 39892
+},
+"stopwatch": {
+"name": "Stopwatch",
+"file": "stopwatch.png",
+"bytes": 45094
+},
+"calendar": {
+"name": "Calendar",
+"file": "calendar.png",
+"bytes": 41180
+},
+"pushpin": {
+"name": "Pushpin",
+"file": "pushpin.png",
+"bytes": 26476
+},
+"megaphone": {
+"name": "Megaphone",
+"file": "megaphone.png",
+"bytes": 35931
+},
+"speech-balloon": {
+"name": "Speech balloon",
+"file": "speech-balloon.png",
+"bytes": 19211
+},
+"thought-balloon": {
+"name": "Thought balloon",
+"file": "thought-balloon.png",
+"bytes": 24491
+},
+"woman-shrugging": {
+"name": "Woman shrugging",
+"file": "woman-shrugging.png",
+"bytes": 41140
+},
+"man-facepalming": {
+"name": "Man facepalming",
+"file": "man-facepalming.png",
+"bytes": 34059
+}
+}

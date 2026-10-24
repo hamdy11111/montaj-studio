@@ -70,7 +70,7 @@ export async function openEditor(root, params) {
     compoundVersion: (id) => st.compoundVersions[id] || 0,
     compoundReady: (id) => !!st.compoundReady[id],
     reloadTimeline,
-    select, seek, exec, run, patchLive, dropItem, importDropped, importDialog, importFolder, refreshMedia, globalEdit, autoCaptions, importCaptions, deleteCaptions,
+    select, seek, exec, run, patchLive, dropItem, behindPerson, importDropped, importDialog, importFolder, refreshMedia, globalEdit, autoCaptions, importCaptions, deleteCaptions,
     applyFilterToClip, openPanel: (tab) => materials.setTab(tab), openSettings: (tab) => openSettings(tab), relayout: () => { player.lastLayout = null; player.layout(); },
     segmentAtPlayhead, clipMenu, emptyMenu, markerMenu, pickColor, coverMenu,
     onTime: (us) => { timeline.movePlayhead(us); updateTime(); },
@@ -213,6 +213,21 @@ export async function openEditor(root, params) {
   async function refreshMedia() { st.media = (await guard(() => call("media.list", st.project.id))) || st.media; materials.refresh(); timeline.render(); player.invalidate(); }
   // Thumbnails / waveforms / proxies finished (or media imported elsewhere, e.g. TTS, recording): reload the list.
   const offMedia = on("media:updated", throttle(() => refreshMedia(), 300));
+  // A person matte finished (here or for an agent): the preview loads it at once.
+  const offMatte = on("matte:ready", (e) => { for (const mid of e.mediaIds || []) player.mattes.delete(mid); player.invalidate(); });
+
+  /** Put layers behind the person (or back in front); the first time per video, its person matte is made. */
+  async function behindPerson(ids, value = true) {
+    const res = await exec("setBehindPerson", { ids, value });
+    if (!res || !value) return res;
+    const tst = toast(t("lib.matteWorking", { p: 0 }), "info", { ms: 30 * 60_000 });
+    const offP = on("matte:progress", (e) => { tst.firstChild.textContent = t("lib.matteWorking", { p: Math.round(e.progress * 100) }); });
+    try {
+      const r = await call("mattes.prepare", st.timelineId);
+      if (r.made) toast(t("lib.matteDone"), "success");
+    } catch (err) { toast(errorText(err), "error", { ms: 8000 }); } finally { offP(); tst.remove(); }
+    return res;
+  }
 
   // ------------------------------------------------------------------ import
   async function importPaths(paths, { atUs = null, toMain = true, addToTimeline = false } = {}) {
@@ -635,7 +650,7 @@ export async function openEditor(root, params) {
   return async () => {
     player.pause();
     document.removeEventListener("keydown", onKey);
-    offMedia(); offShortcuts(); offSettings(); offAgentEdit();
+    offMedia(); offMatte(); offShortcuts(); offSettings(); offAgentEdit();
     player.destroy(); timeline.destroy();
     const editSeconds = Math.round((Date.now() - st.openedAt) / 1000);
     await call("project.finalize", st.project.id, { editSeconds }).catch(() => {});

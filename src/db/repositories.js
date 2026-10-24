@@ -40,7 +40,7 @@ export class ProjectRepository {
       const tl = newTimeline(pid, { ratio: canvas.ratio || "original", width: canvas.width || 1920, height: canvas.height || 1080, fps });
       const timeline = this.realm.create("Timeline", {
         _id: tl.id, name: tl.name, order: 0, fps, isCompound: false, canvas: tl.canvas, markers: [], createdAt: now(), updatedAt: now(),
-        tracks: tl.tracks.map((t) => ({ _id: t.id, type: t.type, order: t.order, isMain: t.isMain, name: t.name, segments: [] })),
+        tracks: tl.tracks.map((t) => ({ _id: t.id, type: t.type, order: t.order, isMain: t.isMain, name: t.name, role: t.role || "", segments: [] })),
       });
       const p = this.realm.create("Project", {
         _id: pid, name: clean, createdAt: now(), updatedAt: now(), lastOpenedAt: now(), status: "active",
@@ -97,7 +97,7 @@ export class ProjectRepository {
             delete j.track;
             return this.realm.create("Segment", { ...j, _id: uid(), media: s.media || null, compoundTimeline: s.compoundTimeline ? idMap.get(s.compoundTimeline._id) || null : null });
           });
-          nt.tracks.push(this.realm.create("Track", { _id: uid(), type: tr.type, order: tr.order, isMain: tr.isMain, name: tr.name, locked: tr.locked, hidden: tr.hidden, muted: tr.muted, segments: segs }));
+          nt.tracks.push(this.realm.create("Track", { _id: uid(), type: tr.type, order: tr.order, isMain: tr.isMain, name: tr.name, locked: tr.locked, hidden: tr.hidden, muted: tr.muted, role: tr.role || "", segments: segs }));
         }
       }
       const p = this.realm.create("Project", {
@@ -174,7 +174,7 @@ export class TimelineRepository {
       const tl = newTimeline(projectId, { name: name || `Timeline ${String(p.timelines.length + 1).padStart(2, "0")}`, ...(canvas || {}), fps });
       const t = this.realm.create("Timeline", {
         _id: tl.id, name: tl.name, order: p.timelines.length, fps, isCompound, canvas: canvas || tl.canvas, markers: [], createdAt: now(), updatedAt: now(),
-        tracks: tl.tracks.map((tr) => ({ _id: tr.id, type: tr.type, order: tr.order, isMain: tr.isMain, name: tr.name, segments: [] })),
+        tracks: tl.tracks.map((tr) => ({ _id: tr.id, type: tr.type, order: tr.order, isMain: tr.isMain, name: tr.name, role: tr.role || "", segments: [] })),
       });
       p.timelines.push(t);
       p.updatedAt = now();
@@ -221,12 +221,13 @@ export class TimelineRepository {
           keepSeg.add(s.id);
           return this.realm.create("Segment", segmentToRealm(s, this.realm), Realm.UpdateMode.Modified);
         });
-        const track = this.realm.create("Track", { _id: tr.id, type: tr.type, order: tr.order, isMain: tr.isMain, name: tr.name || "", locked: !!tr.locked, hidden: !!tr.hidden, muted: !!tr.muted }, Realm.UpdateMode.Modified);
+        const track = this.realm.create("Track", { _id: tr.id, type: tr.type, order: tr.order, isMain: tr.isMain, name: tr.name || "", locked: !!tr.locked, hidden: !!tr.hidden, muted: !!tr.muted, role: tr.role || "" }, Realm.UpdateMode.Modified);
         track.segments.splice(0, track.segments.length, ...segs);
         tracks.push(track);
       }
       for (const old of [...t.tracks]) {
-        if (!keepTrack.has(old._id)) { this.realm.delete(old.segments); this.realm.delete(old); continue; }
+        // A removed track's segments go too — except those moved to a kept track (same id, now in its list).
+        if (!keepTrack.has(old._id)) { for (const s of [...old.segments]) if (!keepSeg.has(s._id)) this.realm.delete(s); this.realm.delete(old); continue; }
         for (const s of [...old.segments]) if (!keepSeg.has(s._id)) this.realm.delete(s);
       }
       t.tracks.splice(0, t.tracks.length, ...tracks);

@@ -9,6 +9,7 @@ import { adjustToFfmpeg, applyFilterPreset, isDefaultAdjust } from "./color.js";
 import { EFFECTS, VOICE_CHANGERS, AUDIO_CHAINS } from "./presets.js";
 import { RESOLUTIONS } from "./model.js";
 import { AppError } from "./validation.js";
+import { cutoutLayers, cutoutAfterTrack } from "./cutout.js";
 
 const s = (us) => Number((us / US).toFixed(6));
 const hex = (c) => `0x${(c || "#000000").replace("#", "").slice(0, 6)}`;
@@ -143,6 +144,20 @@ export function buildExport(tl, o) {
    * transition pre/post-roll). Timestamps are range-local timeline time; only that part of the file is decoded.
    */
   function videoSource(seg, media, preUs, postUs, w0, w1) {
+    const out = rawSource(seg, media, preUs, postUs, w0, w1);
+    if (seg.kind !== "video" || seg.videoFx?.matte?.type !== "person") return out;
+    // Person cutout: the cached mask video opened with the clip's own timing (source times, speed, pads), stretched
+    // to the source frame and merged as alpha — what is under this layer shows around the person.
+    const file = o.mattes?.[seg.mediaId];
+    if (!file) throw new AppError("MEDIA", "err.matteMissing", { segId: seg.id });
+    const m = rawSource(seg, { ...media, path: file }, preUs, postUs, w0, w1);
+    const yv = L(), a = L(), merged = L();
+    chains.push(`[${out}]format=yuv420p[${yv}]`);
+    chains.push(`[${m}]scale=${media.width || W}:${media.height || H}:flags=bicubic,format=gray[${a}]`);
+    chains.push(`[${yv}][${a}]alphamerge[${merged}]`);
+    return merged;
+  }
+  function rawSource(seg, media, preUs, postUs, w0, w1) {
     const speedStd = seg.speedMode === "curve" ? null : seg.speed || 1;
     const visStart = seg.start - preUs, visEnd = seg.start + seg.duration + postUs;
     w0 = Math.max(snap(w0), w0); w1 = Math.max(w0 + FRAME, snap(w1)); // the frames that show it
@@ -373,7 +388,7 @@ export function buildExport(tl, o) {
     const an = seg.animation || {};
     if ([an.in, an.out, an.combo].some((a) => a && a.type !== "none")) return false;
     const fx = seg.videoFx || {};
-    if (fx.chroma?.enabled || (fx.mask && fx.mask.type !== "none")) return false;
+    if (fx.chroma?.enabled || (fx.mask && fx.mask.type !== "none") || (fx.matte && fx.matte.type !== "none")) return false;
     const mw = media.width || W, mh = media.height || H, fit = Math.min(W / mw, H / mh);
     return Math.abs(mw * fit - W) < 1 && Math.abs(mh * fit - H) < 1;
   }
@@ -520,9 +535,10 @@ export function buildExport(tl, o) {
     rgbCompositeNeeded = tracks.some((t) => !t.hidden && t.segments.some((x) => !x.disabled && inRange(x.start, x.start + x.duration) && (isGrade(x.kind) || (x.transform?.blend && x.transform.blend !== "normal"))));
     const inSequence = sequence && mainSequence(main) !== null;
     if (!inSequence) comp = colorStream(bgColor, T0, span.frames);
-    for (const track of tracks) {
-      if (track.hidden || (inSequence && track === main)) continue;
-      if (track.isMain) { mainOverlays(track, span); continue; }
+    const cutoutAfter = cutoutAfterTrack(tl);
+    const layTrack = (track) => {
+      if (track.hidden || (inSequence && track === main)) return;
+      if (track.isMain) { mainOverlays(track, span); return; }
       const segs = [...track.segments].filter((x) => !x.disabled).sort((a, b) => a.start - b.start);
       for (const seg of segs) {
         if (isGrade(seg.kind)) { if (inRange(seg.start, seg.start + seg.duration)) gradeComposite(seg); continue; }
@@ -532,6 +548,16 @@ export function buildExport(tl, o) {
         const media = seg.kind === "text" || seg.kind === "sticker" ? {} : mediaOf(seg);
         const src = videoSource(seg, media, 0, 0, w0, w1);
         placeLayer(seg, layerLook(seg, src, media), media, { W, H, transIn: null, transOut: null }, w0, w1, span);
+      }
+    };
+    for (const track of tracks) {
+      layTrack(track);
+      // Text behind the person: the person, cut out of the main clip, over the behind tracks (core/cutout.js).
+      if (track.id === cutoutAfter) {
+        for (const c of cutoutLayers(tl, { startUs: rangeStart, endUs: rangeEnd })) {
+          const media = mediaOf(c.seg);
+          placeLayer(c.seg, layerLook(c.seg, videoSource(c.seg, media, 0, 0, c.a, c.b), media), media, { W, H, transIn: null, transOut: null }, c.a, c.b, span);
+        }
       }
     }
   }

@@ -94,11 +94,13 @@ test("editor: every material tab and inspector tab renders", async () => {
   const tabs = win.locator(".mat-tab");
   for (let i = 0; i < await tabs.count(); i++) { await tabs.nth(i).click(); await win.waitForTimeout(220); }
   // add one of each overlay kind
+  // Tabs: 0 media, 1 audio, 2 text, 3 graphics, 4 stickers, 5 effects, 6 transitions, 7 captions, 8 filters, 9 adjustment.
   await tabs.nth(2).click(); await win.locator(".mat-body .btn.primary").first().click();
-  await tabs.nth(3).click(); await win.locator(".mat-body .tile").first().click();
-  await tabs.nth(4).click(); await win.locator(".tl-ruler").click({ position: { x: 40, y: 10 } }); await win.locator(".mat-body .tile").first().click();
-  await tabs.nth(7).click(); await win.locator(".mat-body .tile").nth(2).click();
-  await tabs.nth(8).click(); await win.locator(".mat-body .btn.primary").first().click();
+  await tabs.nth(3).click(); await win.locator(".mat-body .gfx-tile").first().click(); // a motion graphic (a text clip)
+  await tabs.nth(4).click(); await win.locator(".mat-body .tile").first().click();
+  await tabs.nth(5).click(); await win.locator(".tl-ruler").click({ position: { x: 40, y: 10 } }); await win.locator(".mat-body .tile").first().click();
+  await tabs.nth(8).click(); await win.locator(".mat-body .tile").nth(2).click();
+  await tabs.nth(9).click(); await win.locator(".mat-body .btn.primary").first().click();
   await win.waitForTimeout(500);
   const kinds = await win.locator(".clip").evaluateAll((els) => els.map((e) => [...e.classList].find((c) => c.startsWith("k-"))));
   for (const k of ["k-video", "k-text", "k-sticker", "k-effect", "k-filter", "k-adjust"]) assert.ok(kinds.includes(k), `missing ${k} in ${kinds}`);
@@ -126,7 +128,7 @@ test("editor: transitions, speed curve, animation, keyframe and context menu", a
   await card.hover(); await card.locator(".media-add").click();
   await win.waitForFunction(() => document.querySelectorAll(".clip.k-video").length === 2);
   await win.locator(".clip.k-video").first().click();
-  await win.locator(".mat-tab").nth(5).click();
+  await win.locator(".mat-tab").nth(6).click(); // transitions
   await win.locator(".mat-body .tile").first().click();
   await win.waitForTimeout(400);
   let tl = (await api("timeline.get", tid)).timeline;

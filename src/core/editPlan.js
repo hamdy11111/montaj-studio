@@ -6,6 +6,7 @@ import { TRANSITIONS } from "./layerMath.js";
 import { CANVAS_RATIOS, mainTrack } from "./model.js";
 import { FILTER_PRESETS, TEXT_PRESETS } from "./presets.js";
 import { US } from "./util.js";
+import { GRAPHIC_TEMPLATES } from "./graphics.js";
 
 const MIN_CUT_US = 100_000; // the timeline ignores shorter cuts (removeRanges)
 
@@ -22,7 +23,8 @@ export const EDIT_PLAN_SCHEMA = {
     canvas: { type: "object", additionalProperties: false, properties: { ratio: { enum: Object.keys(CANVAS_RATIOS) }, bgType: { enum: ["color", "blur"] }, bgColor: { type: "string", pattern: "^#[0-9A-Fa-f]{6}$" }, bgBlur: { type: "number", minimum: 0, maximum: 100 } } },
     cuts: { type: "array", maxItems: 2000, items: range(), description: "SOURCE ranges removed from the main-track clips of that media" },
     zooms: { type: "array", maxItems: 300, items: range({ scale: { type: "number", minimum: 1.02, maximum: 2.5 }, x: { type: "number", minimum: -0.5, maximum: 0.5 }, y: { type: "number", minimum: -0.5, maximum: 0.5 } }, ["scale"]), description: "Punch-in: the main clip is shown larger during a SOURCE span (cut-zoom)" },
-    texts: { type: "array", maxItems: 200, items: range({ content: { type: "string", minLength: 1, maxLength: 300 }, preset: { type: "string", maxLength: 40 }, position: { enum: ["top", "center", "bottom"] }, size: { type: "number", minimum: 4, maximum: 60 } }, ["content"]), description: "On-screen text during a SOURCE span" },
+    texts: { type: "array", maxItems: 200, items: range({ content: { type: "string", minLength: 1, maxLength: 300 }, preset: { type: "string", maxLength: 40 }, position: { enum: ["top", "center", "bottom"] }, size: { type: "number", minimum: 4, maximum: 60 }, behindPerson: { type: "boolean" } }, ["content"]), description: "On-screen text during a SOURCE span" },
+    graphics: { type: "array", maxItems: 200, items: range({ template: { enum: Object.keys(GRAPHIC_TEMPLATES) }, params: { type: "object" }, behindPerson: { type: "boolean", description: "Draw it behind the person (big titles, words)" } }, ["template"]), description: "Motion graphics during a SOURCE span (see graphics_templates)" },
     transitions: { type: "array", maxItems: 300, items: { type: "object", additionalProperties: false, required: ["mediaId", "atUs", "type"], properties: { mediaId: { type: "string", pattern: "^[A-Za-z0-9-]+$" }, atUs: { type: "integer", minimum: 0 }, type: { enum: TRANSITIONS }, durationUs: { type: "integer", minimum: 100_000, maximum: 2_000_000 }, reason: { type: "string", maxLength: 200 } } }, description: "A transition at the cut nearest to SOURCE time atUs (typically the fromUs of a cut)" },
     filter: { type: "object", additionalProperties: false, required: ["preset"], properties: { preset: { enum: Object.keys(FILTER_PRESETS) }, intensity: { type: "number", minimum: 0, maximum: 100 } } },
     audio: { type: "object", additionalProperties: false, properties: { enhanceVoice: { type: "boolean" }, denoise: { type: "boolean" }, normalizeLufs: { type: "number", minimum: -30, maximum: -9 } } },
@@ -103,7 +105,7 @@ export function checkPlan(plan, tl, { mediaDurations = {} } = {}) {
   const errors = [], warnings = [];
   const pieces = mainPieces(tl);
   const onMain = new Set(pieces.map((p) => p.mediaId).filter(Boolean));
-  const refs = [...(plan.cuts || []), ...(plan.zooms || []), ...(plan.texts || []), ...(plan.transitions || [])];
+  const refs = [...(plan.cuts || []), ...(plan.zooms || []), ...(plan.texts || []), ...(plan.graphics || []), ...(plan.transitions || [])];
   for (const m of new Set(refs.map((r) => r.mediaId))) if (!onMain.has(m)) errors.push({ path: "mediaId", message: `media ${m} is not on the main track` });
   if (pieces.some((p) => p.curve)) warnings.push({ path: "timeline", message: "main-track clips with a speed curve are mapped at speed 1 (times may be off)" });
   const check = (list, name) => (list || []).forEach((r, i) => {
@@ -118,6 +120,7 @@ export function checkPlan(plan, tl, { mediaDurations = {} } = {}) {
   const removedPieces = [];
   for (const [i, z] of (plan.zooms || []).entries()) if (!mapSpan(after, z.mediaId, z.fromUs, z.toUs).length) { warnings.push({ path: `zooms/${i}`, message: "the whole span is cut out — skipped" }); removedPieces.push(`zooms/${i}`); }
   for (const [i, x] of (plan.texts || []).entries()) if (!mapSpan(after, x.mediaId, x.fromUs, x.toUs).length) { warnings.push({ path: `texts/${i}`, message: "the whole span is cut out — skipped" }); removedPieces.push(`texts/${i}`); }
+  for (const [i, x] of (plan.graphics || []).entries()) if (!mapSpan(after, x.mediaId, x.fromUs, x.toUs).length) warnings.push({ path: `graphics/${i}`, message: "the whole span is cut out — skipped" });
   const beforeUs = pieces.length ? pieces[pieces.length - 1].end : 0;
   const afterUs = after.length ? after[after.length - 1].end : 0;
   if (beforeUs && afterUs < beforeUs * 0.25) warnings.push({ path: "cuts", message: `the cuts remove ${Math.round(100 - (100 * afterUs) / beforeUs)}% of the main track` });
@@ -127,6 +130,7 @@ export function checkPlan(plan, tl, { mediaDurations = {} } = {}) {
   for (const [m, list] of cuts) for (const c of list) sheet.push({ at: c.fromUs, mediaId: m, kind: "cut", text: `cut ${fmtTime(c.fromUs)}–${fmtTime(c.toUs)} (${((c.toUs - c.fromUs) / US).toFixed(1)}s)${c.reason ? ` — ${c.reason}` : ""}` });
   for (const z of plan.zooms || []) sheet.push({ at: z.fromUs, mediaId: z.mediaId, kind: "zoom", text: `zoom ×${z.scale} ${fmtTime(z.fromUs)}–${fmtTime(z.toUs)}${z.reason ? ` — ${z.reason}` : ""}` });
   for (const x of plan.texts || []) sheet.push({ at: x.fromUs, mediaId: x.mediaId, kind: "text", text: `text "${x.content}" ${fmtTime(x.fromUs)}–${fmtTime(x.toUs)}${x.reason ? ` — ${x.reason}` : ""}` });
+  for (const x of plan.graphics || []) sheet.push({ at: x.fromUs, mediaId: x.mediaId, kind: "graphic", text: `graphic ${x.template} "${String(x.params?.text || x.params?.title || x.params?.emoji || "").slice(0, 40)}" ${fmtTime(x.fromUs)}–${fmtTime(x.toUs)}${x.reason ? ` — ${x.reason}` : ""}` });
   for (const x of plan.transitions || []) sheet.push({ at: x.atUs, mediaId: x.mediaId, kind: "transition", text: `transition ${x.type} at ${fmtTime(x.atUs)}${x.reason ? ` — ${x.reason}` : ""}` });
   if (plan.filter) sheet.push({ at: null, kind: "look", text: `look ${plan.filter.preset} ${plan.filter.intensity ?? 80}%` });
   if (plan.audio) sheet.push({ at: null, kind: "audio", text: `audio${plan.audio.denoise || plan.audio.enhanceVoice ? " clean-up" : ""}${plan.audio.normalizeLufs ? ` ${plan.audio.normalizeLufs} LUFS` : ""}` });
@@ -134,7 +138,7 @@ export function checkPlan(plan, tl, { mediaDurations = {} } = {}) {
   sheet.sort((a, b) => (a.at ?? -1) - (b.at ?? -1));
   return {
     errors, warnings,
-    summary: { beforeUs, afterUs, cuts: [...cuts.values()].reduce((n, l) => n + l.length, 0), removedUs: beforeUs - afterUs, zooms: (plan.zooms || []).length, texts: (plan.texts || []).length, transitions: (plan.transitions || []).length },
+    summary: { beforeUs, afterUs, cuts: [...cuts.values()].reduce((n, l) => n + l.length, 0), removedUs: beforeUs - afterUs, zooms: (plan.zooms || []).length, texts: (plan.texts || []).length, graphics: (plan.graphics || []).length, transitions: (plan.transitions || []).length },
     cutSheet: sheet.map((x) => x.text),
   };
 }

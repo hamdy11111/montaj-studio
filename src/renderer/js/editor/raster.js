@@ -3,6 +3,8 @@
 // font px = text.size × H / 200, sticker box = 25 % of the frame's short side, both × the layer scale.
 import { stickerUrl, libUrl } from "../api.js";
 import { captionFrames } from "./captionRaster.js";
+import { graphicFrames } from "./graphicsRaster.js";
+import { fontStack } from "../../core/fonts.js";
 
 export const textFontPx = (text, H) => Math.max(4, (text.size || 15) * H / 200);
 export const stickerBasePx = (W, H) => Math.round(Math.min(W, H) * 0.25);
@@ -24,7 +26,7 @@ export function rasterText(text, W, H, fit = true) {
   const content = applyCase(String(text?.content ?? ""), text.textCase);
   if (!content.trim()) return null;
   const px = textFontPx(text, H);
-  const font = `${text.italic ? "italic " : ""}${text.bold ? "700 " : "400 "}${px}px "${(text.font || "Segoe UI").replace(/"/g, "")}", "Segoe UI", Tahoma, Arial, sans-serif`;
+  const font = `${text.italic ? "italic " : ""}${text.bold ? "700 " : "400 "}${px}px ${fontStack(text.font)}`;
   const lines = content.split(/\r?\n/);
   const meas = document.createElement("canvas").getContext("2d");
   meas.font = font;
@@ -103,7 +105,8 @@ export async function buildOverlays(timeline, W, H, { onlyIds = null } = {}) {
   const out = {};
   for (const tr of timeline.tracks) for (const s of tr.segments) {
     if (onlyIds && !onlyIds.includes(s.id)) continue;
-    if (s.kind === "text" && s.text?.caption) out[s.id] = captionFrames(s.text, W, H, s.duration, timeline.fps || 30);
+    if (s.kind === "text" && s.text?.graphic) out[s.id] = await graphicFrames(s.text.graphic, W, H, s.duration, timeline.fps || 30);
+    else if (s.kind === "text" && s.text?.caption) out[s.id] = captionFrames(s.text, W, H, s.duration, timeline.fps || 30);
     else if (s.kind === "text" && s.text) { const c = rasterText(s.text, W, H); if (c) out[s.id] = c.toDataURL("image/png"); else out[s.id] = blankPng(); }
     else if (s.kind === "sticker" && s.sticker) { try { const c = await rasterSticker(s.sticker, W, H); out[s.id] = c ? c.toDataURL("image/png") : blankPng(); } catch { out[s.id] = blankPng(); } }
   }

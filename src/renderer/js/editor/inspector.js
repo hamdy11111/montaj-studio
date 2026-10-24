@@ -1,9 +1,10 @@
 // Inspector / Details panel (SCREEN-029..039): properties of the selected clip by kind, or the Project panel
 // (details, canvas, smart suggestions, global edits) when nothing is selected. Slider drags update the preview
 // live and commit one undoable change on release; values with keyframes write keyframes at the playhead.
+import { BUNDLED_FAMILIES } from "../../core/fonts.js";
 import { h, mount, clear } from "../dom.js";
 import { icon } from "../icons.js";
-import { t } from "../i18n.js";
+import { t, getLang } from "../i18n.js";
 import { call, guard } from "../api.js";
 import { toast } from "../ui/toast.js";
 import { slider, toggle, select, segmented, colorInput, section, check } from "../ui/controls.js";
@@ -11,9 +12,16 @@ import { US, formatDuration, clamp } from "../../core/util.js";
 import { ANIMATIONS_IN, ANIMATIONS_OUT, ANIMATIONS_COMBO, EASINGS } from "../../core/layerMath.js";
 import { CURVE_PRESETS, VELOCITY_EFFECTS, SPEED_MIN, SPEED_MAX } from "../../core/speed.js";
 import { FILTER_PRESETS, EFFECTS, TEXT_PRESETS, VOICE_CHANGERS } from "../../core/presets.js";
+import { GRAPHIC_TEMPLATES, EMOJI_ALIASES, graphicParams } from "../../core/graphics.js";
+import { canGoBehind } from "../../core/cutout.js";
 import { HSL_CHANNELS, DEFAULT_ADJUST, DEFAULT_TRANSFORM, DEFAULT_VIDEO_FX, DEFAULT_AUDIO_FX, CANVAS_RATIOS, FPS_OPTIONS } from "../../core/model.js";
 
-const FONTS = ["Segoe UI", "Arial", "Tahoma", "Times New Roman", "Georgia", "Verdana", "Trebuchet MS", "Courier New", "Impact", "Comic Sans MS", "Sakkal Majalla", "Traditional Arabic", "Arabic Typesetting", "Simplified Arabic", "Segoe UI Black"];
+const FONTS = [...BUNDLED_FAMILIES, "Segoe UI", "Arial", "Tahoma", "Times New Roman", "Georgia", "Verdana", "Trebuchet MS", "Courier New", "Impact", "Comic Sans MS", "Sakkal Majalla", "Traditional Arabic", "Arabic Typesetting", "Simplified Arabic", "Segoe UI Black"];
+// Arabic names of the motion-graphics parameters (core/graphics.js keeps the English titles for agents).
+const PARAM_AR = { text: "النص", title: "العنوان", subtitle: "العنوان الفرعي", font: "الخط", color: "لون النص", color2: "اللون السفلي (تدرّج)", accent: "اللون المميّز",
+  position: "الموضع", size: "الحجم", x: "الموضع الأفقي", y: "الموضع الرأسي", width: "العرض", w: "العرض", h: "الارتفاع", style: "النمط", emoji: "إيموجي", icon: "أيقونة",
+  items: "البنود (سطر لكل بند)", checked: "عدد المنجز", number: "الرقم", label: "التسمية", from: "من", to: "إلى", prefix: "قبل الرقم", suffix: "بعد الرقم",
+  decimals: "الأرقام العشرية", author: "القائل", motion: "الحركة", side: "الجهة", box: "خلفية مصمتة", thickness: "السُمك" };
 const HSL_SWATCH = { red: "#e5484d", orange: "#f76b15", yellow: "#ffd400", green: "#30a46c", cyan: "#00c1cd", blue: "#3e63dd", purple: "#8e4ec6", magenta: "#d6409f" };
 
 export class Inspector {
@@ -367,7 +375,73 @@ export class Inspector {
   }
 
   // ------------------------------------------------------------------ text
+  /** "Behind the person" switch for layers that can go there (not the main track). */
+  behindRow(seg) {
+    const track = this.ed.trackOf(seg.id);
+    if (!track || track.isMain || !canGoBehind(seg)) return null;
+    return h("div", { class: "row" }, check({ checked: track.role === "behind", label: t("lib.behindPerson"), onChange: (v) => this.ed.behindPerson([seg.id], v) }));
+  }
+
+  /** Motion graphic: one control per template parameter (text, numbers, colours, choices, fonts, emoji, icon). */
+  graphicTab(seg) {
+    const ed = this.ed, gr = seg.text.graphic, tpl = GRAPHIC_TEMPLATES[gr.template];
+    if (!tpl) { this.body.append(h("p", { class: "muted" }, gr.template)); return; }
+    const P = graphicParams(gr);
+    const patch = (k, v) => ({ text: { graphic: { params: { [k]: v } }, ...(["text", "title"].includes(k) && typeof v === "string" ? { content: v.slice(0, 2000) } : {}) } });
+    const live = (k, v) => ed.patchLive(seg.id, patch(k, v));
+    const commit = (k, v) => ed.exec("updateSegment", { segId: seg.id, patch: patch(k, v), coalesceKey: `g-${k}` });
+    const row = (label, ctl) => h("div", { class: "row" }, h("span", { class: "muted grow" }, label), ctl);
+    const field = (k, sch) => {
+      const label = (getLang() === "ar" && PARAM_AR[k]) || sch.title || k;
+      if (sch.enum) return row(label, select({ value: P[k], options: sch.enum, onChange: (v) => commit(k, v) }));
+      if (sch.type === "boolean") return h("div", { class: "row" }, check({ checked: !!P[k], label, onChange: (v) => commit(k, v) }));
+      if (sch.type === "number" || sch.type === "integer") {
+        if (sch.maximum - sch.minimum > 10_000) {
+          const el = h("input", { type: "number", value: P[k], step: sch.type === "integer" ? 1 : "any", style: { width: "110px" } });
+          el.addEventListener("change", () => { const v = Number(el.value); if (Number.isFinite(v)) commit(k, clamp(v, sch.minimum, sch.maximum)); });
+          return row(label, el);
+        }
+        const step = sch.type === "integer" ? 1 : (sch.maximum - sch.minimum) / 100;
+        return slider({ label, min: sch.minimum, max: sch.maximum, step, value: P[k], onInput: (v) => live(k, v), onChange: (v) => commit(k, v) });
+      }
+      if (sch.pattern?.startsWith("^#")) return row(label, colorInput({ value: P[k], onInput: (v) => live(k, v), onChange: (v) => commit(k, v) }));
+      if (k === "font") return row(label, select({ value: P[k], options: FONTS, onChange: (v) => commit(k, v) }));
+      if (sch.type === "array") {
+        const area = h("textarea", { rows: Math.min(6, (P[k] || []).length + 1), dir: "auto", style: { width: "100%" } });
+        area.value = (P[k] || []).join("\n");
+        const lines = () => area.value.split("\n").map((x) => x.trim()).filter(Boolean).slice(0, sch.maxItems || 6).map((x) => x.slice(0, sch.items?.maxLength || 50));
+        area.addEventListener("input", () => live(k, lines()));
+        area.addEventListener("change", () => commit(k, lines()));
+        return h("div", { class: "col" }, h("span", { class: "muted" }, label), area);
+      }
+      const input = h("input", { type: "text", value: P[k] ?? "", maxlength: sch.maxLength || 120, dir: "auto", style: { width: "100%" } });
+      input.addEventListener("input", () => live(k, input.value));
+      input.addEventListener("change", () => commit(k, input.value));
+      const out = [h("span", { class: "muted" }, label), input];
+      if (k === "emoji") { // the bundled 3D emoji
+        const seen = new Set();
+        out.push(h("div", { class: "emoji-pick" }, Object.entries(EMOJI_ALIASES).filter(([, name]) => !seen.has(name) && seen.add(name)).map(([ch, name]) =>
+          h("button", { class: ["icon-btn", P[k] === ch && "active"], title: name, onclick: () => { input.value = ch; commit(k, ch); } }, h("img", { src: `assets/emoji/${name}.png`, alt: name, loading: "lazy" })))));
+      }
+      if (k === "icon") {
+        const list = h("datalist", { id: `icons-${seg.id}` });
+        input.setAttribute("list", list.id);
+        fetch("assets/icons/index.json").then((r) => r.json()).then((names) => mount(list, ...names.map((n) => h("option", { value: n })))).catch(() => {});
+        out.push(list);
+      }
+      return h("div", { class: "col" }, ...out);
+    };
+    this.body.append(
+      h("div", { class: "col" }, h("strong", {}, `${t("in.graphic")} · ${getLang() === "ar" ? tpl.ar : tpl.name}`), h("p", { class: "muted small" }, tpl.use)),
+      this.behindRow(seg),
+      section({ title: t("in.basic"), children: Object.entries(tpl.params).map(([k, sch]) => field(k, sch)) }),
+      section({ title: t("in.transform"), open: false, children: [
+        slider({ label: t("in.opacity"), min: 0, max: 100, unit: "%", value: Math.round((seg.transform?.opacity ?? 1) * 100), ...this.bind(seg, (v) => ({ transform: { opacity: v / 100 } }), { coalesce: "opacity" }) })] }),
+      h("button", { class: "btn block", onclick: () => ed.exec("updateSegment", { segId: seg.id, patch: { text: { graphic: { template: gr.template, params: Object.fromEntries(Object.entries(tpl.params).map(([k, s]) => [k, s.default])) } } } }) }, t("in.reset")));
+  }
+
   textTab(seg) {
+    if (seg.text?.graphic) return this.graphicTab(seg);
     const ed = this.ed, tx = seg.text;
     const p = (patch) => ({ text: patch });
     const area = h("textarea", { rows: 3, maxlength: 2000, value: tx.content, "aria-label": t("in.text"), dir: "auto", style: { width: "100%" } });
@@ -393,6 +467,7 @@ export class Inspector {
       section({ title: t("in.shadow"), enabled: tx.shadow, onToggle: (v) => ed.exec("updateSegment", { segId: seg.id, patch: p({ shadow: v }) }), open: false, children: [] }),
       section({ title: t("in.presetStyle"), children: [h("div", { class: "chips" }, Object.keys(TEXT_PRESETS).map((k) => h("button", { class: ["chip", tx.preset === k && "active"], onclick: () => ed.exec("updateSegment", { segId: seg.id, patch: p({ ...TEXT_PRESETS[k], preset: k }) }) }, k.replace(/_/g, " "))))] }),
       h("div", { class: "row" }, check({ checked: tx.isCaption, label: t("in.isCaption"), onChange: (v) => ed.exec("updateSegment", { segId: seg.id, patch: p({ isCaption: v }) }) })),
+      this.behindRow(seg),
       section({ title: t("in.transform"), open: false, children: [
         slider({ label: t("in.scale"), min: 1, max: 500, unit: "%", value: Math.round((seg.transform?.scale ?? 1) * 100), ...this.bind(seg, (v) => ({ transform: { scale: v / 100 } }), { coalesce: "scale" }) }),
         slider({ label: t("in.rotate"), min: -360, max: 360, unit: "°", value: seg.transform?.rotation || 0, ...this.bind(seg, (v) => ({ transform: { rotation: v } }), { coalesce: "rotation" }) }),

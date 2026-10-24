@@ -3,7 +3,7 @@
 //   Segment n─1 Timeline (compound clips);  Workspace n─n Project;  ExportRecord/ShareRecord n─1 Project.
 // Embedded objects hold value-typed parameter blocks (transform, adjust, effects...).
 
-export const SCHEMA_VERSION = 3;
+export const SCHEMA_VERSION = 5;
 
 const emb = (name, properties) => ({ name, embedded: true, properties });
 
@@ -34,6 +34,7 @@ export const VideoFx = emb("VideoFx", {
   maskType: { type: "string", default: "none" }, maskX: { type: "double", default: 0 }, maskY: { type: "double", default: 0 },
   maskW: { type: "double", default: 0.6 }, maskH: { type: "double", default: 0.6 }, maskRotation: { type: "double", default: 0 },
   maskFeather: { type: "double", default: 0 }, maskInvert: { type: "bool", default: false },
+  matte: { type: "string", default: "none" }, // v5: "person" = keep only the person (cutout over text placed beneath)
 });
 export const AudioFx = emb("AudioFx", {
   normalize: { type: "bool", default: false }, targetLufs: { type: "double", default: -23 },
@@ -53,6 +54,7 @@ export const TextStyle = emb("TextStyle", {
   bgOpacity: { type: "double", default: 0 }, shadow: { type: "bool", default: false }, preset: { type: "string", default: "none" },
   isCaption: { type: "bool", default: false },
   caption: "string?", // v3: word-timed caption page (template, words, emphasis) as JSON — see core/captionTemplates.js
+  graphic: "string?", // v4: motion-graphics template + parameters as JSON — see core/graphics.js
 });
 export const CanvasSpec = emb("CanvasSpec", {
   ratio: { type: "string", default: "original" }, width: { type: "int", default: 1920 }, height: { type: "int", default: 1080 },
@@ -103,6 +105,7 @@ export const Track = {
   properties: {
     _id: "string", type: "string", order: "int", isMain: { type: "bool", default: false }, name: { type: "string", default: "" },
     locked: { type: "bool", default: false }, hidden: { type: "bool", default: false }, muted: { type: "bool", default: false },
+    role: { type: "string", default: "" }, // v5: "behind" = its layers show behind the person (core/cutout.js)
     segments: "Segment[]",
     timeline: { type: "linkingObjects", objectType: "Timeline", property: "tracks" },
   },

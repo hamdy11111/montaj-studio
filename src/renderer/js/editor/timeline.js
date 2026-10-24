@@ -131,7 +131,7 @@ export class TimelineView {
     for (const track of this.orderedTracks()) {
       const hgt = ROW_H[track.type] || 30;
       this.heads.append(h("div", { class: ["tl-head", track.isMain && "main"], style: { height: `${hgt}px` } },
-        h("span", { class: "tl-head-type", title: track.type }, icon({ video: "video", audio: "audio", text: "text", sticker: "sticker", effect: "effect", filter: "filter", adjust: "adjust" }[track.type] || "layers")),
+        h("span", { class: "tl-head-type", title: track.role === "behind" ? t("lib.behindPerson") : track.type }, icon(track.role === "behind" ? "layers" : { video: "video", audio: "audio", text: "text", sticker: "sticker", effect: "effect", filter: "filter", adjust: "adjust" }[track.type] || "layers")),
         h("button", { class: ["icon-btn", track.locked && "active"], title: t("tl.lock"), "aria-label": t("tl.lock"), onclick: () => this.ed.exec("setTrackFlag", { trackId: track.id, flag: "locked", value: !track.locked }) }, icon(track.locked ? "lock" : "unlock")),
         track.type !== "audio" ? h("button", { class: ["icon-btn", track.hidden && "active"], title: t("tl.hide"), "aria-label": t("tl.hide"), onclick: () => this.ed.exec("setTrackFlag", { trackId: track.id, flag: "hidden", value: !track.hidden }) }, icon(track.hidden ? "eyeOff" : "eye")) : null,
         ["video", "audio"].includes(track.type) ? h("button", { class: ["icon-btn", track.muted && "active"], title: t("tl.mute"), "aria-label": t("tl.mute"), onclick: () => this.ed.exec("setTrackFlag", { trackId: track.id, flag: "muted", value: !track.muted }) }, icon(track.muted ? "mute" : "volume")) : null,

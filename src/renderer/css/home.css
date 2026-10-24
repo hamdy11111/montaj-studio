@@ -104,3 +104,10 @@ code.token { user-select: all; }
 .cap-tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .cap-art { background: linear-gradient(135deg, #2c3e50, #4b6a88); display: grid; place-items: center; overflow: hidden; }
 .cap-preview { max-width: 100%; max-height: 100%; }
+.gfx-tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.tile-art.gfx-art { background: #1b1f29; display: grid; place-items: center; overflow: hidden; aspect-ratio: 16 / 9; height: auto; }
+.gfx-preview { width: 100%; height: 100%; object-fit: cover; }
+.emoji-pick { display: grid; grid-template-columns: repeat(auto-fill, minmax(30px, 1fr)); gap: 2px; max-height: 150px; overflow-y: auto; }
+.emoji-pick .icon-btn { width: 30px; height: 30px; padding: 2px; }
+.emoji-pick .icon-btn.active { outline: 2px solid var(--accent); }
+.emoji-pick img { width: 24px; height: 24px; }

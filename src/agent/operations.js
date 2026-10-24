@@ -13,6 +13,10 @@ import { US } from "../core/util.js";
 import { analyzeSpeech, sentences } from "../core/speech.js";
 import { run as runProcess, binaries } from "../services/ffmpeg.js";
 import { CAPTION_TEMPLATES } from "../core/captionTemplates.js";
+import { GRAPHIC_TEMPLATES, EMOJI_ALIASES } from "../core/graphics.js";
+import { cutoutMedia } from "../core/cutout.js";
+import { DEFAULT_TEXT } from "../core/model.js";
+import { checkInputs } from "./skills/runtime.js";
 import { EDIT_PLAN_SCHEMA } from "../core/editPlan.js";
 import { inspectPlan, applyPlan } from "./editPlan.js";
 import { applyCaptions, restyleCaptions, transact } from "./captions.js";
@@ -44,7 +48,7 @@ export function summarizeTimeline(tl, revision, history) {
     timelineId: tl.id, projectId: tl.projectId, name: tl.name, revision, fps: tl.fps, canvas: tl.canvas, durationUs: durationOf(tl),
     history: history ? { canUndo: history.canUndo, canRedo: history.canRedo, undoLabel: history.undoLabel, depth: history.depth } : undefined,
     tracks: [...tl.tracks].sort((a, b) => a.order - b.order).map((t) => ({
-      trackId: t.id, type: t.type, isMain: !!t.isMain, hidden: !!t.hidden, muted: !!t.muted, locked: !!t.locked,
+      trackId: t.id, type: t.type, isMain: !!t.isMain, hidden: !!t.hidden, muted: !!t.muted, locked: !!t.locked, behindPerson: t.role === "behind" || undefined,
       clips: t.segments.map((s) => ({
         clipId: s.id, kind: s.kind, name: s.name, startUs: s.start, durationUs: s.duration, mediaId: s.mediaId || null, sourceStartUs: s.sourceStart,
         speed: s.speedMode === "curve" ? `curve:${s.curve?.preset}` : s.speed, volumeDb: s.volumeDb,
@@ -52,7 +56,7 @@ export function summarizeTimeline(tl, revision, history) {
         animation: s.animation && ["in", "out", "combo"].some((k) => s.animation[k]?.type && s.animation[k].type !== "none") ? s.animation : undefined,
         transitionOut: s.transitionOut?.type && s.transitionOut.type !== "none" ? s.transitionOut : undefined,
         filter: s.filter?.preset ? s.filter : undefined, effect: s.effect?.type ? s.effect : undefined,
-        text: s.text?.content !== undefined ? { content: s.text.content, isCaption: !!s.text.isCaption } : undefined,
+        text: s.text?.content !== undefined ? { content: s.text.content, isCaption: !!s.text.isCaption, graphic: s.text.graphic?.template } : undefined,
         disabled: s.disabled || undefined,
       })),
     })),
@@ -68,6 +72,9 @@ function asJob(ctx, kind, label, fn, wait) {
   return wait === false ? ctx.jobs.status(job.jobId, ctx.clientId) : ctx.jobs.wait(job.jobId, WAIT_MS, ctx.clientId);
 }
 const WAIT = { type: "boolean", description: "Wait for the result (default true, up to 50 s; otherwise poll job_status)" };
+
+/** Person-matte readiness of the videos the cutouts of a timeline use. */
+const matteState = (ctx, tl) => cutoutMedia(tl).map((mediaId) => ({ mediaId, ready: svc(ctx).mattes.ready(mediaId) }));
 
 const projectOfTimeline = (ctx, timelineId) => svc(ctx).repos.timelines.get(timelineId).projectId;
 
@@ -433,7 +440,7 @@ export const OPERATIONS = [
   {
     name: "timeline_add_captions_pro", scope: "edit", needs: ["media"], provider: "whisper", title: "Animated captions",
     description: "Adds word-timed animated captions for everything spoken on the main track (after cuts), using the local speech model, as one undo step. template: see captions_templates. keywords: words to emphasize in the accent colour (numbers are emphasized automatically). replace (default true) removes earlier captions. Returns pages, words and a reading-speed check (qc). Runs as a job (see wait).",
-    input: obj({ ...EDIT, template: S.enumOf(Object.keys(CAPTION_TEMPLATES), "Template"), language: { type: "string", pattern: "^(auto|[a-z]{2})$" }, keywords: { type: "array", items: { type: "string", maxLength: 60 }, maxItems: 200 }, autoEmphasis: { type: "boolean" }, reveal: { type: "boolean", description: "Words appear only when spoken (no spoilers); recommended for reveals/punchlines" }, replace: { type: "boolean" }, positionY: S.num("Vertical position (fraction of the frame from the centre, + = lower)", -0.45, 0.45), overrides: { type: "object", additionalProperties: false, properties: { color: { type: "string", pattern: "^#[0-9A-Fa-f]{6}$" }, active: { type: "string", pattern: "^#[0-9A-Fa-f]{6}$" }, accent: { type: "string", pattern: "^#[0-9A-Fa-f]{6}$" }, activeBox: { type: "string", pattern: "^#[0-9A-Fa-f]{6}$" }, size: { type: "number", minimum: 3, maximum: 30 } } }, wait: WAIT }, ["timelineId"]),
+    input: obj({ ...EDIT, template: S.enumOf(Object.keys(CAPTION_TEMPLATES), "Template"), language: { type: "string", pattern: "^(auto|[a-z]{2})$" }, keywords: { type: "array", items: { type: "string", maxLength: 60 }, maxItems: 200 }, autoEmphasis: { type: "boolean" }, reveal: { type: "boolean", description: "Words appear only when spoken (no spoilers); recommended for reveals/punchlines" }, replace: { type: "boolean" }, corrections: { type: "array", maxItems: 300, description: "Fix recognition mistakes (dialect, names): [{ from, to }] word or phrase, punctuation ignored; timing kept", items: { type: "object", additionalProperties: false, required: ["from", "to"], properties: { from: { type: "string", minLength: 1, maxLength: 120 }, to: { type: "string", maxLength: 120 } } } }, positionY: S.num("Vertical position (fraction of the frame from the centre, + = lower)", -0.45, 0.45), overrides: { type: "object", additionalProperties: false, properties: { color: { type: "string", pattern: "^#[0-9A-Fa-f]{6}$" }, active: { type: "string", pattern: "^#[0-9A-Fa-f]{6}$" }, accent: { type: "string", pattern: "^#[0-9A-Fa-f]{6}$" }, activeBox: { type: "string", pattern: "^#[0-9A-Fa-f]{6}$" }, size: { type: "number", minimum: 3, maximum: 30 } } }, wait: WAIT }, ["timelineId"]),
     timeline: (a) => a.timelineId,
     run: (ctx, a) => asJob(ctx, "captions", a.template || "captions", () => transact(ctx, a.timelineId, `captions:${a.template || "karaoke-yellow"}`, a.expectedRevision, () => applyCaptions(ctx, a.timelineId, a)), a.wait),
   },
@@ -443,6 +450,43 @@ export const OPERATIONS = [
     input: obj({ ...EDIT, template: S.enumOf(Object.keys(CAPTION_TEMPLATES), "Template"), positionY: S.num("Vertical position", -0.45, 0.45), overrides: { type: "object" }, reveal: { type: "boolean", description: "Words appear only when spoken" } }, ["timelineId"]),
     timeline: (a) => a.timelineId,
     run: (ctx, a) => { svc(ctx).timelines.checkRevision(a.timelineId, a.expectedRevision); return restyleCaptions(ctx, a.timelineId, a); },
+  },
+  {
+    name: "graphics_templates", scope: "read", title: "Motion-graphics templates",
+    description: "Animated graphics you can add (titles, lower thirds, numbered points, checklists, counters, callout arrows, highlight boxes, 3D emoji, icon badges, big words, quotes, follow CTA, progress bar): id, purpose, parameters with defaults, default duration. Emoji may be given as the character (🔥) — see emoji list.",
+    input: obj({}),
+    run: () => ({ templates: Object.entries(GRAPHIC_TEMPLATES).map(([id, t]) => ({ id, name: t.name, ar: t.ar, use: t.use, durationUs: t.durUs, loop: t.loop, params: t.params })), emoji: Object.keys(EMOJI_ALIASES) }),
+  },
+  {
+    name: "timeline_add_graphic", scope: "edit", title: "Add a motion graphic",
+    description: "Adds an animated graphic (see graphics_templates) at a TIMELINE time. params are checked against the template; missing ones take their defaults. Graphics are drawn full-frame, positions come from the parameters.",
+    input: obj({ ...EDIT, template: S.enumOf(Object.keys(GRAPHIC_TEMPLATES), "Template"), params: { type: "object" }, atUs: S.us("Start"), durationUs: S.us("Length (default: the template's)", 200_000), behindPerson: { type: "boolean", description: "Draw it behind the person (needs a person matte; see timeline_behind_person)" } }, ["timelineId", "template"]),
+    timeline: (a) => a.timelineId,
+    run: async (ctx, a) => {
+      const tpl = GRAPHIC_TEMPLATES[a.template];
+      const params = checkInputs({ type: "object", properties: tpl.params, additionalProperties: false }, a.params || {}, `${a.template}.params`);
+      const label = String(params.text || params.title || params.label || params.emoji || tpl.name).slice(0, 40);
+      const r = await exec(ctx, a.timelineId, "addSegment", { kind: "text", atUs: a.atUs ?? 0, durationUs: a.durationUs ?? tpl.durUs, expectedRevision: a.expectedRevision,
+        init: { name: `${tpl.name}: ${label}`, text: { ...DEFAULT_TEXT, content: label, graphic: { template: a.template, params } } } });
+      if (!a.behindPerson) return { clipId: r.result, revision: r.revision };
+      const b = await exec(ctx, a.timelineId, "setBehindPerson", { ids: [r.result], value: true });
+      return { clipId: r.result, revision: b.revision, behindPerson: true, mattes: matteState(ctx, b.timeline) };
+    },
+  },
+  {
+    name: "timeline_behind_person", scope: "edit", title: "Text behind the person",
+    description: "Puts layers (texts, graphics, stickers, images) BEHIND the person, or back in front (behind=false). The person on the main-track video is cut out with a local segmentation model and drawn over them. The first use per video file makes its person matte (~0.4× real time on the CPU); this runs as a job. Best with big titles/words placed where the person's head or body passes in front.",
+    input: obj({ ...EDIT, clipIds: { type: "array", minItems: 1, maxItems: 100, items: S.str("Clip id", 80) }, behind: { type: "boolean", description: "true (default) = behind the person" }, wait: WAIT }, ["timelineId", "clipIds"]),
+    timeline: (a) => a.timelineId,
+    run: async (ctx, a) => {
+      const r = await exec(ctx, a.timelineId, "setBehindPerson", { ids: a.clipIds, value: a.behind !== false, expectedRevision: a.expectedRevision });
+      const need = cutoutMedia(r.timeline).filter((id) => !svc(ctx).mattes.ready(id));
+      if (!need.length) return { moved: r.result, revision: r.revision, mattes: matteState(ctx, r.timeline) };
+      return asJob(ctx, "matte", "person matte", async (j) => {
+        for (const [i, id] of need.entries()) await svc(ctx).mattes.ensure(id, { onProgress: (p) => j.progress?.((i + p) / need.length, "person matte") });
+        return { moved: r.result, revision: r.revision, mattes: matteState(ctx, r.timeline) };
+      }, a.wait);
+    },
   },
   {
     name: "edit_plan_schema", scope: "read", title: "Edit plan format",

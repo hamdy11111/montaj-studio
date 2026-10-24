@@ -1,0 +1,6 @@
+selfie_multiclass_256x256.tflite — MediaPipe Selfie Multiclass segmentation model (float32)
+Source: https://storage.googleapis.com/mediapipe-models/image_segmenter/selfie_multiclass_256x256/float32/latest/selfie_multiclass_256x256.tflite
+Model card and documentation: https://ai.google.dev/edge/mediapipe/solutions/vision/image_segmenter
+Copyright Google LLC. Licensed under the Apache License, Version 2.0: https://www.apache.org/licenses/LICENSE-2.0
+Used unmodified, locally, by src/services/vision/person_matte.py (categories: 0 background, 1 hair, 2 body skin,
+3 face skin, 4 clothes, 5 others — the person matte is 1 − background).

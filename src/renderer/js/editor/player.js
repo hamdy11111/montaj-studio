@@ -13,6 +13,8 @@ import { parseCube } from "../../core/lut.js";
 import { mediaUrl, call } from "../api.js";
 import { rasterText, rasterSticker, stickerSrc } from "./raster.js";
 import { captionCanvas, captionStateAt, captionLayout, stateKey } from "./captionRaster.js";
+import { graphicCanvas, graphicStateAt, preloadGraphic } from "./graphicsRaster.js";
+import { cutoutLayers, cutoutAfterTrack } from "../../core/cutout.js";
 
 const BLEND = { normal: "source-over", screen: "screen", add: "lighter", multiply: "multiply", darken: "darken", lighten: "lighten", overlay: "overlay" };
 const VISUAL = new Set(["video", "image", "text", "sticker", "compound"]);
@@ -21,6 +23,9 @@ const GRADE = new Set(["effect", "filter", "adjust"]);
 export class Player {
   /** @param {HTMLElement} host  @param {object} ed editor context ({tl(), media(id), settings(), onTime(us), selection(), onTransform(segId, patch, final)}) */
   constructor(host, ed) {
+    // A bundled font that finishes loading after a text was drawn: redraw the text layers with it.
+    this.onFonts = () => { this.rasters.clear(); this.invalidate(); };
+    document.fonts.addEventListener("loadingdone", this.onFonts);
     this.ed = ed;
     this.host = host;
     this.canvas = h("canvas", { class: "player-canvas", "aria-label": "Player" });
@@ -35,6 +40,7 @@ export class Player {
     this.rasters = new Map();  // key → canvas
     this.luts = new Map();     // assetId → parsed LUT | "loading"
     this.procCache = new Map();
+    this.mattes = new Map();   // mediaId → { el, failedAt, canvas, key } person-matte video (text behind the person)
     this.timeUs = 0;
     this.playing = false;
     this.zoom = 1;
@@ -55,8 +61,9 @@ export class Player {
 
   destroy() {
     cancelAnimationFrame(this.raf);
+    document.fonts.removeEventListener("loadingdone", this.onFonts);
     this.ro.disconnect();
-    for (const m of [this.videos, this.audios]) for (const v of m.values()) { v.el.pause(); v.el.removeAttribute("src"); v.el.load(); }
+    for (const m of [this.videos, this.audios, this.mattes]) for (const v of m.values()) { v.el.pause(); v.el.removeAttribute("src"); v.el.load(); }
     this.actx?.close().catch(() => {});
   }
 
@@ -153,6 +160,56 @@ export class Player {
 
   findSeg(segId) { for (const t of this.ed.tl()?.tracks || []) for (const s of t.segments) if (s.id === segId) return s; return null; }
 
+  // ------------------------------------------------------------------ person matte (text behind the person)
+  /**
+   * The person matte of a video clip at its current frame, as an alpha canvas, with the source region that matches
+   * the layer's crop; null while it loads (or when the matte has not been made: see timeline_behind_person).
+   * The matte video plays alongside the clip's own element (same media time), corrected when it drifts.
+   */
+  matteFrame(seg, s) {
+    const main = this.videos.get(seg.id)?.el;
+    if (!main) return null;
+    let m = this.mattes.get(seg.mediaId);
+    if (m?.failedAt && performance.now() - m.failedAt > 5000) { this.mattes.delete(seg.mediaId); m = null; } // made meanwhile?
+    if (!m) {
+      const el = document.createElement("video");
+      el.crossOrigin = "anonymous"; el.muted = true; el.preload = "auto";
+      el.src = `media://matte/${encodeURIComponent(seg.mediaId)}`;
+      m = { el, failedAt: 0, canvas: document.createElement("canvas"), key: "" };
+      el.addEventListener("seeked", () => this.invalidate());
+      el.addEventListener("loadeddata", () => this.invalidate());
+      el.addEventListener("error", () => { m.failedAt = performance.now(); });
+      this.mattes.set(seg.mediaId, m);
+    }
+    const el = m.el;
+    m.usedIn = this.stats.renders;
+    if (m.failedAt || el.readyState < 2) return null;
+    const want = main.currentTime;
+    if (!main.paused) {
+      if (Math.abs(el.playbackRate - main.playbackRate) > 0.01) el.playbackRate = main.playbackRate;
+      if (Math.abs(el.currentTime - want) > 0.12 && !el.seeking) el.currentTime = want;
+      if (el.paused) el.play().catch(() => {});
+    } else {
+      if (!el.paused) el.pause();
+      if (Math.abs(el.currentTime - want) > 0.5 / 60 && !el.seeking) el.currentTime = want;
+    }
+    const mw = el.videoWidth, mh = el.videoHeight;
+    if (!mw || !mh) return null;
+    const key = `${el.currentTime.toFixed(4)}:${mw}x${mh}`;
+    if (m.key !== key) { // luminance → alpha (the matte is white on black)
+      const c = m.canvas;
+      if (c.width !== mw || c.height !== mh) { c.width = mw; c.height = mh; }
+      const g = c.getContext("2d", { willReadFrequently: true });
+      g.drawImage(el, 0, 0);
+      const d = g.getImageData(0, 0, mw, mh), px = d.data;
+      for (let i = 0; i < px.length; i += 4) { px[i + 3] = px[i]; px[i] = px[i + 1] = px[i + 2] = 255; }
+      g.putImageData(d, 0, 0);
+      m.key = key;
+    }
+    const vw = main.videoWidth || mw, vh = main.videoHeight || mh;
+    return { canvas: m.canvas, sx: ((s.sx || 0) * mw) / vw, sy: ((s.sy || 0) * mh) / vh, sw: (s.sw * mw) / vw, sh: (s.sh * mh) / vh };
+  }
+
   // ------------------------------------------------------------------ media elements
   mediaElement(pool, seg, kind) {
     const m = seg.kind === "compound" ? null : this.ed.media(seg.mediaId);
@@ -244,7 +301,9 @@ export class Player {
     g.fillRect(0, 0, W, H);
     const tracks = [...tl.tracks].sort((a, b) => a.order - b.order);
     const live = new Set();
+    const cutoutAfter = cutoutAfterTrack(tl);
     for (const track of tracks) {
+      if (track.id === cutoutAfter) this.pendingCutouts = true;
       const segs = track.segments.filter((s) => !s.disabled).sort((a, b) => a.start - b.start);
       if (track.isMain && !track.hidden && tl.canvas.bgType === "blur") {
         // Blurred backgrounds sit under every main-track clip on screen, also during a transition (as in the export).
@@ -280,15 +339,36 @@ export class Player {
         if (t < seg.start - pre || t >= seg.start + seg.duration + post) return;
         this.drawLayer(seg, t, tr);
       });
+      if (this.pendingCutouts) {
+        // Text behind the person: the person, cut out of the main clip, over the behind tracks (core/cutout.js).
+        this.pendingCutouts = false;
+        for (const c of cutoutLayers(tl, { startUs: t, endUs: t + 1 })) this.drawLayer(c.seg, t, { transIn: null, transOut: null });
+      }
     }
     // Pause elements of segments that are no longer near the playhead.
     for (const pool of [this.videos, this.audios]) for (const [id, v] of pool) if (!live.has(id)) { if (!v.el.paused) v.el.pause(); if (!this.findSeg(id)) pool.delete(id); }
+    for (const m of this.mattes.values()) if (m.usedIn !== this.stats.renders && !m.el.paused) m.el.pause(); // no cutout on screen
     this.drawOverlay();
   }
 
   /** Returns a drawable + its base (fit) size, or null if not ready yet. */
   source(seg) {
     const W = this.W, H = this.H;
+    if (seg.kind === "text" && seg.text?.graphic) {
+      // Motion graphic: the full-frame picture of its current frame state (held frames are drawn once).
+      const gr = seg.text.graphic;
+      const base = `g:${JSON.stringify(gr)}:${seg.duration}:${W}x${H}`;
+      if (!this.rasters.has(`${base}:assets`)) { this.rasters.set(`${base}:assets`, true); preloadGraphic(gr).then(() => { for (const k of [...this.rasters.keys()]) if (k.startsWith(base) && !k.endsWith(":assets")) this.rasters.delete(k); this.invalidate(); }); }
+      const st = graphicStateAt(gr, seg.duration, this.ed.tl().fps || 30, this.timeUs - seg.start);
+      const key = `${base}:${st.key}`;
+      let c = this.rasters.get(key);
+      if (c === undefined) {
+        c = graphicCanvas(gr, W, H, st.tUs, seg.duration);
+        if (this.rasters.size > 400) for (const k of [...this.rasters.keys()]) if (k.startsWith("g:") && !k.endsWith(":assets")) this.rasters.delete(k);
+        this.rasters.set(key, c);
+      }
+      return { img: c, w: c.width, h: c.height, sw: c.width, sh: c.height };
+    }
     if (seg.kind === "text" && seg.text?.caption) {
       // Word-timed caption: the state (spoken word, pop) at the playhead, drawn like the export draws it.
       const base = `c:${JSON.stringify(seg.text)}:${seg.duration}:${W}x${H}`;
@@ -355,6 +435,7 @@ export class Player {
     const lw = Math.max(1, s.w * st.scaleX), lh = Math.max(1, s.h * st.scaleY);
     // Render the layer "look" (grade, effects, keying, mask) on an offscreen canvas at its on-screen size.
     const off = this.layerCanvas(seg, s, lw, lh, t);
+    if (!off) return; // a cutout whose person matte is not loaded yet
     const g = this.ctx;
     g.save();
     g.globalAlpha = st.opacity;
@@ -364,11 +445,13 @@ export class Player {
     g.scale(seg.transform?.flipH ? -1 : 1, seg.transform?.flipV ? -1 : 1);
     g.drawImage(off, -lw / 2, -lh / 2, lw, lh);
     g.restore();
-    seg._box = { cx: W / 2 + st.x, cy: H / 2 + st.y, w: lw, h: lh, rot: st.rotation }; // for hit-testing / handles
+    if (!seg.cutout) seg._box = { cx: W / 2 + st.x, cy: H / 2 + st.y, w: lw, h: lh, rot: st.rotation }; // for hit-testing / handles
   }
 
   layerCanvas(seg, s, lw, lh, t) {
-    const needsLook = (seg.adjust && seg.adjust.enabled !== false && !isDefaultAdjust(seg.adjust)) || seg.clipEffects?.length || seg.videoFx?.chroma?.enabled || (seg.videoFx?.mask && seg.videoFx.mask.type !== "none");
+    const matte = seg.kind === "video" && seg.videoFx?.matte?.type === "person" ? this.matteFrame(seg, s) : null;
+    if (seg.kind === "video" && seg.videoFx?.matte?.type === "person" && !matte) return null;
+    const needsLook = (seg.adjust && seg.adjust.enabled !== false && !isDefaultAdjust(seg.adjust)) || seg.clipEffects?.length || seg.videoFx?.chroma?.enabled || (seg.videoFx?.mask && seg.videoFx.mask.type !== "none") || !!matte;
     const cw = Math.max(1, Math.min(Math.round(lw), this.W * 2)), ch = Math.max(1, Math.min(Math.round(lh), this.H * 2));
     if (!needsLook && !(s.sx || s.sy || s.sw !== s.img.width)) {
       if (s.img instanceof HTMLCanvasElement) return s.img;
@@ -389,6 +472,12 @@ export class Player {
       }
       for (const ce of seg.clipEffects || []) applyEffect(g, c, ce.type, ce.intensity ?? 50, (t - seg.start) / US);
       if (fx?.mask && fx.mask.type !== "none") applyMask(g, cw, ch, fx.mask);
+      if (matte) { // keep only the person: the matte's alpha over the same source region
+        g.save();
+        g.globalCompositeOperation = "destination-in";
+        g.drawImage(matte.canvas, matte.sx, matte.sy, matte.sw, matte.sh, 0, 0, cw, ch);
+        g.restore();
+      }
     }
     // Return a copy so the next layer can reuse the scratch canvas.
     const out = document.createElement("canvas");

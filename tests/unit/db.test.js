@@ -1,4 +1,4 @@
-// Realm data-access tests: CRUD, transactions, relations, persistence across reopen, migrations v1→v3 and v2→v3.
+// Realm data-access tests: CRUD, transactions, relations, persistence across reopen, migrations v1→v4, v2→v4 and v3→v4.
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
@@ -7,9 +7,9 @@ import path from "node:path";
 import Realm from "realm";
 import { openDatabase, closeDatabase } from "../../src/db/realmClient.js";
 import { createRepositories } from "../../src/db/repositories.js";
-import { legacySchemaV1, legacySchemaV2 } from "../../src/db/migrations.js";
+import { legacySchemaV1, legacySchemaV2, legacySchemaV4 } from "../../src/db/migrations.js";
 import { newSegment } from "../../src/core/model.js";
-import { addMediaSegment, split } from "../../src/core/timelineOps.js";
+import { addMediaSegment, addSegment, split, setBehindPerson } from "../../src/core/timelineOps.js";
 import { US } from "../../src/core/util.js";
 
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), "montaj-db-"));
@@ -46,7 +46,10 @@ test("media + timeline state round-trip through saveState, including embedded bl
   text.text.content = "مرحبا";
   const caption = { template: "karaoke-yellow", words: [{ t: "مرحبا", s: 0, e: 600000 }], emphasis: [0], overrides: { accent: "#3EE07B" } };
   text.text.caption = caption;
-  tl.tracks.push({ id: "11111111-1111-1111-1111-111111111111", type: "text", order: 1, isMain: false, name: "", locked: false, hidden: false, muted: false, segments: [text] });
+  const graphic = { template: "list-item", params: { number: "1", text: "شعر منكوش", emoji: "🔥", accent: "#FF4D6D" } };
+  const g2 = newSegment("text", { start: 4 * US, duration: 2 * US });
+  g2.text.graphic = graphic;
+  tl.tracks.push({ id: "11111111-1111-1111-1111-111111111111", type: "text", order: 1, isMain: false, name: "", locked: false, hidden: false, muted: false, segments: [text, g2] });
   repo.timelines.saveState(tl);
   const back = repo.timelines.get(p.mainTimelineId);
   const vs = back.tracks[0].segments[0];
@@ -56,6 +59,7 @@ test("media + timeline state round-trip through saveState, including embedded bl
   assert.equal(vs.keyframes[0].easing, "easeIn");
   assert.equal(back.tracks[1].segments[0].text.content, "مرحبا");
   assert.deepEqual(back.tracks[1].segments[0].text.caption, caption, "word-timed caption data survives a save");
+  assert.deepEqual(back.tracks[1].segments[1].text.graphic, graphic, "motion-graphic data survives a save");
   assert.equal(repo.projects.get(p.id).durationUs, 10 * US);
 });
 
@@ -71,6 +75,30 @@ test("saveState deletes removed segments and tracks (no orphans)", () => {
   repo.timelines.saveState(tl);
   assert.equal(repo.timelines.get(tl.id).tracks[0].segments.length, 1);
   assert.equal(realm.objects("Segment").filtered("track.@count == 0").length, 0);
+});
+
+test("a clip moved to another track survives when its old track is removed (behind the person and back)", () => {
+  const p = repo.projects.create({ name: "moved" });
+  const m = repo.media.add(p.id, { name: "b.mp4", path: "C:/x/b.mp4", type: "video", durationUs: 6 * US, hasVideo: true, origin: "import" });
+  const tl = repo.timelines.get(p.mainTimelineId);
+  addMediaSegment(tl, m);
+  const txt = addSegment(tl, newSegment("text", { start: US, duration: 2 * US, text: { content: "WOW" } }));
+  repo.timelines.saveState(tl);
+  const oldTrack = tl.tracks.find((t) => t.segments.some((x) => x.id === txt.id)).id;
+  setBehindPerson(tl, [txt.id], true); // moves it to a new "behind" track; the old text track is removed
+  repo.timelines.saveState(tl);
+  let back = repo.timelines.get(tl.id);
+  let host = back.tracks.find((t) => t.segments.some((x) => x.id === txt.id));
+  assert.ok(host, "the moved text is still in the database");
+  assert.equal(host.role, "behind");
+  assert.notEqual(host.id, oldTrack);
+  assert.ok(back.tracks.find((t) => t.isMain).order < host.order, "behind tracks sit above the main track");
+  setBehindPerson(back, [txt.id], false);
+  repo.timelines.saveState(back);
+  back = repo.timelines.get(tl.id);
+  host = back.tracks.find((t) => t.segments.some((x) => x.id === txt.id));
+  assert.ok(host && host.role === "", "back in front, on a normal track");
+  assert.equal(back.tracks.filter((t) => t.role === "behind").length, 0, "the empty behind track is removed");
 });
 
 test("trash, restore, duplicate and permanent delete with cascade", () => {
@@ -129,7 +157,7 @@ test("data persists after closing and reopening the database", async () => {
   assert.equal(repo.projects.get(p.id).name, "persist-me");
 });
 
-test("migration v1 → v3 (through v2) backfills lastOpenedAt and keeps data", async () => {
+test("migration v1 → v5 (through v2, v3, v4) backfills lastOpenedAt and keeps data", async () => {
   const legacy = path.join(dir, "legacy.realm");
   const old = await Realm.open({ path: legacy, schema: legacySchemaV1(), schemaVersion: 1 });
   const updated = new Date("2026-01-02T03:04:05Z");
@@ -141,14 +169,14 @@ test("migration v1 → v3 (through v2) backfills lastOpenedAt and keeps data", a
   const migrated = await openDatabase({ file: legacy });
   const p = migrated.objectForPrimaryKey("Project", "aaaaaaaa-0000-0000-0000-000000000002");
   assert.equal(p.lastOpenedAt.toISOString(), updated.toISOString());
-  assert.equal(migrated.schemaVersion, 3);
-  assert.ok(fs.existsSync(`${legacy}.pre-v3.bak`), "a safety copy is written before migrating");
+  assert.equal(migrated.schemaVersion, 5);
+  assert.ok(fs.existsSync(`${legacy}.pre-v5.bak`), "a safety copy is written before migrating");
   migrated.close();
   realm = await openDatabase({ file });
   repo = createRepositories(realm);
 });
 
-test("migration v2 → v3 adds TextStyle.caption and keeps existing text", async () => {
+test("migration v2 → v5 adds TextStyle.caption/graphic and keeps existing text", async () => {
   const legacy = path.join(dir, "legacy-v2.realm");
   const old = await Realm.open({ path: legacy, schema: legacySchemaV2(), schemaVersion: 2 });
   const at = new Date("2026-05-06T07:08:09Z");
@@ -160,10 +188,32 @@ test("migration v2 → v3 adds TextStyle.caption and keeps existing text", async
   });
   old.close();
   const migrated = await openDatabase({ file: legacy });
-  assert.equal(migrated.schemaVersion, 3);
+  assert.equal(migrated.schemaVersion, 5);
   const s = migrated.objectForPrimaryKey("Segment", "bbbbbbbb-0000-0000-0000-000000000003");
   assert.equal(s.text.content, "old caption");
   assert.equal(s.text.caption, null);
-  assert.ok(fs.existsSync(`${legacy}.pre-v3.bak`));
+  assert.equal(s.text.graphic, null);
+  assert.ok(fs.existsSync(`${legacy}.pre-v5.bak`));
+  migrated.close();
+});
+
+test("migration v4 → v5 adds VideoFx.matte = none and keeps the clip's effects", async () => {
+  const legacy = path.join(dir, "legacy-v4.realm");
+  const old = await Realm.open({ path: legacy, schema: legacySchemaV4(), schemaVersion: 4 });
+  const at = new Date("2026-09-01T00:00:00Z");
+  old.write(() => {
+    const seg = old.create("Segment", { _id: "cccccccc-0000-0000-0000-000000000003", kind: "video", start: 0, duration: 1000000, videoFx: { maskType: "circle", chroma: true } });
+    const tr = old.create("Track", { _id: "cccccccc-0000-0000-0000-000000000004", type: "video", order: 0, isMain: true, segments: [seg] });
+    const t = old.create("Timeline", { _id: "cccccccc-0000-0000-0000-000000000001", name: "Timeline 01", createdAt: at, updatedAt: at, tracks: [tr], markers: [] });
+    old.create("Project", { _id: "cccccccc-0000-0000-0000-000000000002", name: "v4", createdAt: at, updatedAt: at, lastOpenedAt: at, mainTimelineId: t._id, timelines: [t], media: [], tags: [] });
+  });
+  old.close();
+  const migrated = await openDatabase({ file: legacy });
+  assert.equal(migrated.schemaVersion, 5);
+  const s = migrated.objectForPrimaryKey("Segment", "cccccccc-0000-0000-0000-000000000003");
+  assert.equal(s.videoFx.matte, "none");
+  assert.equal(s.videoFx.maskType, "circle");
+  assert.equal(s.videoFx.chroma, true);
+  assert.equal(migrated.objectForPrimaryKey("Track", "cccccccc-0000-0000-0000-000000000004").role, "");
   migrated.close();
 });

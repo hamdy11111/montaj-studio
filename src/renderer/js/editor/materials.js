@@ -13,6 +13,30 @@ import { DEFAULT_TEXT } from "../../core/model.js";
 import { openProviderOnly } from "../dialogs/tools.js";
 import { CAPTION_TEMPLATES } from "../../core/captionTemplates.js";
 import { captionCanvas } from "./captionRaster.js";
+import { GRAPHIC_TEMPLATES } from "../../core/graphics.js";
+import { graphicCanvas, preloadGraphic } from "./graphicsRaster.js";
+import { ensureFonts } from "../fonts.js";
+import { canGoBehind } from "../../core/cutout.js";
+
+/** Preview of a motion-graphics template (its defaults, mid-animation) over a dark frame; cached per template. */
+const gfxPreviews = new Map();
+function graphicPreview(id) {
+  if (!gfxPreviews.has(id)) {
+    gfxPreviews.set(id, (async () => {
+      const tpl = GRAPHIC_TEMPLATES[id], g = { template: id, params: {} };
+      await ensureFonts([tpl.params.font?.default || "Cairo"]);
+      await preloadGraphic(g);
+      const W = 320, H = 180, c = document.createElement("canvas");
+      c.width = W; c.height = H; c.className = "gfx-preview";
+      const x = c.getContext("2d"), bg = x.createLinearGradient(0, 0, W, H);
+      bg.addColorStop(0, "#2b3240"); bg.addColorStop(1, "#151821");
+      x.fillStyle = bg; x.fillRect(0, 0, W, H);
+      x.drawImage(graphicCanvas(g, W, H, Math.min(tpl.durUs * 0.55, 2_200_000), tpl.durUs), 0, 0);
+      return c;
+    })());
+  }
+  return gfxPreviews.get(id);
+}
 
 /** Small static preview of a caption template (second word spoken). */
 function templatePreview(id) {
@@ -24,7 +48,7 @@ function templatePreview(id) {
 }
 
 export const TABS = [
-  ["media", "media"], ["audio", "audio"], ["text", "text"], ["stickers", "sticker"], ["effects", "effect"], ["transitions", "transition"],
+  ["media", "media"], ["audio", "audio"], ["text", "text"], ["graphics", "sparkle"], ["stickers", "sticker"], ["effects", "effect"], ["transitions", "transition"],
   ["captions", "captions"], ["filters", "filter"], ["adjustment", "adjust"], ["templates", "template"], ["avatar", "avatar"],
 ];
 
@@ -52,7 +76,7 @@ export class Materials {
   refresh() { if (this.tab === "media" || this.tab === "captions") this.draw(); }
 
   draw() {
-    const fn = { media: this.mediaTab, audio: this.audioTab, text: this.textTab, stickers: this.stickerTab, effects: this.effectsTab, transitions: this.transitionsTab, captions: this.captionsTab, filters: this.filtersTab, adjustment: this.adjustTab, templates: this.templatesTab, avatar: this.avatarTab }[this.tab];
+    const fn = { media: this.mediaTab, audio: this.audioTab, text: this.textTab, graphics: this.graphicsTab, stickers: this.stickerTab, effects: this.effectsTab, transitions: this.transitionsTab, captions: this.captionsTab, filters: this.filtersTab, adjustment: this.adjustTab, templates: this.templatesTab, avatar: this.avatarTab }[this.tab];
     clear(this.body);
     fn.call(this);
   }
@@ -169,6 +193,41 @@ export class Materials {
       })));
   }
 
+  // ------------------------------------------------------------------ motion graphics
+  async graphicsTab() {
+    const ed = this.ed;
+    const tiles = h("div", { class: "tiles gfx-tiles" });
+    for (const [id, tpl] of Object.entries(GRAPHIC_TEMPLATES)) {
+      const art = h("div", { class: "tile-art gfx-art" });
+      tiles.append(h("button", { class: "tile gfx-tile", title: tpl.use, onclick: () => this.addGraphic(id) }, art, h("div", { class: "tile-label nowrap" }, getLang() === "ar" ? tpl.ar : tpl.name)));
+      graphicPreview(id).then((c) => art.append(copyCanvas(c))).catch(() => {});
+    }
+    const sel = ed.selectedSegment();
+    const track = sel ? ed.trackOf(sel.id) : null;
+    const canBehind = sel && !track?.isMain && canGoBehind(sel);
+    const isBehind = track?.role === "behind";
+    const status = await guard(() => call("mattes.status"));
+    this.body.append(
+      h("p", { class: "muted small" }, t("lib.graphicsHint")),
+      tiles,
+      h("div", { class: "card pad col" },
+        h("strong", {}, t("lib.behindPerson"), " ", h("span", { class: "badge local" }, t("c.local"))),
+        h("p", { class: "muted small" }, t("lib.behindHint")),
+        status?.available ? null : h("p", { class: "muted small" }, t("err.matteUnavailable")),
+        h("button", { class: "btn", disabled: !canBehind || !status?.available, onclick: async () => { await ed.behindPerson([sel.id], !isBehind); this.draw(); } },
+          icon("layers"), isBehind ? t("lib.frontOfPerson") : t("lib.putBehind"))));
+  }
+
+  /** Add a template at the playhead (its default length); a "behind" title goes behind the person at once. */
+  async addGraphic(id) {
+    const ed = this.ed, tpl = GRAPHIC_TEMPLATES[id];
+    const def = Object.fromEntries(Object.entries(tpl.params).map(([k, s]) => [k, s.default]));
+    const label = String(def.text || def.title || def.label || def.emoji || tpl.name).slice(0, 40);
+    const res = await ed.exec("addSegment", { kind: "text", atUs: ed.playhead(), durationUs: tpl.durUs,
+      init: { name: `${getLang() === "ar" ? tpl.ar : tpl.name}: ${label}`, text: { ...DEFAULT_TEXT, content: label, graphic: { template: id, params: def } } } });
+    if (res && id === "behind-title") await ed.behindPerson([res.result], true);
+  }
+
   // ------------------------------------------------------------------ stickers
   async stickerTab() {
     const ed = this.ed;
@@ -239,13 +298,16 @@ export class Materials {
       h("div", { class: "tile-art cap-art" }, templatePreview(id)), h("div", { class: "tile-label nowrap" }, has(`cap.${id}`) ? t(`cap.${id}`) : tp.name))));
     drawTiles();
     const keywords = h("input", { type: "text", maxlength: 300, placeholder: t("lib.keywordsPh") });
+    // Recognition fixes, one per line: «wrong = right» (dialect words, names).
+    const fixes = h("textarea", { rows: 2, maxlength: 4000, dir: "auto", placeholder: t("lib.correctionsPh"), style: { width: "100%" } });
+    const corrections = () => fixes.value.split(/\r?\n/).map((l) => l.split("=")).filter((p) => p.length === 2 && p[0].trim()).map(([from, to]) => ({ from: from.trim(), to: to.trim() }));
     const firstCap = ed.tl().tracks.flatMap((x) => x.segments).find((s) => s.text?.caption);
     let reveal = firstCap ? !!firstCap.text.caption.reveal : true;
     const revealBox = h("label", { class: "check" }, h("input", { type: "checkbox", checked: reveal, onchange: (e) => { reveal = e.target.checked; } }), t("lib.revealSpoken"));
     const generate = async () => {
       const tst = toast(t("lib.captionsWorking"), "info", { ms: 30 * 60_000 });
       try {
-        const r = await call("captions.generatePro", ed.timelineId(), { template: chosen, language: lang.value, keywords: keywords.value.split(/[,،]/).map((x) => x.trim()).filter(Boolean), reveal });
+        const r = await call("captions.generatePro", ed.timelineId(), { template: chosen, language: lang.value, keywords: keywords.value.split(/[,،]/).map((x) => x.trim()).filter(Boolean), reveal, corrections: corrections() });
         await ed.reloadTimeline();
         toast(t("lib.captionsDone", { pages: r.pages, words: r.words }), "success");
         if (r.qc?.issues?.length) toast(t("lib.captionsFast", { n: r.qc.issues.length, cps: r.qc.maxCps }), "warning", { ms: 6000 });
@@ -260,6 +322,7 @@ export class Materials {
         tiles,
         h("div", { class: "row" }, h("span", { class: "muted" }, t("lib.spokenLanguage")), lang),
         keywords,
+        fixes,
         revealBox,
         h("div", { class: "row wrap" },
           h("button", { class: "btn primary", disabled: !status?.words, onclick: generate }, icon("captions"), hasAnimated ? t("lib.regenerate") : t("lib.generate")),
@@ -322,6 +385,13 @@ export class Materials {
 }
 
 const hexA = (hex, a) => { const n = parseInt((hex || "#000000").slice(1, 7), 16); return `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},${a})`; };
+function copyCanvas(c) {
+  const d = document.createElement("canvas");
+  d.width = c.width; d.height = c.height; d.className = c.className;
+  d.getContext("2d").drawImage(c, 0, 0);
+  return d;
+}
+
 function filterSwatch(a) {
   const warm = (a.temperature || 0) / 100, sat = 1 + (a.saturation || 0) / 100, bri = 1 + ((a.brightness || 0) + (a.exposure || 0)) / 100;
   const base = [90 + warm * 60, 120, 150 - warm * 60].map((v) => Math.round(Math.max(0, Math.min(255, (128 + (v - 128) * sat) * bri))));

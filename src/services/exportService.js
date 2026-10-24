@@ -8,6 +8,7 @@ import { cuesFromTimeline, formatSrt, formatTxt } from "../core/srt.js";
 import { AppError, validateName, validateEnum } from "../core/validation.js";
 import { uid, US, deepClone } from "../core/util.js";
 import { timelineDuration } from "../core/model.js";
+import { cutoutMedia } from "../core/cutout.js";
 
 // Parts rendered at once (each FFmpeg filter graph is mostly single-threaded; NVENC allows several sessions).
 const PART_CONCURRENCY = Math.max(1, Math.min(4, Math.floor(os.cpus().length / 4)));
@@ -266,6 +267,12 @@ export class ExportService {
         if (!this.compoundFresh(cid)) await this.renderCompound(cid, { overlays: compoundOverlays?.[cid] || {}, compoundOverlays });
         compoundFiles[cid] = this.compoundPath(cid);
       }
+      // Person cutouts need their mask videos (made once per media file, then cached).
+      const mattes = {};
+      for (const id of mattedMedia(timeline)) {
+        if (!this.mattes) throw new AppError("PROVIDER", "err.matteUnavailable", {});
+        mattes[id] = await this.mattes.ensure(id, { onProgress: (p) => notify("export:progress", { jobId, progress: 0, stage: "matte", stageProgress: p }) });
+      }
       const size = outputSize(timeline.canvas, opts.resolution || "1080p");
       // Started without the editor's rasters (agents, compounds): rasterize here with the same drawing code.
       if ((!overlays || !Object.keys(overlays).length) && this.rasterize && needsRaster(timeline)) overlays = await this.rasterize(timeline, size.width, size.height);
@@ -273,7 +280,7 @@ export class ExportService {
       const files = { ...this.stickerFiles(timeline), ...this.writeOverlays(jobDir, overlays) };
       const fps = Number(opts.fps) || timeline.fps || 30;
       const common = {
-        media: this.mediaMap(projectId), overlays: files, luts: this.lutMap(timeline), compoundFiles, caps,
+        media: this.mediaMap(projectId), overlays: files, luts: this.lutMap(timeline), compoundFiles, mattes, caps,
         width: size.width, height: size.height, fps, range: opts.range || null, mode,
         video: { codec: opts.codec || "h264", format: opts.format || "mp4", bitrate: opts.bitrate || "recommended", hw: this.settings.get("performance").hwEncode },
         audio: { enabled: opts.audioEnabled !== false, format: opts.audioFormat || "flac" },
@@ -318,6 +325,9 @@ export class ExportService {
     }
   }
 }
+
+/** Media ids of the clips shown as person cutouts (videoFx.matte = person). */
+export const mattedMedia = (tl) => [...new Set([...tl.tracks.flatMap((t) => t.segments.filter((s) => s.kind === "video" && !s.disabled && s.videoFx?.matte?.type === "person").map((s) => s.mediaId)), ...cutoutMedia(tl)])];
 
 /** True when a timeline has text or sticker layers that must be rasterized for export. */
 export const needsRaster = (tl) => tl.tracks.some((t) => t.segments.some((s) => s.kind === "text" || s.kind === "sticker"));

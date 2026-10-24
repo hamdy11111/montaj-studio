@@ -249,3 +249,69 @@ test("animated captions op and restyle; frames for the agent to look at", async 
   const mf = await call("media_frames", { mediaId: mid, count: 3, short: 160 });
   assert.deepEqual(mf.frames.map((f) => f.atUs), [Math.round(10 * US / 6), Math.round(10 * US / 2), Math.round(50 * US / 6)]);
 });
+
+test("motion graphics: templates and frame states; the op checks params; behind the person via op and plan; caption corrections", async () => {
+  const { GRAPHIC_TEMPLATES, graphicStates, graphicParams } = await import("../../src/core/graphics.js");
+  const { checkInputs } = await import("../../src/agent/skills/runtime.js");
+  const { correctWords } = await import("../../src/core/speech.js");
+  for (const [id, tpl] of Object.entries(GRAPHIC_TEMPLATES)) {
+    const defs = Object.fromEntries(Object.entries(tpl.params).map(([k, s]) => [k, s.default]));
+    assert.doesNotThrow(() => checkInputs({ type: "object", properties: tpl.params, additionalProperties: false }, defs, id), `${id}: defaults match the schema`);
+    assert.ok(tpl.ar && tpl.use && tpl.durUs > tpl.inUs + tpl.outUs, `${id}: names and timing`);
+  }
+  // Intro and outro frame by frame, one held state between; a looping template changes every frame.
+  const st = graphicStates({ template: "title-reveal" }, 3 * US, 30);
+  const tpl = GRAPHIC_TEMPLATES["title-reveal"];
+  assert.equal(st.length, Math.ceil(tpl.inUs / (US / 30)) + 1 + Math.ceil(tpl.outUs / (US / 30)));
+  assert.equal(st[0].fromUs, 0);
+  assert.equal(st[st.length - 1].toUs, 3 * US);
+  assert.ok(st.some((s) => s.toUs - s.fromUs > US), "the hold is one state");
+  assert.equal(graphicStates({ template: "follow-cta" }, 2 * US, 30).length, 60, "loop: every frame");
+  assert.equal(graphicParams({ template: "behind-title", params: { text: "واو" } }).width, 0.9, "missing params take their defaults");
+
+  const invalid = (e) => e.messageKey === "err.inputsInvalid";
+  await assert.rejects(call("timeline_add_graphic", { timelineId: tid, template: "lower-third", params: { title: "x", colour: "#fff" } }), invalid, "unknown parameter refused");
+  await assert.rejects(call("timeline_add_graphic", { timelineId: tid, template: "lower-third", params: { accent: "red" } }), invalid, "colour checked");
+
+  // Behind the person: the matte maker is stubbed (no model in unit tests); the op moves the layer and makes the matte.
+  const made = [];
+  const realEnsure = S.mattes.ensure, realReady = S.mattes.ready;
+  S.mattes.ensure = async (id) => { made.push(id); return "matte.mp4"; };
+  S.mattes.ready = (id) => made.includes(id);
+  try {
+    const g = await call("timeline_add_graphic", { timelineId: tid, template: "behind-title", params: { text: "WOW" }, atUs: US, durationUs: 2 * US });
+    assert.ok(g.clipId && !g.behindPerson);
+    const b = await call("timeline_behind_person", { timelineId: tid, clipIds: [g.clipId] });
+    assert.equal(b.status, "done", JSON.stringify(b.error));
+    assert.deepEqual(b.result.mattes, [{ mediaId: mid, ready: true }]);
+    assert.deepEqual(made, [mid], "the matte of the main video is made once");
+    const view = await call("timeline_inspect", { timelineId: tid });
+    const host = view.tracks.find((t) => t.clips.some((c) => c.clipId === g.clipId));
+    assert.equal(host.behindPerson, true);
+    assert.equal(host.clips.find((c) => c.clipId === g.clipId).text.graphic, "behind-title");
+    const front = await call("timeline_behind_person", { timelineId: tid, clipIds: [g.clipId], behind: false });
+    assert.deepEqual(front.moved, [g.clipId]);
+    assert.equal((await call("timeline_inspect", { timelineId: tid })).tracks.filter((t) => t.behindPerson).length, 0);
+    await call("timeline_remove_clips", { timelineId: tid, clipIds: [g.clipId] });
+
+    // The same through an edit plan, with caption corrections.
+    const plan = { schema: "montaj.editplan/1", title: "gfx",
+      graphics: [{ mediaId: mid, fromUs: 0, toUs: 1_500_000, template: "behind-title", params: { text: "TRICKS" }, behindPerson: true },
+        { mediaId: mid, fromUs: 5_400_000, toUs: 7_000_000, template: "list-item", params: { number: "1", text: "cut", emoji: "scissors" } }],
+      captions: { template: "box-highlight", corrections: [{ from: "um", to: "" }, { from: "three tricks", to: "3 tricks" }] } };
+    assert.equal((await call("edit_plan_validate", { timelineId: tid, plan })).valid, true);
+    const r = await call("edit_plan_apply", { timelineId: tid, plan });
+    assert.equal(r.status, "done", JSON.stringify(r.error));
+    assert.ok(r.result.applied.includes("graphics (2)") && r.result.applied.includes("behind the person (1)"), r.result.applied.join(", "));
+    const tl = S.timelines.get(tid).timeline;
+    const words = tl.tracks.flatMap((t) => t.segments).filter((s) => s.text?.caption).flatMap((s) => s.text.caption.words.map((w) => w.t));
+    assert.ok(words.includes("3") && words.includes("tricks.") && !words.includes("three") && !words.some((w) => /^um/.test(w)), words.join(" "));
+    assert.equal(tl.tracks.filter((t) => t.role === "behind").length, 1);
+    const wrong = await call("edit_plan_validate", { timelineId: tid, plan: { schema: "montaj.editplan/1", captions: { template: "box-highlight", corrections: [{ from: "", to: "x" }] } } });
+    assert.equal(wrong.valid, false, "empty correction refused");
+    await call("timeline_undo", { timelineId: tid });
+  } finally { S.mattes.ensure = realEnsure; S.mattes.ready = realReady; }
+  // Corrections keep the span and the sentence end.
+  assert.deepEqual(correctWords([{ t: "يتزبط.", s: 0, e: 600 }], [{ from: "يتزبط", to: "يتظبط" }]), [{ t: "يتظبط.", s: 0, e: 600 }]);
+  assert.deepEqual(correctWords([{ t: "a", s: 0, e: 100 }, { t: "b", s: 100, e: 300 }], [{ from: "a b", to: "x y z" }]).map((w) => [w.t, w.s, w.e]), [["x", 0, 100], ["y", 100, 200], ["z", 200, 300]]);
+});

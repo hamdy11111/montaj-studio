@@ -10,6 +10,7 @@ import { ProjectService } from "./projectService.js";
 import { AnalysisService } from "./analysisService.js";
 import { TtsService } from "./ttsService.js";
 import { CaptionService } from "./captionService.js";
+import { MatteService } from "./matteService.js";
 import { BackupService } from "./backupService.js";
 import { PackageService } from "./packageService.js";
 import { setBinaries } from "./ffmpeg.js";
@@ -34,6 +35,8 @@ export async function createServices({ root, appVersion = "1.0.0", notify = () =
   const projects = new ProjectService({ repos, paths, media, settings, timelines });
   const tts = new TtsService({ paths, media });
   const captions = new CaptionService({ repos, paths, settings });
+  const mattes = new MatteService({ repos, paths, settings, log, notify });
+  exporter.mattes = mattes;
   const backup = new BackupService({
     paths, appVersion,
     onReopen: (r) => { Object.assign(repos, createRepositories(r)); timelines.open.clear(); },
@@ -41,5 +44,5 @@ export async function createServices({ root, appVersion = "1.0.0", notify = () =
   const packages = new PackageService({ repos, paths, media });
   const purged = projects.purgeExpired();
   if (settings.get("draft").autoBackup) { try { backup.autoBackup(); } catch (e) { log("auto backup failed", e.message); } }
-  return { paths, repos, settings, media, analysis, timelines, exporter, projects, tts, captions, backup, packages, startup: { purged } };
+  return { paths, repos, settings, media, analysis, timelines, exporter, projects, tts, captions, mattes, backup, packages, startup: { purged } };
 }

@@ -39,6 +39,7 @@ export function videoFxToRealm(v) {
     motionBlur: v.motionBlur.enabled, motionBlurAmount: v.motionBlur.amount,
     chroma: v.chroma.enabled, chromaColor: v.chroma.color, chromaIntensity: v.chroma.intensity, chromaShadow: v.chroma.shadow,
     maskType: v.mask.type, maskX: v.mask.x, maskY: v.mask.y, maskW: v.mask.w, maskH: v.mask.h, maskRotation: v.mask.rotation, maskFeather: v.mask.feather, maskInvert: v.mask.invert,
+    matte: v.matte?.type || "none",
   };
 }
 export function videoFxFromRealm(r) {
@@ -48,6 +49,7 @@ export function videoFxFromRealm(r) {
     motionBlur: { enabled: r.motionBlur, amount: r.motionBlurAmount },
     chroma: { enabled: r.chroma, color: r.chromaColor, intensity: r.chromaIntensity, shadow: r.chromaShadow },
     mask: { type: r.maskType, x: r.maskX, y: r.maskY, w: r.maskW, h: r.maskH, rotation: r.maskRotation, feather: r.maskFeather, invert: r.maskInvert },
+    matte: { type: r.matte || "none" },
   };
 }
 export function audioFxToRealm(a) {
@@ -74,7 +76,7 @@ export function segmentToRealm(s, realm) {
     animIn: s.animation?.in, animOut: s.animation?.out, animCombo: s.animation?.combo, transitionOut: s.transitionOut,
     clipEffects: (s.clipEffects || []).map((e) => ({ type: e.type, intensity: e.intensity ?? 50, velocity: !!e.velocity })),
     keyframes: (s.keyframes || []).map((k) => ({ id: k.id, prop: k.prop, timeUs: Math.round(k.timeUs), value: k.value, easing: k.easing || "linear" })),
-    text: s.text ? { ...DEFAULT_TEXT, ...s.text, caption: s.text.caption ? JSON.stringify(s.text.caption) : null } : null,
+    text: s.text ? { ...DEFAULT_TEXT, ...s.text, caption: s.text.caption ? JSON.stringify(s.text.caption) : null, graphic: s.text.graphic ? JSON.stringify(s.text.graphic) : null } : null,
     effectType: s.effect?.type ?? null, effectIntensity: s.effect?.intensity ?? 50,
     filterPreset: s.filter?.preset ?? null, filterIntensity: s.filter?.intensity ?? 100,
     stickerAssetId: s.sticker?.assetId ?? null, stickerBuiltin: s.sticker?.builtin ?? null,
@@ -88,6 +90,7 @@ const anim = (a) => (a ? { type: a.type, durationUs: a.durationUs } : { type: "n
 function textFromRealm(t) {
   const out = pick(t, Object.keys(DEFAULT_TEXT));
   if (t.caption) { try { out.caption = JSON.parse(t.caption); } catch { /* unreadable caption data: plain text */ } }
+  if (t.graphic) { try { out.graphic = JSON.parse(t.graphic); } catch { /* unreadable graphic data: plain text */ } }
   return out;
 }
 
@@ -118,7 +121,7 @@ export function timelineFromRealm(t) {
     canvas: t.canvas ? pick(t.canvas, ["ratio", "width", "height", "bgType", "bgColor", "bgBlur"]) : { ratio: "original", width: 1920, height: 1080, bgType: "color", bgColor: "#000000", bgBlur: 0 },
     markers: t.markers.map((m) => ({ id: m.id, timeUs: m.timeUs, color: m.color, note: m.note })),
     tracks: [...t.tracks].sort((a, b) => a.order - b.order).map((tr) => ({
-      id: tr._id, type: tr.type, order: tr.order, isMain: tr.isMain, name: tr.name, locked: tr.locked, hidden: tr.hidden, muted: tr.muted,
+      id: tr._id, type: tr.type, order: tr.order, isMain: tr.isMain, name: tr.name, locked: tr.locked, hidden: tr.hidden, muted: tr.muted, role: tr.role || "",
       segments: [...tr.segments].map(segmentFromRealm).sort((a, b) => a.start - b.start),
     })),
   };

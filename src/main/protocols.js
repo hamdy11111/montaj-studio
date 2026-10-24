@@ -1,7 +1,7 @@
 // Custom protocols:
 //   app://bundle/...   the renderer (HTML/CSS/JS) and the shared core modules, with a strict CSP
 //   media://asset/<id>[?proxy=1], media://thumb/<id>, media://cover/<projectId>, media://lib/<libraryItemId>,
-//   media://sticker/<builtin>, media://compound/<timelineId>, media://export/<recordId> — streamed from disk with HTTP Range support (needed for <video> seeking)
+//   media://sticker/<builtin>, media://compound/<timelineId>, media://matte/<mediaId>, media://export/<recordId> — streamed from disk with HTTP Range support (needed for <video> seeking)
 import { protocol, net } from "electron";
 import fs from "node:fs";
 import path from "node:path";
@@ -88,6 +88,7 @@ export function handleProtocols(o) {
       if (kind === "lib") { const item = s.repos.library.list().find((i) => i.id === id); return fileResponse(item?.path, request); }
       if (kind === "sticker") return fileResponse(path.join(o.assetsDir, "stickers", `${id}.svg`), request);
       if (kind === "compound") return fileResponse(s.exporter.compoundPath(id), request); // pre-processed compound clip
+      if (kind === "matte") return fileResponse(s.mattes?.ready(id) ? s.mattes.file(id) : null, request); // person matte (text behind the person)
       if (kind === "export") { const r = s.repos.exports.list().find((x) => x.id === id); return fileResponse(r?.path, request); }
     } catch {
       return new Response("not found", { status: 404 });

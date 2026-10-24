@@ -56,6 +56,7 @@ export const DEFAULT_VIDEO_FX = {
   motionBlur: { enabled: false, amount: 3 },
   chroma: { enabled: false, color: "#00FF00", intensity: 30, shadow: 0 },
   mask: { type: "none", x: 0, y: 0, w: 0.6, h: 0.6, rotation: 0, feather: 0, invert: false },
+  matte: { type: "none" }, // "person": only the person shows (a cutout layer above text = text behind the person)
 };
 export const DEFAULT_AUDIO_FX = {
   normalize: { enabled: false, targetLufs: -23 },
@@ -65,13 +66,13 @@ export const DEFAULT_AUDIO_FX = {
   voiceChanger: "none",
 };
 export const DEFAULT_TEXT = {
-  content: "Default text", font: "Segoe UI", size: 15, color: "#FFFFFF", bold: false, italic: false, underline: false,
+  content: "Default text", font: "Cairo", size: 15, color: "#FFFFFF", bold: false, italic: false, underline: false,
   textCase: "none", letterSpacing: 0, lineSpacing: 0, align: "center", direction: "auto",
   strokeColor: "#000000", strokeWidth: 0, bgColor: "#000000", bgOpacity: 0, shadow: false, preset: "none", isCaption: false,
 };
 
-export function newTrack(type, { isMain = false, order = 0, name } = {}) {
-  return { id: uid(), type, order, isMain, locked: false, hidden: false, muted: false, name: name || "", segments: [] };
+export function newTrack(type, { isMain = false, order = 0, name, role = "" } = {}) {
+  return { id: uid(), type, order, isMain, locked: false, hidden: false, muted: false, name: name || "", role, segments: [] };
 }
 
 export function newSegment(kind, init = {}) {
