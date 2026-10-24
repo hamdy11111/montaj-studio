@@ -90,7 +90,7 @@ npm run pack
 ```bash
 npm run dist
 ```
-ينتج مثبّت NSIS في `dist/` بالاسم «Montaj Studio Setup 1.0.0.exe»: تثبيت لكل مستخدم، مع إمكانية اختيار المجلد، واختصار على سطح المكتب، وربط ملفات `.mstudio`.
+ينتج مثبّت NSIS في `dist/` بالاسم «Montaj Studio Setup 1.1.0.exe»: تثبيت لكل مستخدم، مع إمكانية اختيار المجلد، واختصار على سطح المكتب، وربط ملفات `.mstudio`.
 
 - `npmRebuild: false` مقصود: Realm 20 يأتي بملف Node-API مسبق البناء متوافق مع Electron 45، فلا حاجة إلى مُترجِم C++.
 - `asarUnpack` يُخرج `realm.node` وFFmpeg وffprobe من أرشيف asar لأنها ملفات أصلية لا تُحمَّل من داخله.
