@@ -19,6 +19,68 @@ import { TEXT_PRESETS } from "../core/presets.js";
 // The Python helper must be a real file for the interpreter: in packaged builds it is unpacked next to app.asar.
 const FW_SCRIPT = path.join(path.dirname(fileURLToPath(import.meta.url)), "asr", "faster_whisper_words.py").replace(/app\.asar([\\/])/, "app.asar.unpacked$1");
 
+/** 10 ms RMS envelope of a 16-bit PCM WAV (the 16 kHz mono file extracted for recognition). */
+export function wavEnvelope(file, frameMs = 10) {
+  const buf = fs.readFileSync(file);
+  let off = 12, rate = 16000, data = null;
+  while (off + 8 <= buf.length) { // RIFF chunks: "fmt " gives the rate, "data" the samples
+    const id = buf.toString("ascii", off, off + 4), size = buf.readUInt32LE(off + 4);
+    if (id === "fmt ") rate = buf.readUInt32LE(off + 12);
+    if (id === "data") { data = buf.subarray(off + 8, Math.min(buf.length, off + 8 + size)); break; }
+    off += 8 + size + (size % 2);
+  }
+  if (!data) return { env: [], frameUs: frameMs * 1000 };
+  const win = Math.round((rate * frameMs) / 1000), n = Math.floor(data.length / 2), env = [];
+  for (let i = 0; i + win <= n; i += win) { let s = 0; for (let k = 0; k < win; k++) { const v = data.readInt16LE((i + k) * 2); s += v * v; } env.push(Math.sqrt(s / win)); }
+  return { env, frameUs: frameMs * 1000 };
+}
+
+/**
+ * Snap word times to the sound. Recognisers start the first word after a pause too early (part of the silence is
+ * given to it — measured 0.5–1.2 s on real speech), which makes a caption appear before the word is said. A word
+ * whose reported start is silent moves forward to where speech energy starts (−30 ms), and a word whose reported end
+ * is silent moves back to its last voiced frame (+50 ms). "Speech" = 40 ms in a row above a threshold between the
+ * noise floor (20th percentile) and the speech level (90th), so a click or breath does not count. Words keep at
+ * least 60 ms and their order.
+ */
+export function refineWordTimes(words, { env, frameUs }) {
+  if (!env.length || !words.length) return { words, moved: 0 };
+  const sorted = [...env].sort((a, b) => a - b);
+  const pct = (p) => sorted[Math.min(sorted.length - 1, Math.floor(p * sorted.length))];
+  const floor = pct(0.2), speech = pct(0.9);
+  const thr = floor + 0.12 * (speech - floor);
+  if (!(speech > floor * 2)) return { words, moved: 0 }; // no clear speech/silence contrast: leave as is
+  const frame = (us) => Math.max(0, Math.min(env.length - 1, Math.floor(us / frameUs)));
+  const RUN = Math.max(1, Math.round(40_000 / frameUs));
+  const voicedAt = (j) => { for (let k = 0; k < RUN; k++) if (!(env[j + k] >= thr)) return false; return true; };
+  const voicedBefore = (j) => { for (let k = 0; k < RUN; k++) if (!(env[j - k] >= thr)) return false; return true; };
+  let moved = 0;
+  const out = words.map((w, i) => {
+    let s = w.startUs, e = w.endUs;
+    const nextStart = words[i + 1]?.startUs ?? Infinity;
+    if (env[frame(s)] < thr) {
+      // The sound may begin after the reported END too (the whole word placed in the silence): search up to the
+      // next word, and keep the word's length when it moves past its end.
+      let j = frame(s); const lim = frame(Math.min(Math.max(e - 40_000, nextStart - 40_000), s + 1_500_000));
+      while (j < lim && !voicedAt(j)) j++;
+      if (voicedAt(j)) {
+        const ns = Math.max(w.startUs, j * frameUs - 30_000);
+        if (ns >= e - 60_000) e = Math.min(Math.max(nextStart, ns + 60_000), ns + Math.max(150_000, w.endUs - w.startUs));
+        s = ns;
+      }
+    }
+    if (env[frame(e)] < thr) {
+      let j = frame(e); const lim = frame(s + 60_000);
+      while (j > lim && !voicedBefore(j)) j--;
+      if (voicedBefore(j)) e = Math.min(w.endUs, (j + 1) * frameUs + 50_000);
+    }
+    if (e - s < 60_000) e = Math.min(w.endUs, s + 60_000);
+    if (s !== w.startUs || e !== w.endUs) moved++;
+    return { ...w, startUs: Math.round(s), endUs: Math.round(Math.max(e, s + 1)) };
+  });
+  return { words: out, moved };
+}
+
 /** Run a process, collect stdout/stderr; rejects with PROVIDER err on failure. */
 function exec(cmd, args, { timeoutMs = 60_000, signal } = {}) {
   return new Promise((resolve, reject) => {
@@ -64,14 +126,16 @@ export class CaptionService {
   async detectFasterWhisper(force = false) {
     const p = this.settings.get("providers");
     const key = `${this.pythonCmd()}|${p.fwModel}`;
-    if (!force && this.fw?.key === key) return this.fw;
+    // A success is kept; a failure is retried after 20 s (Python can be slow to start while the app launches — a
+    // failed first check must not disable speech until the next restart).
+    if (!force && this.fw?.key === key && (this.fw.ok || Date.now() - this.fw.at < 20_000)) return this.fw;
     if (!force && this.fwChecking?.key === key) return this.fwChecking.promise;
     const code = "import json,faster_whisper,ctranslate2\nfrom faster_whisper.utils import download_model\n"
       + "m=None\ntry:\n  m=download_model(__import__('sys').argv[1],local_files_only=True)\nexcept Exception as e:\n  m=None\n"
       + "print(json.dumps({'version':faster_whisper.__version__,'cuda':ctranslate2.get_cuda_device_count(),'model':bool(m)}))";
-    const promise = exec(this.pythonCmd(), ["-X", "utf8", "-c", code, p.fwModel || "large-v3-turbo"], { timeoutMs: 30_000 })
-      .then((out) => { const j = JSON.parse(out.trim().split("\n").pop()); return { key, ok: j.model, installed: true, version: j.version, cuda: j.cuda > 0, model: p.fwModel }; })
-      .catch(() => ({ key, ok: false, installed: false }))
+    const promise = exec(this.pythonCmd(), ["-X", "utf8", "-c", code, p.fwModel || "large-v3-turbo"], { timeoutMs: 90_000 })
+      .then((out) => { const j = JSON.parse(out.trim().split("\n").pop()); return { key, at: Date.now(), ok: j.model, installed: true, version: j.version, cuda: j.cuda > 0, model: p.fwModel }; })
+      .catch((e) => ({ key, at: Date.now(), ok: false, installed: false, error: String(e?.details?.stderr || e?.details?.message || e?.message || e).slice(-300) }))
       .then((r) => { this.fw = r; this.fwChecking = null; return r; });
     this.fwChecking = { key, promise };
     return promise;
@@ -125,14 +189,16 @@ export class CaptionService {
     let stamp = "";
     try { const st = fs.statSync(m.path); stamp = `${st.size}:${st.mtimeMs}`; } catch { throw new AppError("IO", "err.fileNotFound", { file: path.basename(m.path) }); }
     const dir = path.join(this.paths.cache, "transcripts");
-    const file = path.join(dir, `${m.id}.${crypto.createHash("sha1").update(`${engine}|${model}|${lang}|${stamp}`).digest("hex").slice(0, 12)}.json`);
+    const file = path.join(dir, `${m.id}.${crypto.createHash("sha1").update(`${engine}|${model}|${lang}|${stamp}|onsets-v1`).digest("hex").slice(0, 12)}.json`);
     if (!fresh && fs.existsSync(file)) { try { return JSON.parse(fs.readFileSync(file, "utf8")); } catch { /* re-run */ } }
     const work = path.join(this.paths.cache, `asr-${uid()}`);
     fs.mkdirSync(work, { recursive: true });
     try {
       const wav = await this.extractWav(m, work, { signal });
       const result = engine === "fasterwhisper" ? await this.runFasterWhisper(wav, lang, signal) : await this.runWhisperCppWords(wav, work, lang, signal);
-      const out = { mediaId: m.id, engine, model, language: result.language || lang, durationUs: m.durationUs, ...result.data };
+      const snapped = refineWordTimes(result.data.words, wavEnvelope(wav));
+      for (const sg of result.data.segments) { const a = snapped.words[sg.w0], b = snapped.words[sg.w1]; if (a && b) { sg.startUs = a.startUs; sg.endUs = b.endUs; } }
+      const out = { mediaId: m.id, engine, model, language: result.language || lang, durationUs: m.durationUs, ...result.data, words: snapped.words, timing: { snappedToAudio: snapped.moved } };
       fs.mkdirSync(dir, { recursive: true });
       fs.writeFileSync(file, JSON.stringify(out));
       return out;

@@ -46,6 +46,7 @@ export function fillers(words, { pauseUs = 150_000 } = {}) {
     const gapBefore = i === 0 ? Infinity : w.startUs - words[i - 1].endUs;
     const gapAfter = i === words.length - 1 ? Infinity : words[i + 1].startUs - w.endUs;
     const isolated = gapBefore >= pauseUs || gapAfter >= pauseUs || /,|،/.test(w.text);
+    if (/[?؟]$/.test(String(w.text).trim())) return; // "فطبعا إيه؟" — a question, not a hesitation
     if ((SURE_FILLERS.has(n) && (!NEEDS_PAUSE.has(n) || isolated)) || (FUSED_FILLER.test(n) && isolated)) out.push({ i, text: w.text, startUs: w.startUs, endUs: w.endUs, sure: true });
     else if (MAYBE_FILLERS.has(n)) out.push({ i, text: w.text, startUs: w.startUs, endUs: w.endUs, sure: false });
   });

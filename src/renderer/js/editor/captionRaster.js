@@ -52,7 +52,7 @@ function layout(text, W, H) {
   const pad = Math.ceil(px * 0.6);
   const contentW = tpl.mode === "word" ? Math.max(...widths, 1) * (WORD_SCALE_MAX) : Math.max(...lines.map((l) => l.w), 1);
   const contentH = tpl.mode === "word" ? lineH * WORD_SCALE_MAX : lineH * lines.length;
-  return { tpl, ov, words, rtl, emph, px, font, wordScale, widths, lines, lineH, pad, cw: Math.ceil(contentW * MAX_POP + pad * 2), ch: Math.ceil(contentH * MAX_POP + pad * 2) };
+  return { tpl, ov, words, rtl, emph, px, reveal: !!text.caption.reveal, font, wordScale, widths, lines, lineH, pad, cw: Math.ceil(contentW * MAX_POP + pad * 2), ch: Math.ceil(contentH * MAX_POP + pad * 2) };
 }
 const WORD_SCALE_MAX = 1.25;
 
@@ -111,7 +111,7 @@ export function captionCanvas(text, W, H, state, L = layout(text, W, H)) {
       const w = L.widths[i];
       const mid = L.rtl ? x - w / 2 : x + w / 2;
       const active = i === state.active;
-      drawWord(g, L, i, mid, y, active ? state.wordPop : 1, active);
+      if (!(L.reveal && i > state.active)) drawWord(g, L, i, mid, y, active ? state.wordPop : 1, active); // not said yet: keep its place
       x = L.rtl ? x - w - (k < line.idx.length - 1 ? L.lines.gap : 0) : x + w + (k < line.idx.length - 1 ? L.lines.gap : 0);
     });
   });

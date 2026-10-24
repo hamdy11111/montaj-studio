@@ -52,6 +52,25 @@ function applyLinkageShift(tl, attached, deltas) {
       if (f && !f.track.locked) f.segment.start = Math.max(0, f.segment.start + d);
     }
   }
+  resolveOverlaps(tl);
+}
+
+/**
+ * After a ripple move, linked layers that now overlap another layer on their track (e.g. a long text whose anchor
+ * clip was deleted, reached by the texts after it) move to a free track of the same type instead of making the
+ * whole edit fail — the layer keeps its time.
+ */
+export function resolveOverlaps(tl) {
+  for (const t of [...tl.tracks]) {
+    if (t.isMain || t.locked) continue;
+    sortSegments(t);
+    for (let i = 1; i < t.segments.length; i++) {
+      const prev = t.segments[i - 1], s = t.segments[i];
+      if (!overlaps(prev, s)) continue;
+      t.segments.splice(i, 1); i--;
+      trackFor(tl, t.type, s.start, s.duration).segments.push(s);
+    }
+  }
 }
 
 /** Run an edit with optional magnet + linkage handling around it. */
@@ -102,8 +121,14 @@ export function addMediaSegment(tl, media, { atUs = null, toMain = true, setting
   } else if (toMain) {
     const main = mainTrack(tl);
     assertUnlocked(main);
-    if (atUs === null || magnet) seg.start = timelineEndOf(main);
-    else seg.start = atUs;
+    if (atUs === null) seg.start = timelineEndOf(main);
+    else if (magnet) {
+      // Insert at the clip boundary nearest atUs (between two clips); later clips move right by its length.
+      const bounds = [0, ...main.segments.map((s) => end(s))];
+      const at = bounds.reduce((b, x) => (Math.abs(x - atUs) < Math.abs(b - atUs) ? x : b), bounds[0]);
+      for (const s of main.segments) if (s.start >= at) s.start += seg.duration;
+      seg.start = at;
+    } else seg.start = atUs;
     main.segments.push(seg);
     if (magnet) packMainTrack(tl);
   } else {

@@ -1,7 +1,8 @@
 // Word-timed caption templates and the pure logic shared by the preview, the exporter and the agents: grouping
 // words into pages, the discrete animation states of a page (which word is active, pop frames) and keyword
 // emphasis. Drawing lives in renderer/js/editor/captionRaster.js; a caption page is a text segment with
-// text.caption = { template, words: [{ t, s, e }] (µs from the segment start), emphasis: [word indices], overrides }.
+// text.caption = { template, words: [{ t, s, e }] (µs from the segment start), emphasis: [word indices], overrides,
+// reveal (words appear only when spoken) }.
 import { US } from "./util.js";
 
 const BLACK = "#000000";
@@ -37,18 +38,24 @@ const normKey = (w) => String(w || "").toLowerCase().replace(/[^\p{L}\p{N}]+/gu,
  * A page ends at sentence/clause punctuation, at a pause ≥ pauseUs, or when it would exceed the template's
  * word/character budget or maxPageUs.
  */
-export function paginate(words, tplId, { pauseUs = 350_000, maxPageUs = 3_000_000, upper = null } = {}) {
+export function paginate(words, tplId, { pauseUs = 350_000, maxPageUs = 3_000_000, upper = null, breaksUs = [] } = {}) {
   const tpl = CAPTION_TEMPLATES[tplId] || CAPTION_TEMPLATES["bold-classic"];
   const pages = [];
   let cur = [];
   const chars = (ws) => ws.reduce((n, w) => n + w.t.length + 1, 0);
   const flush = () => { if (cur.length) pages.push({ words: cur }); cur = []; };
-  for (const w of words) {
+  // A cut on the main track also ends a page: words on both sides of a cut are not one thought on screen.
+  const cutBetween = (a, b) => breaksUs.some((t) => t > a.s && t <= b.s);
+  words.forEach((w, i) => {
     const prev = cur[cur.length - 1];
-    if (prev && (w.s - prev.e >= pauseUs || cur.length >= tpl.maxWords || chars(cur) + w.t.length > tpl.maxChars || w.e - cur[0].s > maxPageUs)) flush();
+    const over = prev && (cur.length >= tpl.maxWords || chars(cur) + w.t.length > tpl.maxChars || w.e - cur[0].s > maxPageUs);
+    // Over budget but this word closes the sentence: keep it on the page rather than leave it alone on the next.
+    const closesSentence = PUNCT_END.test(w.t) && !cutBetween(prev || w, w) && chars(cur) + w.t.length <= tpl.maxChars + 8 && cur.length <= tpl.maxWords;
+    if (prev && (w.s - prev.e >= pauseUs || cutBetween(prev, w) || (over && !closesSentence))) flush();
     cur.push(w);
-    if (PUNCT_END.test(w.t) && cur.length >= 2) flush();
-  }
+    const next = words[i + 1];
+    if (PUNCT_END.test(w.t) && (cur.length >= 2 || !next || cutBetween(w, next))) flush();
+  });
   flush();
   // Timing: a page shows from its first word to just before the next page (gaps < 0.6 s are bridged, so the text
   // does not flicker between pages), and at least 0.3 s.
@@ -56,7 +63,9 @@ export function paginate(words, tplId, { pauseUs = 350_000, maxPageUs = 3_000_00
     const next = pages[i + 1];
     const startUs = p.words[0].s;
     let endUs = p.words[p.words.length - 1].e;
-    if (next && next.words[0].s - endUs < 600_000) endUs = next.words[0].s;
+    const cut = breaksUs.filter((t) => t > endUs - 1 && (!next || t <= next.words[0].s)).sort((a, b) => a - b)[0];
+    if (cut !== undefined) endUs = Math.min(endUs + 150_000, cut); // never runs over a cut into the next clip
+    else if (next && next.words[0].s - endUs < 600_000) endUs = next.words[0].s;
     else endUs += 150_000;
     return { startUs, endUs: Math.max(endUs, startUs + 300_000), words: p.words.map((w) => ({ ...w, t: upper ?? tpl.upper ? w.t.toUpperCase() : w.t })) };
   });
@@ -97,7 +106,8 @@ export function captionStates(text, durationUs, fps = 30) {
   const words = captionWords(text, durationUs);
   const FRAME = US / fps;
   const cuts = new Set([0, durationUs]);
-  const perWord = tpl.highlight !== "none" || tpl.mode === "word" || tpl.pop === "word";
+  // reveal: a word appears only once it is spoken (no spoilers); its place on the line is kept.
+  const perWord = tpl.highlight !== "none" || tpl.mode === "word" || tpl.pop === "word" || !!text?.caption?.reveal;
   if (perWord) for (const w of words) if (w.s > 0 && w.s < durationUs) cuts.add(w.s);
   if (tpl.pop === "page") POP_FRAMES.forEach((_, k) => cuts.add(Math.min(durationUs, Math.round((k + 1) * FRAME))));
   if (tpl.pop === "word") for (const w of words) WORD_POP.forEach((_, k) => { const t = Math.max(0, w.s) + Math.round((k + 1) * FRAME); if (t < durationUs) cuts.add(t); });
@@ -112,7 +122,7 @@ export function captionStates(text, durationUs, fps = 30) {
     const pop = tpl.pop === "page" && pageFrame < POP_FRAMES.length ? POP_FRAMES[pageFrame] : 1;
     let wordPop = 1;
     if (tpl.pop === "word" && active >= 0) { const f = Math.round((t - Math.max(0, words[active].s)) / FRAME); if (f >= 0 && f < WORD_POP.length) wordPop = WORD_POP[f]; }
-    const st = { fromUs: t, toUs: times[i + 1], active: tpl.mode === "word" || tpl.highlight !== "none" ? active : -1, pop, wordPop };
+    const st = { fromUs: t, toUs: times[i + 1], active: perWord ? active : -1, pop, wordPop };
     const last = states[states.length - 1];
     if (last && last.active === st.active && last.pop === st.pop && last.wordPop === st.wordPop) last.toUs = st.toUs;
     else states.push(st);

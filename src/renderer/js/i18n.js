@@ -226,6 +226,7 @@ const D = {
   "cap.bold-classic": ["Bold classic", "عريض كلاسيكي"], "cap.karaoke-yellow": ["Karaoke yellow", "كاريوكي أصفر"], "cap.box-highlight": ["Box highlight", "مربع متنقّل"],
   "cap.single-pop": ["Single word pop", "كلمة واحدة تقفز"], "cap.keywords": ["Keywords", "الكلمات المهمة"], "cap.minimal-lower": ["Minimal lower", "بسيط أسفل"],
   "cap.neon": ["Neon", "نيون"], "cap.subtitle-bar": ["Subtitle bar", "شريط ترجمة"],
+  "lib.revealSpoken": ["Show each word only when it is spoken (no spoilers)", "إظهار الكلمة عند نطقها فقط (بدون حرق المفاجآت)"],
   "lib.regenerate": ["Regenerate", "إعادة التوليد"], "lib.applyStyle": ["Apply this style", "تطبيق هذا الشكل"], "lib.generatePlain": ["Plain captions", "كابشن عادي"],
   "set.asrEngine": ["Speech recognition", "التعرّف على الكلام"], "set.asrAuto": ["Automatic", "تلقائي"], "set.pythonPath": ["Python (for faster-whisper)", "Python (لـ faster-whisper)"],
   "set.fwModel": ["faster-whisper model", "نموذج faster-whisper"], "set.asrStatus": ["Status", "الحالة"],

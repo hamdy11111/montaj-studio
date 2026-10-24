@@ -52,7 +52,8 @@ export async function applyCaptions(ctx, timelineId, opts = {}) {
     const old = tl.tracks.flatMap((t) => t.segments).filter((s) => s.kind === "text" && s.text?.isCaption).map((s) => s.id);
     if (old.length) await exec("delete", { ids: old });
   }
-  const pages = paginate(words, template);
+  const breaksUs = mainPieces(tl).slice(1).map((p) => p.start); // clip boundaries on the main track
+  const pages = paginate(words, template, { breaksUs });
   const y = opts.positionY ?? captionPosY(template, tl.canvas);
   let trackId = null;
   for (const pg of pages) {
@@ -62,7 +63,7 @@ export async function applyCaptions(ctx, timelineId, opts = {}) {
       init: {
         name: content.slice(0, 40),
         text: { ...DEFAULT_TEXT, content, isCaption: true, direction: isArabicText(content) ? "rtl" : "auto",
-          caption: { template, words: pg.words.map((w) => ({ t: w.t, s: w.s - pg.startUs, e: w.e - pg.startUs })), emphasis: emphasisFor(pg.words, opts.keywords || [], { auto: opts.autoEmphasis !== false }), overrides: opts.overrides || {} } },
+          caption: { template, words: pg.words.map((w) => ({ t: w.t, s: w.s - pg.startUs, e: w.e - pg.startUs })), emphasis: emphasisFor(pg.words, opts.keywords || [], { auto: opts.autoEmphasis !== false }), overrides: opts.overrides || {}, reveal: !!opts.reveal } },
         transform: { y },
       },
     });
@@ -90,13 +91,13 @@ export async function transact(ctx, timelineId, label, expectedRevision, fn) {
 }
 
 /** Change the template / colours of every caption page of a timeline (one undo step). */
-export async function restyleCaptions(ctx, timelineId, { template, overrides, positionY } = {}) {
+export async function restyleCaptions(ctx, timelineId, { template, overrides, positionY, reveal } = {}) {
   if (template && !CAPTION_TEMPLATES[template]) throw new AppError("VALIDATION", "err.enum", { field: "template", allowed: Object.keys(CAPTION_TEMPLATES) });
   const T = ctx.services.timelines;
   const tl = T.get(timelineId).timeline;
   const segs = tl.tracks.flatMap((t) => t.segments).filter((s) => s.kind === "text" && s.text?.caption);
   if (!segs.length) throw new AppError("VALIDATION", "err.noCaptions");
-  const items = segs.map((s) => ({ segId: s.id, patch: { text: { caption: { ...s.text.caption, ...(template ? { template } : {}), ...(overrides ? { overrides: { ...(s.text.caption.overrides || {}), ...overrides } } : {}) } }, ...(positionY !== undefined || template ? { transform: { y: positionY ?? captionPosY(template, tl.canvas) } } : {}) } }));
+  const items = segs.map((s) => ({ segId: s.id, patch: { text: { caption: { ...s.text.caption, ...(template ? { template } : {}), ...(overrides ? { overrides: { ...(s.text.caption.overrides || {}), ...overrides } } : {}), ...(reveal !== undefined ? { reveal: !!reveal } : {}) } }, ...(positionY !== undefined || template ? { transform: { y: positionY ?? captionPosY(template, tl.canvas) } } : {}) } }));
   const r = await T.execAs(ctx.source, timelineId, "patchMany", { label: "captions style", items });
   return { changed: r.result, revision: r.revision };
 }

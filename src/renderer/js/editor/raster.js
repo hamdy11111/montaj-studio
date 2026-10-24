@@ -16,8 +16,11 @@ function applyCase(s, c) {
 const hexA = (hex, a) => { const n = parseInt((hex || "#000000").slice(1, 7), 16); return `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},${a})`; };
 const isRtl = (s) => /[֐-ࣿיִ-ﻼ]/.test(s);
 
-/** Draw a text block into a new canvas sized to its content. Returns null for empty text. */
-export function rasterText(text, W, H) {
+/**
+ * Draw a text block into a new canvas sized to its content. Returns null for empty text. A block wider than 92 % of
+ * the frame is drawn smaller to fit (a long title would otherwise be cut off at both edges).
+ */
+export function rasterText(text, W, H, fit = true) {
   const content = applyCase(String(text?.content ?? ""), text.textCase);
   if (!content.trim()) return null;
   const px = textFontPx(text, H);
@@ -31,6 +34,7 @@ export function rasterText(text, W, H) {
   const stroke = (text.strokeWidth || 0) * px / 30;
   const pad = Math.ceil(px * 0.25 + stroke + (text.shadow ? px * 0.15 : 0));
   const w = Math.ceil(Math.max(...widths) + pad * 2), hgt = Math.ceil(lineH * lines.length + pad * 2);
+  if (fit && w > W * 0.92) return rasterText({ ...text, size: (text.size || 15) * ((W * 0.92) / w) }, W, H, false);
   const c = document.createElement("canvas");
   c.width = Math.max(2, w); c.height = Math.max(2, hgt);
   const g = c.getContext("2d");

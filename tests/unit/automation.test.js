@@ -16,6 +16,7 @@ import { fillers, pauses, retakes, sentences, suggestCuts, normWord } from "../.
 import { paginate, captionStates, captionWords, captionQc, emphasisFor, CAPTION_TEMPLATES, POP_FRAMES } from "../../src/core/captionTemplates.js";
 import { mainPieces, mapSpan, mapPoint, predictCuts, normalizeCuts, checkPlan } from "../../src/core/editPlan.js";
 import { US } from "../../src/core/util.js";
+import { refineWordTimes } from "../../src/services/captionService.js";
 
 const W = (text, s, e) => ({ text, startUs: Math.round(s * US), endUs: Math.round(e * US) });
 // "So today I want to show you, um, three tricks. [1.5 s] The first trick is cut. The first trick is to cut silence."
@@ -40,6 +41,8 @@ test("speech analysis: sentences, sure and possible fillers, pauses, retakes", (
   assert.equal(normWord("أَوَّل،"), "اول");
   const ar = [W("هوريكم", 1, 1.5), W("بأمم", 1.7, 2.2), W("تلات", 2.5, 2.8), W("بامتياز", 3, 3.5)];
   assert.deepEqual(fillers(ar).map((x) => [x.text, x.sure]), [["بأمم", true]]);
+  // "فطبعا إيه؟" (rhetorical question between pauses) is speech, not a hesitation — found on a real recording.
+  assert.deepEqual(fillers([W("فطبعا", 50.6, 51.1), W("ايه?", 51.12, 51.44), W("كل", 52.7, 53.0)]), []);
 });
 
 test("suggested cuts remove pauses (keeping air), sure fillers and the first attempt of a retake", () => {
@@ -76,6 +79,44 @@ test("caption pages break at punctuation, pauses and the template budget; states
   assert.equal(st[st.length - 1].toUs, pg.endUs - pg.startUs);
   // A template without highlight has one settled state.
   assert.equal(captionStates({ ...text, caption: { ...text.caption, template: "minimal-lower" } }, 1_000_000, 30).length, 1);
+});
+
+test("word times snap to the sound: no caption before the word is said; clicks are ignored", () => {
+  // 10 ms frames: silence (level 10), a one-frame click at 0.30 s, speech 0.50–1.00 s and 1.80–2.30 s.
+  const env = Array.from({ length: 300 }, (_, i) => ((i >= 50 && i < 100) || (i >= 180 && i < 230) ? 1000 : i === 30 ? 900 : 10));
+  const words = [W("early", 0.1, 0.9), W("inside", 1.0, 1.2), W("next", 1.8, 2.3)];
+  const { words: out, moved } = refineWordTimes(words, { env, frameUs: 10_000 });
+  assert.equal(out[0].startUs, 470_000, "starts where speech starts (−30 ms), not at the click");
+  assert.equal(out[0].endUs, 900_000, "end kept inside speech");
+  assert.equal(out[2].startUs, 1_800_000, "a word that starts on its sound is untouched");
+  assert.deepEqual([out[1].startUs, out[1].endUs], [1_000_000, 1_200_000], "no sound before the next word: left as reported");
+  assert.equal(moved, 1);
+  // A word placed entirely in the silence before its sound moves to the sound and keeps its length.
+  const env2 = Array.from({ length: 200 }, (_, i) => (i >= 120 && i < 170 ? 1000 : 10));
+  const r2 = refineWordTimes([W("a", 0.1, 0.4), W("b", 1.9, 2.0)], { env: env2, frameUs: 10_000 }).words;
+  assert.equal(r2[0].startUs, 1_170_000);
+  assert.ok(r2[0].endUs > r2[0].startUs && r2[0].endUs <= 1_900_000);
+  // No speech/silence contrast (all noise): nothing changes.
+  assert.equal(refineWordTimes(words, { env: Array(300).fill(500), frameUs: 10_000 }).moved, 0);
+});
+
+test("reveal: words of a page appear only once spoken, even without a highlight", () => {
+  const ws = words([["no", 0, 300], ["spoilers", 300, 900], ["here", 900, 1300]]);
+  const text = { content: "no spoilers here", caption: { template: "minimal-lower", words: ws, reveal: true } };
+  const st = captionStates(text, 1_300_000, 30);
+  assert.deepEqual(st.map((x) => [x.fromUs, x.active]), [[0, 0], [300_000, 1], [900_000, 2]]);
+  assert.equal(captionStates({ ...text, caption: { ...text.caption, reveal: false } }, 1_300_000, 30).length, 1);
+});
+
+test("caption pages respect cuts: no page spans a cut or stays on screen after it; no orphan last word", () => {
+  // "...يبقى شاكله حلو." then a cut at 2.0 s, then "والدنيا حواليا مكركبة."
+  const ws = words([["يبقى", 0, 300], ["شاكله", 300, 700], ["حلو.", 700, 1000], ["والدنيا", 2000, 2400], ["حواليا", 2400, 2800], ["مكركبة.", 2800, 3300]]);
+  const pages = paginate(ws, "single-pop", { breaksUs: [1_900_000] }); // single-pop: 3 words max per page
+  assert.deepEqual(pages.map((p) => p.words.map((w) => w.t).join(" ")), ["يبقى شاكله حلو.".toUpperCase(), "والدنيا حواليا مكركبة.".toUpperCase()]);
+  assert.ok(pages[0].endUs <= 1_900_000, "the page ends at the cut");
+  const joined = words([["one", 0, 200], ["two", 200, 400], ["three", 400, 600], ["four", 600, 800], ["five", 800, 1000], ["end.", 1000, 1200]]);
+  const kp = paginate(joined, "karaoke-yellow"); // 5 words max: "end." would be alone on the next page
+  assert.equal(kp.length, 1, "a sentence-final word joins the page instead of standing alone");
 });
 
 test("editing a caption keeps or redistributes word timings; emphasis and reading-speed checks", () => {

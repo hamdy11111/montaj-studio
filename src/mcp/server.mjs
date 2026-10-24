@@ -45,7 +45,7 @@ class AppConnection {
     const pipe = endpoint();
     const tok = token();
     if (!tok) throw new Error("No client token. Create one in Montaj Studio › Settings › Agents and set MONTAJ_TOKEN or MONTAJ_TOKEN_FILE.");
-    if (!pipe) throw new Error("Montaj Studio is not running with Agents enabled (no endpoint). Open the app and turn on Settings › Agents.");
+    if (!pipe) throw new Error("Montaj Studio's agent connection is not open (no endpoint): the app is closed, Settings › Agents & MCP is off, or the local pipe failed to open — that page shows the reason.");
     await new Promise((resolve, reject) => {
       const s = net.createConnection(pipe);
       s.setEncoding("utf8");

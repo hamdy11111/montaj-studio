@@ -239,17 +239,20 @@ export class Materials {
       h("div", { class: "tile-art cap-art" }, templatePreview(id)), h("div", { class: "tile-label nowrap" }, has(`cap.${id}`) ? t(`cap.${id}`) : tp.name))));
     drawTiles();
     const keywords = h("input", { type: "text", maxlength: 300, placeholder: t("lib.keywordsPh") });
+    const firstCap = ed.tl().tracks.flatMap((x) => x.segments).find((s) => s.text?.caption);
+    let reveal = firstCap ? !!firstCap.text.caption.reveal : true;
+    const revealBox = h("label", { class: "check" }, h("input", { type: "checkbox", checked: reveal, onchange: (e) => { reveal = e.target.checked; } }), t("lib.revealSpoken"));
     const generate = async () => {
       const tst = toast(t("lib.captionsWorking"), "info", { ms: 30 * 60_000 });
       try {
-        const r = await call("captions.generatePro", ed.timelineId(), { template: chosen, language: lang.value, keywords: keywords.value.split(/[,،]/).map((x) => x.trim()).filter(Boolean) });
+        const r = await call("captions.generatePro", ed.timelineId(), { template: chosen, language: lang.value, keywords: keywords.value.split(/[,،]/).map((x) => x.trim()).filter(Boolean), reveal });
         await ed.reloadTimeline();
         toast(t("lib.captionsDone", { pages: r.pages, words: r.words }), "success");
         if (r.qc?.issues?.length) toast(t("lib.captionsFast", { n: r.qc.issues.length, cps: r.qc.maxCps }), "warning", { ms: 6000 });
         this.draw();
       } catch (err) { toast(errorText(err), "error"); } finally { tst.remove(); }
     };
-    const restyle = async () => { if (await guard(() => call("captions.restyle", ed.timelineId(), { template: chosen }))) { await ed.reloadTimeline(); this.draw(); } };
+    const restyle = async () => { if (await guard(() => call("captions.restyle", ed.timelineId(), { template: chosen, reveal }))) { await ed.reloadTimeline(); this.draw(); } };
     this.body.append(
       h("div", { class: "card pad col" },
         h("strong", {}, t("lib.animatedCaptions"), " ", h("span", { class: "badge local" }, t("c.local"))),
@@ -257,6 +260,7 @@ export class Materials {
         tiles,
         h("div", { class: "row" }, h("span", { class: "muted" }, t("lib.spokenLanguage")), lang),
         keywords,
+        revealBox,
         h("div", { class: "row wrap" },
           h("button", { class: "btn primary", disabled: !status?.words, onclick: generate }, icon("captions"), hasAnimated ? t("lib.regenerate") : t("lib.generate")),
           hasAnimated ? h("button", { class: "btn", onclick: restyle }, t("lib.applyStyle")) : null),

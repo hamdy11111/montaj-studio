@@ -136,7 +136,8 @@ export class TimelineService {
       case "addMedia": {
         const m = this.repos.media.get(a.mediaId);
         return this.commit(timelineId, "addMedia", (tl) => {
-          const seg = ops.addMediaSegment(tl, m, { atUs: a.atUs ?? null, toMain: a.toMain !== false, settings: { imageDurationUs }, magnet: o.magnet });
+          // Through withMagnet: an insertion that moves later main-track clips moves their linked layers with them.
+          const seg = ops.withMagnet(tl, o, () => ops.addMediaSegment(tl, m, { atUs: a.atUs ?? null, toMain: a.toMain !== false, settings: { imageDurationUs }, magnet: o.magnet }));
           if (tl.tracks.find((t) => t.isMain).segments.length === 1 && tl.canvas.ratio === "original" && m.width && m.height) {
             tl.canvas.width = m.width; tl.canvas.height = m.height; // "Original" ratio follows the first clip
           }

@@ -48,6 +48,8 @@ export function summarizeTimeline(tl, revision, history) {
       clips: t.segments.map((s) => ({
         clipId: s.id, kind: s.kind, name: s.name, startUs: s.start, durationUs: s.duration, mediaId: s.mediaId || null, sourceStartUs: s.sourceStart,
         speed: s.speedMode === "curve" ? `curve:${s.curve?.preset}` : s.speed, volumeDb: s.volumeDb,
+        transform: s.transform && ((s.transform.scale ?? 1) !== 1 || s.transform.x || s.transform.y || s.transform.rotation) ? { scale: s.transform.scale ?? 1, x: s.transform.x || 0, y: s.transform.y || 0, rotation: s.transform.rotation || 0 } : undefined,
+        animation: s.animation && ["in", "out", "combo"].some((k) => s.animation[k]?.type && s.animation[k].type !== "none") ? s.animation : undefined,
         transitionOut: s.transitionOut?.type && s.transitionOut.type !== "none" ? s.transitionOut : undefined,
         filter: s.filter?.preset ? s.filter : undefined, effect: s.effect?.type ? s.effect : undefined,
         text: s.text?.content !== undefined ? { content: s.text.content, isCaption: !!s.text.isCaption } : undefined,
@@ -251,7 +253,7 @@ export const OPERATIONS = [
   },
   {
     name: "timeline_add_clip", scope: "edit", title: "Add a media clip",
-    description: "Adds an imported media file to the timeline (main track by default, at the end, or at atUs).",
+    description: "Adds an imported media file to the timeline. Main track (default): appended at the end, or inserted at the clip boundary nearest atUs (later clips move right). toMain=false: an overlay at atUs.",
     input: obj({ ...EDIT, mediaId: S.id("Media id"), atUs: S.us("Position on the timeline"), toMain: { type: "boolean", description: "Add to the main track (default true)" } }, ["timelineId", "mediaId"]),
     timeline: (a) => a.timelineId, media: (a) => a.mediaId,
     run: async (ctx, a) => { const r = await exec(ctx, a.timelineId, "addMedia", { mediaId: a.mediaId, atUs: a.atUs ?? null, toMain: a.toMain !== false, expectedRevision: a.expectedRevision }); return { clipId: r.result, revision: r.revision }; },
@@ -287,9 +289,14 @@ export const OPERATIONS = [
   {
     name: "timeline_update_clips", scope: "edit", title: "Change clip properties",
     description: "Patches clip properties: transform {x,y,scale,rotation,opacity}, adjust {brightness,contrast,saturation,temperature,...}, audioFx {denoise,enhanceVoice,normalize}, volumeDb, fadeInUs, fadeOutUs, text {...}, filter, effect, videoFx. One undo step.",
-    input: obj({ ...EDIT, clipIds: S.ids("Clips to change"), patch: { type: "object", description: "Properties to merge into each clip" } }, ["timelineId", "clipIds", "patch"]),
+    input: obj({ ...EDIT, clipIds: S.ids("Clips to change (same patch for all)"), patch: { type: "object", description: "Properties to merge into each clip" }, items: { type: "array", maxItems: 500, description: "Or different patches per clip in ONE undo step: [{clipId, patch}]", items: { type: "object", additionalProperties: false, required: ["clipId", "patch"], properties: { clipId: { type: "string", pattern: "^[A-Za-z0-9-]+$" }, patch: { type: "object" } } } } }, ["timelineId"]),
     timeline: (a) => a.timelineId,
-    run: async (ctx, a) => { const r = await exec(ctx, a.timelineId, "patchMany", { label: "agent update", items: a.clipIds.map((segId) => ({ segId, patch: a.patch })), expectedRevision: a.expectedRevision }); return { changed: r.result, revision: r.revision }; },
+    run: async (ctx, a) => {
+      const items = a.items?.length ? a.items.map((x) => ({ segId: x.clipId, patch: x.patch })) : (a.clipIds || []).map((segId) => ({ segId, patch: a.patch }));
+      if (!items.length || items.some((x) => !x.patch)) throw new AppError("VALIDATION", "err.inputsInvalid", { field: "items", errors: ["give clipIds + patch, or items"] });
+      const r = await exec(ctx, a.timelineId, "patchMany", { label: "agent update", items, expectedRevision: a.expectedRevision });
+      return { changed: r.result, revision: r.revision };
+    },
   },
   {
     name: "timeline_add_layer", scope: "edit", title: "Add a filter, effect, adjustment or text layer",
@@ -426,14 +433,14 @@ export const OPERATIONS = [
   {
     name: "timeline_add_captions_pro", scope: "edit", needs: ["media"], provider: "whisper", title: "Animated captions",
     description: "Adds word-timed animated captions for everything spoken on the main track (after cuts), using the local speech model, as one undo step. template: see captions_templates. keywords: words to emphasize in the accent colour (numbers are emphasized automatically). replace (default true) removes earlier captions. Returns pages, words and a reading-speed check (qc). Runs as a job (see wait).",
-    input: obj({ ...EDIT, template: S.enumOf(Object.keys(CAPTION_TEMPLATES), "Template"), language: { type: "string", pattern: "^(auto|[a-z]{2})$" }, keywords: { type: "array", items: { type: "string", maxLength: 60 }, maxItems: 200 }, autoEmphasis: { type: "boolean" }, replace: { type: "boolean" }, positionY: S.num("Vertical position (fraction of the frame from the centre, + = lower)", -0.45, 0.45), overrides: { type: "object", additionalProperties: false, properties: { color: { type: "string", pattern: "^#[0-9A-Fa-f]{6}$" }, active: { type: "string", pattern: "^#[0-9A-Fa-f]{6}$" }, accent: { type: "string", pattern: "^#[0-9A-Fa-f]{6}$" }, activeBox: { type: "string", pattern: "^#[0-9A-Fa-f]{6}$" }, size: { type: "number", minimum: 3, maximum: 30 } } }, wait: WAIT }, ["timelineId"]),
+    input: obj({ ...EDIT, template: S.enumOf(Object.keys(CAPTION_TEMPLATES), "Template"), language: { type: "string", pattern: "^(auto|[a-z]{2})$" }, keywords: { type: "array", items: { type: "string", maxLength: 60 }, maxItems: 200 }, autoEmphasis: { type: "boolean" }, reveal: { type: "boolean", description: "Words appear only when spoken (no spoilers); recommended for reveals/punchlines" }, replace: { type: "boolean" }, positionY: S.num("Vertical position (fraction of the frame from the centre, + = lower)", -0.45, 0.45), overrides: { type: "object", additionalProperties: false, properties: { color: { type: "string", pattern: "^#[0-9A-Fa-f]{6}$" }, active: { type: "string", pattern: "^#[0-9A-Fa-f]{6}$" }, accent: { type: "string", pattern: "^#[0-9A-Fa-f]{6}$" }, activeBox: { type: "string", pattern: "^#[0-9A-Fa-f]{6}$" }, size: { type: "number", minimum: 3, maximum: 30 } } }, wait: WAIT }, ["timelineId"]),
     timeline: (a) => a.timelineId,
     run: (ctx, a) => asJob(ctx, "captions", a.template || "captions", () => transact(ctx, a.timelineId, `captions:${a.template || "karaoke-yellow"}`, a.expectedRevision, () => applyCaptions(ctx, a.timelineId, a)), a.wait),
   },
   {
     name: "timeline_captions_style", scope: "edit", title: "Restyle captions",
     description: "Changes the template, colours, size or position of every animated caption page of a timeline (one undo step).",
-    input: obj({ ...EDIT, template: S.enumOf(Object.keys(CAPTION_TEMPLATES), "Template"), positionY: S.num("Vertical position", -0.45, 0.45), overrides: { type: "object" } }, ["timelineId"]),
+    input: obj({ ...EDIT, template: S.enumOf(Object.keys(CAPTION_TEMPLATES), "Template"), positionY: S.num("Vertical position", -0.45, 0.45), overrides: { type: "object" }, reveal: { type: "boolean", description: "Words appear only when spoken" } }, ["timelineId"]),
     timeline: (a) => a.timelineId,
     run: (ctx, a) => { svc(ctx).timelines.checkRevision(a.timelineId, a.expectedRevision); return restyleCaptions(ctx, a.timelineId, a); },
   },

@@ -165,7 +165,7 @@ export function registerIpc({ getServices, getAgents = () => null, getWindow, ap
     "captions.status": (force) => S().captions.status(!!force),
     "captions.templates": () => Object.entries(CAPTION_TEMPLATES).map(([tid, t]) => ({ id: tid, name: t.name, use: t.use })),
     // Animated word-timed captions for the open timeline (same code path as agents; one undo step).
-    "captions.generatePro": async (tid, o) => { const ctx = A().userContext(); const q = obj(o); return transact(ctx, id(tid), `captions:${q.template || "karaoke-yellow"}`, undefined, () => applyCaptions(ctx, id(tid), { template: q.template ? str(q.template, "template") : undefined, language: q.language ? str(q.language, "language") : "auto", keywords: q.keywords ? arr(q.keywords, "keywords").map(String) : [] })); },
+    "captions.generatePro": async (tid, o) => { const ctx = A().userContext(); const q = obj(o); return transact(ctx, id(tid), `captions:${q.template || "karaoke-yellow"}`, undefined, () => applyCaptions(ctx, id(tid), { template: q.template ? str(q.template, "template") : undefined, language: q.language ? str(q.language, "language") : "auto", keywords: q.keywords ? arr(q.keywords, "keywords").map(String) : [], reveal: !!q.reveal })); },
     "captions.restyle": (tid, o) => restyleCaptions(A().userContext(), id(tid), obj(o)),
     "captions.importFile": (file) => S().captions.importFile(str(file, "file")),
     "captions.segmentsFromCues": (cues, o) => S().captions.segmentsFromCues(arr(cues, "cues"), obj(o)),
