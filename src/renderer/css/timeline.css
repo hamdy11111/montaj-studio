@@ -1,0 +1,59 @@
+/* Timeline (SCREEN-017). Always LTR. */
+.timeline { display: flex; flex-direction: column; height: 100%; min-height: 0; direction: ltr; }
+.tl-toolbar { height: var(--tl-toolbar-h); display: flex; align-items: center; gap: 2px; padding: 0 8px; border-bottom: 1px solid #1f1f1f; flex: none; overflow-x: auto; overflow-y: hidden; }
+.tl-toolbar .icon-btn { width: 26px; height: 26px; }
+.tl-toolbar .icon-btn svg { width: 16px; height: 16px; }
+.tl-sep { width: 1px; height: 16px; background: #444; margin: 0 4px; }
+.tl-zoom { width: 110px; }
+.tl-body { flex: 1; display: grid; grid-template-columns: 92px 1fr; min-height: 0; }
+.tl-heads-wrap { overflow: hidden; border-right: 1px solid #1f1f1f; background: var(--bg-panel); position: relative; }
+.tl-heads-spacer { height: 26px; }
+.tl-heads { display: flex; flex-direction: column; padding-top: 8px; }
+.tl-head { display: flex; align-items: center; gap: 0; padding: 0 2px; margin-bottom: 4px; }
+.tl-head .icon-btn { width: 22px; height: 22px; }
+.tl-head .icon-btn svg { width: 13px; height: 13px; }
+.tl-head .icon-btn.active { color: var(--warning); background: none; }
+.tl-head-type svg { width: 13px; height: 13px; color: var(--text-secondary); margin: 0 2px; }
+.tl-head.main { background: #232323; border-radius: 4px; }
+.tl-cover { font-size: 9px; color: var(--text-secondary); margin-inline-start: auto; padding: 1px 3px; border: 1px solid #444; border-radius: 3px; background: none; }
+.tl-cover:hover { color: var(--text-primary); border-color: var(--accent); }
+.tl-scroll { overflow: auto; position: relative; }
+.tl-ruler-wrap { position: sticky; top: 0; left: 0; width: 100%; height: 26px; z-index: 5; background: var(--bg-panel); }
+.tl-ruler { display: block; cursor: pointer; }
+.tl-content { position: relative; min-height: calc(100% - 26px); padding-top: 8px; }
+.tl-rows { display: flex; flex-direction: column; }
+.tl-row { position: relative; margin-bottom: 4px; background: var(--bg-track); border-radius: 3px; }
+.tl-row.locked { background: repeating-linear-gradient(45deg, #2a2a2a, #2a2a2a 6px, #262626 6px, #262626 12px); }
+.tl-row.hidden-track .clip { opacity: .45; }
+.tl-empty { display: flex; align-items: center; gap: 8px; color: var(--text-secondary); padding: 18px; position: absolute; left: 12px; top: 20px; pointer-events: none; }
+.tl-empty svg { width: 20px; height: 20px; }
+.clip { position: absolute; top: 0; bottom: 0; border-radius: 4px; overflow: hidden; cursor: grab; border: 1px solid rgba(255,255,255,.12); user-select: none; }
+.clip.selected { border: 2px solid var(--selection); z-index: 2; }
+.clip.dragging { opacity: .8; z-index: 4; cursor: grabbing; }
+.clip.disabled { filter: grayscale(1) brightness(.6); }
+.clip.missing { outline: 2px solid var(--danger); outline-offset: -2px; }
+.clip-thumbs { position: absolute; inset: 0; pointer-events: none; opacity: .9; }
+.clip-wave { position: absolute; left: 0; bottom: 0; pointer-events: none; }
+.clip-label { position: absolute; top: 2px; left: 6px; right: 6px; font-size: 10.5px; text-shadow: 0 1px 2px #000; display: flex; gap: 4px; align-items: center; pointer-events: none; }
+.clip-badge { background: rgba(0,0,0,.55); border-radius: 3px; padding: 0 3px; font-size: 9.5px; }
+.clip-badge.warn { background: var(--danger); }
+.trim { position: absolute; top: 0; bottom: 0; width: 7px; cursor: ew-resize; z-index: 4; }
+.trim.l { left: 0; } .trim.r { right: 0; }
+.clip.selected .trim { background: rgba(255,255,255,.85); }
+.clip.selected .trim.l { border-radius: 3px 0 0 3px; } .clip.selected .trim.r { border-radius: 0 3px 3px 0; }
+.fade { position: absolute; top: 0; bottom: 0; pointer-events: none; }
+.fade.in { left: 0; background: linear-gradient(90deg, rgba(0,0,0,.45), transparent); }
+.fade.out { right: 0; background: linear-gradient(270deg, rgba(0,0,0,.45), transparent); }
+.kf { position: absolute; bottom: 3px; width: 9px; height: 9px; background: var(--accent); transform: rotate(45deg); z-index: 3; cursor: pointer; }
+/* Transition badge: a small target in the top band of the clip boundary, so the trim handles below it stay
+   grabbable over the rest of the edge (it used to sit on the vertical centre, on top of both handles). */
+.tl-trans { position: absolute; top: 2px; width: 16px; height: 14px; border-radius: 3px; border: 0; padding: 0; background: rgba(0,0,0,.55); color: #aaa; z-index: 5; display: grid; place-items: center; opacity: 0; }
+.tl-row:hover .tl-trans, .tl-trans.on { opacity: 1; }
+.tl-trans.on { background: var(--accent); color: var(--accent-ink); }
+.tl-trans svg { width: 10px; height: 10px; }
+.tl-playhead { position: absolute; top: -26px; bottom: 0; left: 0; width: 1px; background: #fff; z-index: 6; pointer-events: none; will-change: transform; }
+.tl-playhead-cap { position: absolute; top: 0; left: -6px; width: 13px; height: 14px; background: #fff; clip-path: polygon(0 0, 100% 0, 100% 60%, 50% 100%, 0 60%); pointer-events: auto; cursor: ew-resize; }
+.tl-marker-layer { position: absolute; left: 0; right: 0; top: -12px; height: 0; z-index: 7; }
+.tl-marker { position: absolute; top: 0; width: 9px; height: 12px; margin-left: -4px; clip-path: polygon(0 0, 100% 0, 100% 65%, 50% 100%, 0 65%); cursor: pointer; }
+.tl-range { position: absolute; top: 0; bottom: 0; background: rgba(0,193,205,.08); border-left: 1px solid var(--accent); border-right: 1px solid var(--accent); pointer-events: none; z-index: 1; }
+.tl-tip { position: absolute; top: -18px; left: 50%; transform: translateX(-50%); background: #000; padding: 0 5px; border-radius: 3px; font-size: 10px; white-space: nowrap; z-index: 9; }

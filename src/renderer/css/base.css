@@ -1,0 +1,27 @@
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; background: var(--bg-app); color: var(--text-primary); font-family: var(--font); font-size: var(--fs-sm); overflow: hidden; user-select: none; }
+body { -webkit-font-smoothing: antialiased; }
+button, input, select, textarea { font: inherit; color: inherit; }
+button { cursor: pointer; }
+a { color: var(--accent-text); }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-thumb { background: #4a4a4a; border-radius: 8px; }
+::-webkit-scrollbar-track { background: transparent; }
+.hidden { display: none !important; }
+.muted { color: var(--text-secondary); }
+.row { display: flex; align-items: center; gap: var(--s2); }
+.col { display: flex; flex-direction: column; gap: var(--s2); }
+.grow { flex: 1; min-width: 0; }
+.ltr { direction: ltr; }
+.nowrap { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+
+/* Custom title bar (window controls are drawn by Windows via titleBarOverlay). */
+.titlebar { height: var(--titlebar-h); display: flex; align-items: center; gap: var(--s2); padding-inline: 10px 150px; -webkit-app-region: drag; background: var(--bg-app); }
+[dir="rtl"] .titlebar { padding-inline: 150px 10px; }
+.titlebar > * { -webkit-app-region: no-drag; }
+.titlebar .brand { display: flex; align-items: center; gap: 6px; font-weight: 600; font-size: var(--fs-md); -webkit-app-region: drag; }
+.titlebar .brand svg { width: 18px; height: 18px; color: var(--accent); }
+.titlebar .title { flex: 1; text-align: center; font-size: var(--fs-md); -webkit-app-region: drag; }
+#app { height: calc(100% - var(--titlebar-h)); }

@@ -1,0 +1,232 @@
+// i18n with Arabic (RTL, default) and English. t("key", {vars}) → string. Missing keys fall back to English,
+// then to the key itself. The timeline area stays LTR in both languages (time flows left → right).
+const D = {
+  // app & navigation
+  "app.name": ["Montaj Studio", "مونتاج ستوديو"],
+  "nav.home": ["Home", "الرئيسية"], "nav.templates": ["Templates", "القوالب"], "nav.createWithAi": ["Create with AI", "أنشئ بالذكاء"],
+  "nav.tools": ["AI tools", "أدوات ذكية"], "nav.management": ["Management", "الإدارة"], "nav.library": ["Library", "المكتبة"], "nav.spaces": ["Spaces", "المساحات"],
+  "nav.createSpace": ["Create space", "إنشاء مساحة"],
+  "home.createProject": ["Create project", "إنشاء مشروع"], "home.projects": ["Projects", "المشاريع"], "home.editpilot": ["How can I help you edit today?", "كيف أساعدك في التحرير اليوم؟"],
+  "home.editpilotPh": ["Describe what you'd like to edit", "صف ما تريد تحريره"], "home.suite": ["Creative tools", "الأدوات الإبداعية"],
+  "home.empty": ["No projects yet. Create your first project.", "لا توجد مشاريع بعد. أنشئ مشروعك الأول."], "home.noResults": ["No matching projects", "لا توجد نتائج مطابقة"],
+  "home.searchPh": ["Search projects", "ابحث في المشاريع"], "home.grid": ["Grid", "شبكة"], "home.list": ["List", "قائمة"], "home.trash": ["Trash", "سلة المهملات"],
+  "home.backupNow": ["Back up now", "نسخ احتياطي الآن"], "home.importPackage": ["Import package", "استيراد حزمة"], "home.sort": ["Sort", "ترتيب"],
+  "col.name": ["Name", "الاسم"], "col.size": ["Size", "الحجم"], "col.duration": ["Duration", "المدة"], "col.lastEdited": ["Last edited", "آخر تعديل"], "col.created": ["Created", "الإنشاء"],
+  "sort.updatedAt": ["Last edited", "آخر تعديل"], "sort.createdAt": ["Created", "تاريخ الإنشاء"], "sort.name": ["Name", "الاسم"], "sort.durationUs": ["Duration", "المدة"], "sort.sizeBytes": ["Size", "الحجم"],
+  "proj.open": ["Open", "فتح"], "proj.rename": ["Rename", "إعادة تسمية"], "proj.duplicate": ["Duplicate", "تكرار"], "proj.delete": ["Delete", "حذف"], "proj.share": ["Export package", "تصدير حزمة"],
+  "proj.saveTemplate": ["Save as template", "حفظ كقالب"], "proj.addToSpace": ["Add to space", "إضافة إلى مساحة"], "proj.removeFromSpace": ["Remove from space", "إزالة من المساحة"],
+  "proj.renamePrompt": ["New project name", "اسم المشروع الجديد"], "proj.deleteConfirm": ["Move “{name}” to Trash? You can restore it within 30 days.", "نقل «{name}» إلى سلة المهملات؟ يمكن استعادته خلال 30 يومًا."],
+  "trash.title": ["Trash", "سلة المهملات"], "trash.recently": ["Recently moved ({n})", "المحذوفة مؤخرًا ({n})"], "trash.hint": ["Items show the days remaining before deletion. Items are kept for up to 30 days.", "تُعرض الأيام المتبقية قبل الحذف النهائي. تُحفظ العناصر حتى 30 يومًا."],
+  "trash.empty": ["Trash is empty", "سلة المهملات فارغة"], "trash.restore": ["Restore", "استعادة"], "trash.deleteForever": ["Delete permanently", "حذف نهائي"], "trash.emptyAll": ["Empty trash", "إفراغ السلة"],
+  "trash.daysLeft": ["{n} days left", "متبقٍ {n} يومًا"], "trash.deleteForeverConfirm": ["Permanently delete “{name}”? This cannot be undone.", "حذف «{name}» نهائيًا؟ لا يمكن التراجع عن ذلك."],
+  "trash.emptyConfirm": ["Permanently delete all {n} projects in Trash?", "حذف جميع المشاريع ({n}) في السلة نهائيًا؟"],
+  // tools / AI suite
+  "tool.longToShorts": ["Long video to shorts", "فيديو طويل إلى مقاطع قصيرة"], "tool.longToShortsDesc": ["Find highlight clips by scenes and speech (local)", "يقترح مقاطع بحسب المشاهد والكلام (محلي)"],
+  "tool.tts": ["Text to speech", "تحويل النص إلى كلام"], "tool.ttsDesc": ["Offline Windows voices, including Arabic", "أصوات ويندوز المحلية ومنها العربية"],
+  "tool.aiVideo": ["AI video", "فيديو بالذكاء"], "tool.aiImage": ["AI image", "صورة بالذكاء"], "tool.extend": ["Extend video", "تمديد الفيديو"], "tool.adMaker": ["AI ad maker", "صانع الإعلانات"],
+  "tool.videoStudio": ["Video Studio", "Video Studio"], "tool.designStudio": ["Design Studio", "Design Studio"], "tool.marketing": ["Marketing tools", "أدوات التسويق"],
+  "tool.providerOnly": ["Requires an external generative AI service", "يتطلب خدمة ذكاء توليدي خارجية"],
+  "tool.providerExplain": ["This feature relies on cloud generative models in the original product. Montaj Studio works fully offline, so it is not available here. Everything else in the editor works locally.", "تعتمد هذه الميزة في المنتج الأصلي على نماذج توليدية سحابية. يعمل مونتاج ستوديو دون اتصال بالكامل، لذا فهي غير متاحة هنا، بينما تعمل بقية أدوات المحرر محليًا."],
+  "shorts.pick": ["Choose a long video", "اختر فيديو طويلًا"], "shorts.analyzing": ["Analyzing scenes and pauses…", "جارٍ تحليل المشاهد والسكتات…"], "shorts.found": ["{n} clips found", "تم العثور على {n} مقاطع"],
+  "shorts.create": ["Create shorts projects", "إنشاء مشاريع المقاطع القصيرة"], "shorts.limits": ["Videos up to 180 minutes. Clips of 15–60 seconds.", "فيديوهات حتى 180 دقيقة. مقاطع من 15 إلى 60 ثانية."],
+  // editor
+  "ed.menu": ["Menu", "القائمة"], "ed.autoSaved": ["Auto saved: {time}", "حُفظ تلقائيًا: {time}"], "ed.export": ["Export", "تصدير"], "ed.share": ["Share", "مشاركة"],
+  "ed.layout": ["Layout", "التخطيط"], "ed.backHome": ["Back to home page", "العودة إلى الرئيسية"], "ed.quit": ["Quit", "خروج"], "ed.settings": ["Settings", "الإعدادات"],
+  "ed.file": ["File", "ملف"], "ed.edit": ["Edit", "تحرير"], "ed.more": ["More", "المزيد"], "ed.help": ["Help", "مساعدة"],
+  "ed.newProject": ["New project", "مشروع جديد"], "ed.newTimeline": ["New timeline", "خط زمني جديد"], "ed.import": ["Import", "استيراد"], "ed.shortcuts": ["Shortcuts", "اختصارات لوحة المفاتيح"],
+  "ed.about": ["About", "حول"], "ed.walkthrough": ["Walkthrough", "جولة تعريفية"], "ed.feedback": ["Feedback", "ملاحظات"],
+  "ed.player": ["Player", "المشغل"], "ed.details": ["Details", "التفاصيل"], "ed.project": ["Project", "المشروع"], "ed.dragHere": ["Drag material here and start to create", "اسحب المواد هنا وابدأ الإنشاء"],
+  "ed.noMedia": ["No media? Create with these tools", "لا توجد وسائط؟ أنشئ بهذه الأدوات"], "ed.importHint": ["Drag and drop videos, photos, and audio files here", "اسحب وأفلت مقاطع الفيديو والصور والملفات الصوتية هنا"],
+  "ed.fromDevice": ["From device", "من الجهاز"], "ed.fromLibrary": ["From library", "من المكتبة"], "ed.importFolder": ["Import folder", "استيراد مجلد"], "ed.record": ["Record", "تسجيل"],
+  "ed.recordScreen": ["Record screen", "تسجيل الشاشة"], "ed.recordVoice": ["Record voiceover", "تسجيل تعليق صوتي"], "ed.stopRecording": ["Stop recording", "إيقاف التسجيل"],
+  "ed.searchMedia": ["Search media", "ابحث في الوسائط"], "ed.added": ["Added", "مضاف"], "ed.missing": ["Missing", "مفقود"], "ed.linkMedia": ["Link to media", "ربط بالوسيط"],
+  "ed.aiClipper": ["AI clipper", "مقص ذكي"], "ed.startClipping": ["Start clipping", "ابدأ القص"], "ed.selectMediaHint": ["Select media to get started", "اختر وسائط للبدء"], "ed.itemsSelected": ["{n} items selected", "{n} عناصر محددة"],
+  "ed.timelineTitle": ["Player — {name}", "المشغل — {name}"],
+  // material tabs
+  "tab.media": ["Media", "الوسائط"], "tab.audio": ["Audio", "الصوت"], "tab.text": ["Text", "النص"], "tab.stickers": ["Stickers", "الملصقات"], "tab.effects": ["Effects", "المؤثرات"],
+  "tab.transitions": ["Transitions", "الانتقالات"], "tab.captions": ["Captions", "الترجمات"], "tab.filters": ["Filters", "الفلاتر"], "tab.adjustment": ["Adjustment", "الضبط"], "tab.templates": ["Templates", "القوالب"],
+  "tab.avatar": ["AI avatar", "شخصية رقمية"],
+  "lib.yours": ["Yours", "موادك"], "lib.favorites": ["Favorites", "المفضلة"], "lib.importAudio": ["Import audio", "استيراد صوت"], "lib.importSticker": ["Import sticker", "استيراد ملصق"], "lib.importLut": ["Import LUT", "استيراد LUT"],
+  "lib.addText": ["Add text", "إضافة نص"], "lib.defaultText": ["Default text", "نص افتراضي"], "lib.textEffects": ["Text styles", "أنماط النص"], "lib.localCaptions": ["Local captions", "ترجمات محلية"],
+  "lib.autoCaptions": ["Auto captions", "ترجمة تلقائية"], "lib.addCaptions": ["Add captions", "إضافة ترجمات"], "lib.spokenLanguage": ["Spoken language", "لغة الكلام"], "lib.generate": ["Generate", "توليد"],
+  "lib.deleteCurrentCaptions": ["Delete current captions", "حذف الترجمات الحالية"], "lib.whisperMissing": ["Auto captions run locally with whisper.cpp. Set its program and model in Settings › Providers.", "تعمل الترجمة التلقائية محليًا عبر whisper.cpp. حدّد البرنامج والنموذج من الإعدادات › المزوّدات."],
+  "lib.addAdjustment": ["Add adjustment", "إضافة طبقة ضبط"], "lib.customAdjustment": ["Custom adjustment", "ضبط مخصص"], "lib.lut": ["LUT", "LUT"],
+  "lib.audioEmpty": ["Import music or sound effects from your computer. Licensed libraries are not bundled.", "استورد الموسيقى أو المؤثرات الصوتية من جهازك. لا تُرفق مكتبات مرخّصة مع التطبيق."],
+  "lib.templatesEmpty": ["No templates yet. Use “Save as template” on any project.", "لا توجد قوالب بعد. استخدم «حفظ كقالب» من أي مشروع."],
+  "lib.avatarNa": ["Digital human avatars need a generative service and are not available offline.", "الشخصيات الرقمية تحتاج خدمة توليدية وهي غير متاحة دون اتصال."],
+  // inspector
+  "in.video": ["Video", "الفيديو"], "in.audio": ["Audio", "الصوت"], "in.speed": ["Speed", "السرعة"], "in.animation": ["Animation", "الحركة"], "in.adjust": ["Adjust", "الضبط"], "in.aiStylize": ["AI stylize", "تنسيق ذكي"],
+  "in.basic": ["Basic", "أساسي"], "in.removeBg": ["Remove BG", "إزالة الخلفية"], "in.mask": ["Mask", "قناع"], "in.retouch": ["Retouch", "تجميل"], "in.hsl": ["HSL", "HSL"], "in.curves": ["Curves", "المنحنيات"], "in.colorWheel": ["Color wheel", "عجلات الألوان"],
+  "in.transform": ["Transform", "التحويل"], "in.crop": ["Crop", "قص الإطار"], "in.scale": ["Scale", "الحجم"], "in.uniformScale": ["Uniform scale", "حجم متناسق"], "in.position": ["Position", "الموضع"], "in.rotate": ["Rotate", "التدوير"], "in.opacity": ["Opacity", "الشفافية"],
+  "in.blend": ["Blend", "المزج"], "in.blendMode": ["Mode", "الوضع"], "in.stabilize": ["Stabilize", "التثبيت"], "in.denoise": ["Reduce image noise", "تقليل التشويش"], "in.motionBlur": ["Motion blur", "ضبابية الحركة"],
+  "in.canvas": ["Canvas", "الخلفية"], "in.canvasColor": ["Color", "لون"], "in.canvasBlur": ["Blur", "ضبابية"], "in.applyAll": ["Apply to all", "تطبيق على الكل"], "in.chroma": ["Chroma key", "مفتاح الكروما"],
+  "in.color": ["Color", "اللون"], "in.intensity": ["Intensity", "الشدة"], "in.shadow": ["Shadow", "الظل"], "in.autoRemoval": ["Auto removal", "إزالة تلقائية"],
+  "in.addMask": ["Add mask", "إضافة قناع"], "in.feather": ["Feather", "تنعيم الحواف"], "in.invert": ["Invert", "عكس"], "in.size": ["Size", "الحجم"],
+  "in.volume": ["Volume", "مستوى الصوت"], "in.fadeIn": ["Fade in", "ظهور تدريجي"], "in.fadeOut": ["Fade out", "اختفاء تدريجي"], "in.normalize": ["Normalize loudness", "توحيد الجهارة"],
+  "in.normalizeHint": ["Normalize the loudness of the selected clip to the target level (Settings › Edit).", "توحيد جهارة المقطع إلى المستوى المستهدف (الإعدادات › التحرير)."],
+  "in.enhanceVoice": ["Enhance voice", "تحسين الصوت"], "in.reduceNoise": ["Reduce noise", "تقليل الضوضاء"], "in.isolateVoice": ["Isolate voice", "عزل الصوت"], "in.voiceChanger": ["Voice changer", "تغيير الصوت"],
+  "in.standard": ["Standard", "قياسي"], "in.curve": ["Curve", "منحنى"], "in.velocity": ["Velocity effects", "مؤثرات السرعة"], "in.duration": ["Duration", "المدة"], "in.changePitch": ["Change audio pitch", "تغيير طبقة الصوت"],
+  "in.reset": ["Reset", "إعادة تعيين"], "in.in": ["In", "دخول"], "in.out": ["Out", "خروج"], "in.combo": ["Combo", "مركّب"], "in.savePreset": ["Save as preset", "حفظ كإعداد مسبق"],
+  "in.noSelection": ["Select a clip on the timeline to edit its properties.", "حدّد مقطعًا على الخط الزمني لتحرير خصائصه."],
+  "in.text": ["Text", "النص"], "in.font": ["Font", "الخط"], "in.fontSize": ["Font size", "حجم الخط"], "in.pattern": ["Pattern", "النمط"], "in.case": ["Case", "حالة الأحرف"], "in.character": ["Character", "تباعد الأحرف"], "in.line": ["Line", "تباعد الأسطر"],
+  "in.alignment": ["Alignment", "المحاذاة"], "in.stroke": ["Stroke", "الحد"], "in.background": ["Background", "الخلفية"], "in.presetStyle": ["Preset style", "نمط جاهز"], "in.direction": ["Direction", "الاتجاه"],
+  "in.tts": ["Text to speech", "تحويل النص إلى كلام"], "in.voice": ["Voice", "الصوت"], "in.rate": ["Rate", "السرعة"], "in.pitch": ["Pitch", "الطبقة"], "in.generateSpeech": ["Generate speech", "توليد الكلام"],
+  "in.isCaption": ["Caption", "ترجمة"], "in.keyframes": ["Keyframes", "الإطارات المفتاحية"], "in.addKeyframe": ["Add keyframe", "إضافة إطار مفتاحي"], "in.removeKeyframe": ["Remove keyframe", "حذف الإطار المفتاحي"],
+  "in.easing": ["Easing", "التسهيل"], "in.effect": ["Effect", "المؤثر"], "in.filter": ["Filter", "الفلتر"], "in.sticker": ["Sticker", "الملصق"], "in.transitionTitle": ["Transition", "الانتقال"],
+  "in.transitionHint": ["Transitions play between this clip and the next clip on the main track.", "يعمل الانتقال بين هذا المقطع والمقطع التالي على المسار الرئيسي."],
+  "in.applyAllTransitions": ["Apply to all clips", "تطبيق على كل المقاطع"], "in.compound": ["Compound clip", "مقطع مركّب"], "in.preprocess": ["Pre-process", "معالجة مسبقة"], "in.preprocessed": ["Pre-processed", "تمت المعالجة"],
+  "in.smartSuggestions": ["Smart suggestions", "اقتراحات ذكية"], "in.findImprove": ["Find out how your video can be improved", "اكتشف كيف يمكن تحسين الفيديو"], "in.analyze": ["Analyze", "تحليل"],
+  "in.globalEdits": ["Global edits", "تعديلات شاملة"], "ge.colorsBetter": ["Make colors better", "تحسين الألوان"], "ge.colorsConsistent": ["Make colors consistent", "توحيد الألوان"],
+  "ge.volumeConsistent": ["Make volume consistent", "توحيد مستوى الصوت"], "ge.voiceClearer": ["Make voice clearer", "توضيح الصوت"], "ge.videoClearer": ["Make video clearer", "توضيح الفيديو"],
+  "in.aspect": ["Aspect ratio", "نسبة العرض"], "in.resolution": ["Resolution", "الدقة"], "in.fps": ["Frame rate", "معدل الإطارات"], "in.modify": ["Modify", "تعديل"], "in.path": ["Path", "المسار"],
+  "in.importedMedia": ["Imported media", "الوسائط المستوردة"], "in.stayOriginal": ["Stay in original location", "تبقى في مكانها الأصلي"],
+  // timeline toolbar
+  "tl.addTrack": ["Add track", "إضافة مسار"], "tl.select": ["Select (V)", "تحديد (V)"], "tl.splitMode": ["Split mode (B)", "وضع القص (B)"], "tl.undo": ["Undo", "تراجع"], "tl.redo": ["Redo", "إعادة"],
+  "tl.split": ["Split", "تقسيم"], "tl.deleteLeft": ["Delete left", "حذف اليسار"], "tl.deleteRight": ["Delete right", "حذف اليمين"], "tl.delete": ["Delete", "حذف"], "tl.marker": ["Add marker", "إضافة علامة"],
+  "tl.crop": ["Crop", "قص الإطار"], "tl.freeze": ["Freeze", "تجميد"], "tl.reverse": ["Reverse", "عكس"], "tl.mirror": ["Mirror", "مرآة"], "tl.rotate": ["Rotate", "تدوير"],
+  "tl.splitScenes": ["Split scenes", "تقسيم المشاهد"], "tl.removeSilences": ["Remove silences", "حذف السكتات"], "tl.recordVoice": ["Record voiceover", "تسجيل تعليق صوتي"],
+  "tl.magnet": ["Main track magnet (P)", "مغناطيس المسار الرئيسي (P)"], "tl.snap": ["Auto snapping (N)", "الالتقاط التلقائي (N)"], "tl.linkage": ["Linkage", "الربط"], "tl.previewAxis": ["Preview axis (S)", "محور المعاينة (S)"],
+  "tl.zoomFit": ["Zoom to fit timeline (Shift+Z)", "ملاءمة الخط الزمني"], "tl.zoomIn": ["Zoom in", "تكبير"], "tl.zoomOut": ["Zoom out", "تصغير"], "tl.cover": ["Cover", "الغلاف"],
+  "tl.lock": ["Lock track", "قفل المسار"], "tl.hide": ["Hide track", "إخفاء المسار"], "tl.mute": ["Mute track", "كتم المسار"],
+  "ctx.copy": ["Copy", "نسخ"], "ctx.cut": ["Cut", "قص"], "ctx.paste": ["Paste", "لصق"], "ctx.copyAttrs": ["Copy attributes", "نسخ السمات"], "ctx.pasteAttrs": ["Paste attributes", "لصق السمات"],
+  "ctx.delete": ["Delete", "حذف"], "ctx.edit": ["Edit", "تحرير"], "ctx.transcript": ["Transcript", "النص المكتوب"], "ctx.isolate": ["Isolate voice", "عزل الصوت"], "ctx.extractAudio": ["Extract audio", "استخراج الصوت"],
+  "ctx.restoreAudio": ["Restore audio", "استعادة الصوت"], "ctx.compound": ["Create compound clip (subproject)", "إنشاء مقطع مركّب"], "ctx.uncompound": ["Undo compound clip", "فك المقطع المركّب"],
+  "ctx.savePreset": ["Save preset", "حفظ إعداد مسبق"], "ctx.group": ["Group", "تجميع"], "ctx.ungroup": ["Ungroup", "فك التجميع"], "ctx.exportSelected": ["Export selected clips", "تصدير المقاطع المحددة"],
+  "ctx.deactivate": ["Deactivate clip", "تعطيل المقطع"], "ctx.activate": ["Activate clip", "تفعيل المقطع"], "ctx.replace": ["Replace clip", "استبدال المقطع"], "ctx.openLocation": ["Open file location", "فتح مكان الملف"],
+  "ctx.range": ["Range", "النطاق"], "ctx.selectByClip": ["Select by clip", "تحديد حسب المقطع"], "ctx.deselectRange": ["Deselect", "إلغاء التحديد"], "ctx.render": ["Render", "تصيير"],
+  "ctx.wholeTimeline": ["Whole timeline", "الخط الزمني كاملًا"], "ctx.inOut": ["In / Out", "من نقطة الدخول إلى الخروج"], "ctx.deleteCache": ["Delete rendering cache", "حذف ذاكرة التصيير"],
+  "ctx.dontIsolate": ["Don't isolate voice", "بلا عزل"], "ctx.removeVocal": ["Remove vocal", "إزالة الصوت البشري"], "ctx.keepVocal": ["Keep vocal", "إبقاء الصوت البشري"], "ctx.editPilot": ["EditPilot", "EditPilot"],
+  // export
+  "ex.title": ["Export — {name}", "تصدير — {name}"], "ex.name": ["Name", "الاسم"], "ex.exportTo": ["Export to", "التصدير إلى"], "ex.video": ["Video", "الفيديو"], "ex.bitrate": ["Bit rate", "معدل البت"],
+  "ex.codec": ["Codec", "الترميز"], "ex.format": ["Format", "الصيغة"], "ex.colorSpace": ["Color space", "فضاء اللون"], "ex.audio": ["Audio", "الصوت"], "ex.gif": ["Export GIF", "تصدير GIF"], "ex.captions": ["Captions", "الترجمات"],
+  "ex.encoding": ["Character encoding", "ترميز الأحرف"], "ex.estimate": ["Duration: {dur} | Size: about {size}", "المدة: {dur} | الحجم: حوالي {size}"], "ex.exporting": ["Exporting… {p}%", "جارٍ التصدير… {p}%"],
+  "ex.done": ["Export complete", "اكتمل التصدير"], "ex.failed": ["Export failed", "فشل التصدير"], "ex.cancelled": ["Export cancelled", "أُلغي التصدير"], "ex.openFolder": ["Open folder", "فتح المجلد"], "ex.play": ["Play", "تشغيل"],
+  "ex.lower": ["Lower", "أقل"], "ex.recommended": ["Recommended", "موصى به"], "ex.higher": ["Higher", "أعلى"], "ex.custom": ["Custom", "مخصص"], "ex.kbps": ["kbps", "كيلوبت/ث"], "ex.hwHint": ["Hardware encoding is used when available (Settings › Performance).", "يُستخدم الترميز بالعتاد عند توفره (الإعدادات › الأداء)."],
+  "ex.hwFallback": ["This size is above the hardware H.264 limit (4096 px), so software encoding is used — slower. HEVC can use the GPU up to 8192 px.", "هذا الحجم أكبر من حد ترميز H.264 بالعتاد (4096 بكسل)، لذا سيُستخدم الترميز البرمجي وهو أبطأ. يمكن لـ HEVC استخدام المعالج الرسومي حتى 8192 بكسل."],
+  "ex.codecSwitched": ["Above 4096 px the GPU cannot encode H.264, so this export is written as HEVC (H.265) on the GPU. To keep H.264, turn hardware encoding off in Settings › Performance (much slower).", "فوق 4096 بكسل لا يستطيع المعالج الرسومي ترميز H.264، لذا سيُكتب هذا التصدير بصيغة HEVC (H.265) بالعتاد. للإبقاء على H.264 أوقف الترميز بالعتاد من الإعدادات › الأداء (أبطأ كثيرًا)."],
+  "ex.stillFrame": ["Export still frame", "تصدير إطار ثابت"], "ex.range": ["Range", "النطاق"], "ex.rangeAll": ["Whole timeline", "الخط الزمني كاملًا"], "ex.rangeInOut": ["In / Out points", "بين نقطتي الدخول والخروج"],
+  "ex.selected": ["Selected clips only", "المقاطع المحددة فقط"], "ex.preparing": ["Preparing…", "جارٍ التحضير…"], "ex.preprocessing": ["Pre-processing compound clips…", "جارٍ معالجة المقاطع المركّبة…"],
+  "ex.syncSpace": ["Add the exported video to a space", "إضافة الفيديو المُصدَّر إلى مساحة"], "ex.history": ["Export history", "سجل التصدير"],
+  // settings
+  "set.title": ["Settings", "الإعدادات"], "set.draft": ["Draft", "المسودة"], "set.edit": ["Edit", "التحرير"], "set.performance": ["Performance", "الأداء"], "set.general": ["General", "عام"], "set.providers": ["Providers", "المزوّدات"],
+  "set.backup": ["Backup", "النسخ الاحتياطي"], "set.save": ["Save", "حفظ"], "set.cancel": ["Cancel", "إلغاء"], "set.saved": ["Settings saved", "تم حفظ الإعدادات"],
+  "set.mediaDir": ["Generated media", "الوسائط المولّدة"], "set.recordDir": ["Screen recording", "تسجيل الشاشة"], "set.downloadDir": ["Default export folder", "مجلد التصدير الافتراضي"],
+  "set.cache": ["Cache", "الذاكرة المؤقتة"], "set.dontDelete": ["Don't delete", "عدم الحذف"], "set.autoDelete": ["Auto delete cache from", "حذف تلقائي للذاكرة المؤقتة الأقدم من"], "set.daysAgo": ["days ago", "يومًا"],
+  "set.cacheSize": ["Cache size", "حجم الذاكرة المؤقتة"], "set.autoBackup": ["Automatic backup", "نسخ احتياطي تلقائي"], "set.autoBackupHint": ["Back up the local database once a day (keeps 7 copies). Local alternative to cloud sync.", "نسخ احتياطي يومي لقاعدة البيانات المحلية (يُحتفظ بـ 7 نسخ). بديل محلي للمزامنة السحابية."],
+  "set.presetDir": ["Preset save path", "مسار حفظ الإعدادات المسبقة"],
+  "set.stepFrames": ["Step forward or back many", "التقدم/الرجوع بعدة إطارات"], "set.frames": ["frames", "إطارات"], "set.valueStep": ["Adjust value many", "تعديل القيمة بعدة وحدات"], "set.units": ["units", "وحدات"],
+  "set.imageDuration": ["Image duration", "مدة الصورة"], "set.targetLoudness": ["Target loudness", "الجهارة المستهدفة"], "set.scrubAudio": ["Play audio while scrubbing", "تشغيل الصوت أثناء السحب"],
+  "set.scrubHint": ["Play audio when you drag the playhead", "تشغيل الصوت عند سحب رأس التشغيل"], "set.linkage": ["Linkage", "الربط"], "set.linkageSettings": ["Settings", "إعدادات"],
+  "set.linkageHint": ["When linkage is turned on, the selected items move or get deleted with the clips on the main track.", "عند تفعيل الربط تتحرك العناصر المحددة أو تُحذف مع مقاطع المسار الرئيسي."],
+  "set.arrangeLayers": ["Arrange layers", "ترتيب الطبقات"], "set.arrangeHint": ["Layers can be reordered in every new project by default.", "يمكن إعادة ترتيب الطبقات افتراضيًا في كل مشروع جديد."],
+  "set.timecode": ["Time code", "رمز الوقت"], "set.exportSound": ["Sound for export", "صوت عند التصدير"], "set.exportSoundHint": ["Send a notification sound when export is complete", "إشعار صوتي عند اكتمال التصدير"],
+  "set.hwEncode": ["Speed up hardware encoding", "تسريع الترميز بالعتاد"], "set.hwDecode": ["Speed up hardware decoding", "تسريع فك الترميز بالعتاد"], "set.gpuUI": ["Render interface with GPU", "رسم الواجهة بالمعالج الرسومي"],
+  "set.restartHint": ["Takes effect after restart", "يُطبَّق بعد إعادة التشغيل"], "set.autoOptimize": ["Auto optimization", "تحسين تلقائي"], "set.smart": ["Smart optimization", "تحسين ذكي"], "set.none": ["None", "بدون"],
+  "set.proxy": ["Proxy", "ملفات بديلة"], "set.proxyHint": ["Create low-resolution proxies on import to edit smoothly.", "إنشاء نسخ منخفضة الدقة عند الاستيراد لتحرير أكثر سلاسة."], "set.proxySize": ["Proxy size", "حجم الملفات البديلة"],
+  "set.renderCache": ["Rendering cache size", "حجم ذاكرة التصيير"], "set.autoClear": ["Auto clear", "مسح تلقائي"], "set.autoClearHint": ["Rendering cache is cleared when it exceeds this size.", "تُمسح ذاكرة التصيير عند تجاوز هذا الحجم."],
+  "set.autoRender": ["Auto render", "تصيير تلقائي"], "set.ffmpegPath": ["FFmpeg executable (optional)", "برنامج FFmpeg (اختياري)"], "set.ffmpegInfo": ["Engine", "المحرك"],
+  "set.language": ["Language", "اللغة"], "set.notifications": ["Allow notifications", "السماح بالإشعارات"], "set.updates": ["Software update", "تحديث البرنامج"], "set.updatesHint": ["Montaj Studio is offline: updates are installed manually from a new installer.", "يعمل مونتاج ستوديو دون اتصال: تُثبَّت التحديثات يدويًا من مثبّت جديد."],
+  "set.shellMenu": ["Add Montaj Studio to Windows right-click menu", "إضافة مونتاج ستوديو إلى قائمة الزر الأيمن في ويندوز"], "set.whisperPath": ["whisper.cpp program", "برنامج whisper.cpp"], "set.whisperModel": ["Whisper model (.bin)", "نموذج Whisper (.bin)"],
+  "set.whisperLang": ["Default spoken language", "لغة الكلام الافتراضية"], "set.browse": ["Browse", "استعراض"], "set.clear": ["Clear", "مسح"],
+  "set.backupNow": ["Create backup", "إنشاء نسخة احتياطية"], "set.restore": ["Restore", "استعادة"], "set.backups": ["Backups", "النسخ الاحتياطية"], "set.restoreConfirm": ["Replace all current data with the backup from {date}? The current database is kept as a safety copy.", "استبدال كل البيانات الحالية بالنسخة الاحتياطية بتاريخ {date}؟ ستُحفظ قاعدة البيانات الحالية كنسخة أمان."],
+  "set.backupDone": ["Backup created", "تم إنشاء النسخة الاحتياطية"], "set.restoreDone": ["Backup restored", "تمت الاستعادة"], "set.dataLocation": ["Data location", "موقع البيانات"],
+  "set.clearCacheConfirm": ["Delete rendering and proxy cache files?", "حذف ملفات التصيير والملفات البديلة المؤقتة؟"], "set.cacheCleared": ["Cache cleared", "تم مسح الذاكرة المؤقتة"],
+  // shortcuts
+  "sc.title": ["Shortcuts", "اختصارات لوحة المفاتيح"], "sc.timeline": ["Timeline", "الخط الزمني"], "sc.player": ["Player", "المشغل"], "sc.basic": ["Basic", "أساسي"], "sc.other": ["Other", "أخرى"],
+  "sc.reset": ["Reset", "إعادة تعيين"], "sc.clickToModify": ["Click to modify shortcut", "انقر لتعديل الاختصار"], "sc.pressKeys": ["Press keys…", "اضغط المفاتيح…"], "sc.conflict": ["“{a}” already uses this shortcut. Override it?", "«{a}» يستخدم هذا الاختصار بالفعل. هل تريد الاستبدال؟"],
+  "sc.closeUnsaved": ["Close the shortcut window? Your edits won't be saved.", "إغلاق نافذة الاختصارات؟ لن تُحفظ تعديلاتك."], "sc.preset": ["Shortcut {n}", "مجموعة {n}"], "sc.fixed": ["Mouse gesture (fixed)", "إيماءة فأرة (ثابتة)"],
+  // assistant
+  "ai.title": ["EditPilot", "EditPilot"], "ai.hello": ["How can I help you today?", "كيف أساعدك اليوم؟"], "ai.placeholder": ["Describe the edit…", "صف التعديل المطلوب…"],
+  "ai.notUnderstood": ["I couldn't map that to an edit. Try one of the suggestions.", "لم أستطع تحويل الطلب إلى تعديل. جرّب أحد الاقتراحات."], "ai.done": ["Done: {list}", "تم: {list}"], "ai.local": ["Runs locally — no data leaves your PC.", "يعمل محليًا — لا تغادر بياناتك جهازك."],
+  // common
+  "c.ok": ["OK", "موافق"], "c.cancel": ["Cancel", "إلغاء"], "c.close": ["Close", "إغلاق"], "c.save": ["Save", "حفظ"], "c.delete": ["Delete", "حذف"], "c.yes": ["Yes", "نعم"], "c.no": ["No", "لا"], "c.apply": ["Apply", "تطبيق"],
+  "c.done": ["Done", "تم"], "c.loading": ["Loading…", "جارٍ التحميل…"], "c.retry": ["Retry", "إعادة المحاولة"], "c.none": ["None", "بدون"], "c.all": ["All", "الكل"], "c.new": ["New", "جديد"], "c.selectAll": ["Select all", "تحديد الكل"],
+  "c.import": ["Import", "استيراد"], "c.create": ["Create", "إنشاء"], "c.remove": ["Remove", "إزالة"], "c.rename": ["Rename", "إعادة تسمية"], "c.favorite": ["Favorite", "مفضلة"], "c.local": ["Local", "محلي"], "c.notAvailable": ["Not available offline", "غير متاح دون اتصال"],
+  "c.search": ["Search", "بحث"], "c.filter": ["Filter", "تصفية"], "c.orientation": ["Orientation", "الاتجاه"], "c.landscape": ["Landscape", "أفقي"], "c.portrait": ["Portrait", "عمودي"], "c.square": ["Square", "مربع"],
+  "c.clips": ["Clips", "المقاطع"], "c.noLimit": ["No limit", "بلا حد"], "c.duration": ["Duration", "المدة"], "c.useTemplate": ["Use template", "استخدام القالب"], "c.materials": ["{n} materials", "{n} مواد"], "c.used": ["{n} used", "استُخدم {n}"],
+  "c.saved": ["Saved to project", "تم الحفظ في المشروع"], "c.undoDone": ["Undone: {label}", "تم التراجع: {label}"], "c.redoDone": ["Redone: {label}", "تمت الإعادة: {label}"], "c.nothingToUndo": ["Nothing to undo", "لا يوجد ما يُتراجع عنه"],
+  "lib.generated": ["Generated assets", "الأصول المولّدة"], "lib.elements": ["Elements", "العناصر"], "lib.createNew": ["Create new", "إنشاء جديد"], "lib.genHint": ["Exports, recordings and generated speech are listed here.", "تظهر هنا الملفات المُصدَّرة والتسجيلات والكلام المولّد."],
+  "lib.elemHint": ["Reusable assets: stickers, LUTs, audio and elements.", "أصول قابلة لإعادة الاستخدام: ملصقات وLUT وأصوات وعناصر."],
+  "space.title": ["Space", "المساحة"], "space.newName": ["Space name", "اسم المساحة"], "space.used": ["{used} of {quota}", "{used} من {quota}"], "space.unlimited": ["no limit", "بلا حد"], "space.empty": ["No projects in this space yet. Use “Add to space” from a project's menu.", "لا توجد مشاريع في هذه المساحة بعد. استخدم «إضافة إلى مساحة» من قائمة المشروع."],
+  "space.deleteConfirm": ["Delete space “{name}”? Projects are not deleted.", "حذف المساحة «{name}»؟ لن تُحذف المشاريع."],
+  "share.title": ["Share history", "سجل المشاركة"], "share.byYou": ["Shared by you", "شاركتها أنت"], "share.withYou": ["Shared with you", "استوردتها"], "share.empty": ["Packages you export or import will appear here.", "ستظهر هنا الحزم التي تصدّرها أو تستوردها."],
+  "notif.title": ["Notifications", "الإشعارات"], "notif.empty": ["Your notifications will appear here", "ستظهر إشعاراتك هنا"],
+  "about.title": ["About Montaj Studio", "حول مونتاج ستوديو"], "about.body": ["Offline desktop video editor. Version {v} · Electron {e} · Realm database · FFmpeg engine.", "محرر فيديو مكتبي يعمل دون اتصال. الإصدار {v} · Electron {e} · قاعدة بيانات Realm · محرك FFmpeg."],
+  "walk.1": ["Import media from the Media tab or drag files onto the window.", "استورد الوسائط من تبويب الوسائط أو اسحب الملفات إلى النافذة."],
+  "walk.2": ["Arrange clips on the timeline. Split with E, delete left/right with Q/W.", "رتّب المقاطع على الخط الزمني. قسّم بـ E واحذف يسارًا/يمينًا بـ Q/W."],
+  "walk.3": ["Select a clip to edit it in the inspector on the right.", "حدّد مقطعًا لتحريره من لوحة الخصائص."], "walk.4": ["Export when you're ready.", "صدّر عندما تكون جاهزًا."], "walk.next": ["Next", "التالي"], "walk.skip": ["Skip", "تخطٍّ"],
+  "rec.choose": ["Choose what to record", "اختر ما تريد تسجيله"], "rec.recording": ["Recording… {t}", "جارٍ التسجيل… {t}"], "rec.saved": ["Recording added to media", "أُضيف التسجيل إلى الوسائط"],
+  "low.memory": ["Your computer is almost out of memory. Close some applications and try again.", "ذاكرة جهازك توشك على النفاد. أغلق بعض التطبيقات ثم حاول مجددًا."],
+  // errors (messageKey from the main process)
+  "err.internal": ["Something went wrong.", "حدث خطأ ما."], "err.nameRequired": ["Enter a name.", "أدخل اسمًا."], "err.nameTooLong": ["The name is too long.", "الاسم طويل جدًا."],
+  "err.nameChars": ["Characters such as \\:/*?\"<>| are not supported.", "المحارف مثل \\:/*?\"<>| غير مدعومة."], "err.nameDot": ["Names can't start with “.”.", "لا يمكن أن يبدأ الاسم بنقطة."], "err.nameTaken": ["That name is already used.", "هذا الاسم مستخدم بالفعل."],
+  "err.number": ["Enter a valid number.", "أدخل رقمًا صحيحًا."], "err.range": ["Value out of range ({min}–{max}).", "القيمة خارج النطاق ({min}–{max})."], "err.fileTooLarge": ["Couldn't import file. Each file cannot exceed 4 GB.", "تعذّر الاستيراد: لا يمكن أن يتجاوز الملف 4 جيجابايت."],
+  "err.fileNotFound": ["File not found.", "الملف غير موجود."], "err.unsupportedMedia": ["This media format isn't supported.", "صيغة الوسائط غير مدعومة."], "err.trackLocked": ["The track is locked.", "المسار مقفل."],
+  "err.exportFailed": ["Export failed.", "فشل التصدير."], "err.cancelled": ["Cancelled.", "أُلغي."], "err.timelineEmpty": ["The timeline is empty.", "الخط الزمني فارغ."], "err.rangeEmpty": ["The selected range is empty.", "النطاق المحدد فارغ."],
+  "err.noCaptions": ["There are no captions to export.", "لا توجد ترجمات للتصدير."], "err.captionFormat": ["The caption file format couldn't be recognized.", "تعذّر التعرف على صيغة ملف الترجمة."], "err.captionTooLarge": ["Caption files must be no more than 3 MB.", "يجب ألا يتجاوز ملف الترجمة 3 ميجابايت."],
+  "err.whisperNotConfigured": ["Auto captions need whisper.cpp (Settings › Providers).", "الترجمة التلقائية تحتاج whisper.cpp (الإعدادات › المزوّدات)."], "err.whisperFailed": ["Speech recognition failed.", "فشل التعرف على الكلام."],
+  "err.ttsVoice": ["That voice isn't installed.", "هذا الصوت غير مثبت."], "err.ttsFailed": ["Speech generation failed.", "فشل توليد الكلام."], "err.ttsText": ["Enter some text first.", "أدخل نصًا أولًا."], "err.ttsUnavailable": ["Text to speech isn't available on this system.", "تحويل النص إلى كلام غير متاح على هذا النظام."],
+  "err.mediaInUse": ["The media is used on the timeline.", "الوسيط مستخدم على الخط الزمني."], "err.mediaMissing": ["Media file is missing. Use “Link to media”.", "ملف الوسيط مفقود. استخدم «ربط بالوسيط»."], "err.noAudio": ["This clip has no audio.", "لا يحتوي المقطع على صوت."],
+  "err.reverseTooLong": ["Reverse works on clips up to 120 seconds.", "يعمل العكس على مقاطع حتى 120 ثانية."], "err.freezeKind": ["Freeze works on video clips.", "يعمل التجميد على مقاطع الفيديو."], "err.reverseKind": ["Reverse works on video clips.", "يعمل العكس على مقاطع الفيديو."],
+  "err.selectionEmpty": ["Select at least one clip.", "حدّد مقطعًا واحدًا على الأقل."], "err.groupMin": ["Select two or more clips to group.", "حدّد مقطعين أو أكثر للتجميع."], "err.transitionMainOnly": ["Transitions work between main-track clips.", "تعمل الانتقالات بين مقاطع المسار الرئيسي."],
+  "err.shortcutConflict": ["Shortcuts conflict.", "تعارض في الاختصارات."], "err.shortcutTooManyModifiers": ["Too many modifier keys. Couldn't set shortcut.", "مفاتيح تعديل كثيرة. تعذّر ضبط الاختصار."], "err.shortcutFixed": ["This gesture can't be changed.", "لا يمكن تغيير هذه الإيماءة."],
+  "err.backupInvalid": ["This folder isn't a Montaj Studio backup.", "هذا المجلد ليس نسخة احتياطية لمونتاج ستوديو."], "err.packageInvalid": ["This isn't a Montaj Studio package.", "هذه ليست حزمة مونتاج ستوديو."],
+  "err.folderNotFound": ["Folder not found.", "المجلد غير موجود."], "err.dbOpen": ["The local database couldn't be opened.", "تعذّر فتح قاعدة البيانات المحلية."], "err.ffmpegMissing": ["The FFmpeg engine is missing.", "محرك FFmpeg مفقود."],
+  "err.compoundNotRendered": ["Pre-process the compound clip first.", "عالج المقطع المركّب أولًا."], "err.replaceTooShort": ["The replacement media is shorter than the clip.", "الوسيط البديل أقصر من المقطع."], "err.replaceType": ["That media type can't replace this clip.", "لا يمكن لهذا النوع استبدال المقطع."],
+  "err.lutFormat": ["Unsupported LUT. Try a .cube file.", "ملف LUT غير مدعوم. جرّب ملف ‎.cube."], "err.recordingEmpty": ["The recording is empty.", "التسجيل فارغ."], "err.projectTrashed": ["The project is in Trash.", "المشروع في سلة المهملات."],
+  "err.mediaMissingPackage": ["A media file is missing: {name}", "ملف وسائط مفقود: {name}"], "err.cannotDeleteMainTimeline": ["The main timeline can't be deleted.", "لا يمكن حذف الخط الزمني الرئيسي."],
+  "err.videoTooLong": ["Videos must be under 180 minutes.", "يجب أن يقل الفيديو عن 180 دقيقة."], "err.analysisKind": ["This works on video clips.", "يعمل هذا على مقاطع الفيديو."],
+  // errors raised by the data layer / services (validation of IPC input, not-found, engine failures)
+  "err.array": ["A list was expected.", "كان متوقعًا قائمة."], "err.string": ["Text was expected.", "كان متوقعًا نص."], "err.integer": ["Enter a whole number.", "أدخل عددًا صحيحًا."],
+  "err.enum": ["That option isn't allowed.", "هذا الخيار غير مسموح."], "err.color": ["Enter a colour like #00C1CD.", "أدخل لونًا مثل ‎#00C1CD."], "err.id": ["Invalid identifier.", "معرّف غير صالح."],
+  "err.forbidden": ["This request isn't allowed.", "هذا الطلب غير مسموح."], "err.unknownMethod": ["Unknown action.", "إجراء غير معروف."], "err.unknownCommand": ["Unknown editing command.", "أمر تحرير غير معروف."],
+  "err.notFound": ["Item not found.", "العنصر غير موجود."], "err.projectNotFound": ["Project not found.", "المشروع غير موجود."], "err.mediaNotFound": ["Media not found.", "الوسيط غير موجود."],
+  "err.segmentNotFound": ["Clip not found.", "المقطع غير موجود."], "err.trackNotFound": ["Track not found.", "المسار غير موجود."], "err.markerNotFound": ["Marker not found.", "العلامة غير موجودة."],
+  "err.timelineNotFound": ["Timeline not found.", "الخط الزمني غير موجود."], "err.presetNotFound": ["Preset not found.", "الإعداد المسبق غير موجود."], "err.commandNotFound": ["Command not found.", "الأمر غير موجود."],
+  "err.timelineInvalid": ["That edit would leave the timeline in an invalid state.", "هذا التعديل يجعل الخط الزمني غير صالح."], "err.timelineInUse": ["The timeline is in use.", "الخط الزمني مستخدم."],
+  "err.fieldNotPatchable": ["That property can't be changed this way.", "لا يمكن تغيير هذه الخاصية بهذه الطريقة."], "err.textContent": ["Text content is invalid.", "محتوى النص غير صالح."],
+  "err.extractKind": ["Extract audio works on video clips.", "يعمل استخراج الصوت على مقاطع الفيديو."], "err.speedKind": ["Speed applies to video and audio clips.", "تُطبَّق السرعة على مقاطع الفيديو والصوت."],
+  "err.notCompound": ["This isn't a compound clip.", "هذا ليس مقطعًا مركّبًا."], "err.notTemplate": ["This isn't a template.", "هذا ليس قالبًا."], "err.overlayMissing": ["A text or sticker image is missing for export.", "صورة نص أو ملصق مفقودة للتصدير."],
+  "err.probeParse": ["The media file couldn't be read.", "تعذّرت قراءة ملف الوسائط."], "err.ffprobeMissing": ["The media analyzer (ffprobe) is missing.", "محلّل الوسائط (ffprobe) مفقود."],
+  "err.ffmpegFailed": ["The media engine reported an error.", "أبلغ محرك الوسائط عن خطأ."], "err.ffmpegSpawn": ["The media engine couldn't be started.", "تعذّر تشغيل محرك الوسائط."], "err.frameFailed": ["The frame couldn't be extracted.", "تعذّر استخراج الإطار."],
+  "err.reverseFailed": ["The reversed clip couldn't be created.", "تعذّر إنشاء المقطع المعكوس."], "err.relinkType": ["The new file must be the same media type.", "يجب أن يكون الملف الجديد من نوع الوسائط نفسه."],
+  "err.lut1d": ["1D LUTs aren't supported; use a 3D .cube file.", "ملفات LUT أحادية البعد غير مدعومة؛ استخدم ملف ‎.cube ثلاثي الأبعاد."],
+  "err.shortcutInvalid": ["That key combination isn't valid.", "تركيبة المفاتيح غير صالحة."], "err.settingUnknown": ["Unknown setting.", "إعداد غير معروف."], "err.settingsSection": ["Unknown settings section.", "قسم إعدادات غير معروف."],
+  "err.windowsOnly": ["Available on Windows only.", "متاح على ويندوز فقط."], "err.registry": ["Windows registry update failed.", "فشل تحديث سجل ويندوز."],
+  "err.packageTool": ["The archive tool (tar) isn't available.", "أداة الأرشفة (tar) غير متاحة."], "err.packageFailed": ["The package couldn't be created or opened.", "تعذّر إنشاء الحزمة أو فتحها."],
+  "err.backupNewer": ["This backup was made by a newer version.", "أُنشئت هذه النسخة بإصدار أحدث."], "err.restoreFailed": ["Restore failed; your data was rolled back.", "فشلت الاستعادة وأُعيدت بياناتك كما كانت."],
+  "err.dbNewerVersion": ["The database was created by a newer version of the app.", "أُنشئت قاعدة البيانات بإصدار أحدث من التطبيق."], "err.dbClosed": ["The database is closed.", "قاعدة البيانات مغلقة."],
+  "err.diskFull": ["Not enough free disk space for this export.", "لا توجد مساحة كافية على القرص لهذا التصدير."], "err.coverNoFrame": ["Move the playhead over a main-track clip to pick the cover.", "ضع رأس التشغيل فوق مقطع على المسار الرئيسي لاختيار الغلاف."],
+  "low.disk": ["Your disk is almost full ({free} free). Exports may fail.", "القرص يوشك على الامتلاء (المتاح {free}). قد يفشل التصدير."], "tl.editCover": ["Set cover from playhead", "تعيين الغلاف من رأس التشغيل"], "tl.resetCover": ["Automatic cover", "غلاف تلقائي"],
+  "about.licenses": ["Open-source components", "مكونات مفتوحة المصدر"],
+  "err.ttsTooLong": ["The text is too long for speech (max 5000 characters).", "النص طويل جدًا للتحويل إلى كلام (الحد 5000 حرف)."],
+};
+
+let lang = "ar";
+export function setLang(l) {
+  lang = l === "en" ? "en" : "ar";
+  document.documentElement.lang = lang;
+  document.documentElement.dir = lang === "ar" ? "rtl" : "ltr";
+}
+export const getLang = () => lang;
+export function t(key, vars = {}) {
+  const e = D[key];
+  let s = e ? (lang === "ar" ? e[1] ?? e[0] : e[0]) : key;
+  for (const [k, v] of Object.entries(vars)) s = s.replaceAll(`{${k}}`, String(v));
+  return s;
+}
+export const has = (key) => key in D;
+/** Human message for an error envelope thrown by window.api. */
+export function errorText(err) {
+  if (err?.messageKey && has(err.messageKey)) return t(err.messageKey, err.details || {});
+  return t("err.internal");
+}
+export function fmtDate(iso) {
+  if (!iso) return "—";
+  const d = new Date(iso);
+  return d.toLocaleDateString(lang === "ar" ? "ar-EG" : "en-GB", { month: "2-digit", day: "2-digit" });
+}
+export function fmtDateTime(iso) {
+  if (!iso) return "—";
+  return new Date(iso).toLocaleString(lang === "ar" ? "ar-EG" : "en-GB", { year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" });
+}

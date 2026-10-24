@@ -1,0 +1,63 @@
+/* Design tokens — values measured from CapCut 9.6 screenshots (report chapter 6) unless marked "proposed". */
+:root {
+  --bg-app: #141414;
+  --bg-home: #090909;
+  --bg-panel: #262626;
+  --bg-panel-header: #303030;
+  --bg-track: #2a2a2a;
+  --bg-raised: #3b3b3b;
+  --bg-chip: #2f2f2f;
+  --bg-btn-secondary: #4f4f4f;
+  --bg-home-card: #0f1a1c;
+  --bg-editpilot: #025160;
+  --bg-backdrop: rgba(4, 4, 4, 0.66);
+  --bg-hover: rgba(255, 255, 255, 0.06);
+  --bg-input: #1f1f1f;
+
+  --accent: #00c1cd;
+  --accent-hover: #19d4df;
+  --accent-text: #12b3cc;
+  --accent-ink: #00222a;
+  --pro: #7b61ff;          /* proposed */
+  --teams-gradient: linear-gradient(90deg, #aad3ff, #b9a8ff);
+  --hero-gradient: linear-gradient(90deg, #30d5e0, #14b8cc);
+  --danger: #ff5a5f;       /* proposed */
+  --warning: #ffc400;      /* proposed */
+  --success: #3ccf8e;      /* proposed */
+
+  --text-primary: #e0e0e0;
+  --text-value: #c4c6c3;
+  --text-secondary: #9a9a97; /* raised from #8E8E8B to reach 4.5:1 on panels (report gap: low contrast) */
+  --text-label: #a3a29f;
+  --text-disabled: #6a6a6a;
+
+  --selection: #ffffff;
+  --playhead: #929292;
+  --track-video: #1a5f64;
+  --track-audio: #0e3058;
+  --track-text: #9c4937;
+  --track-sticker: #d69329;
+  --track-effect: #744a82;
+  --track-filter: #47418b;
+  --track-adjust: #ab8636;
+  --track-overlay: #014a51;
+  --track-tts: #003a4c;
+  --track-sfx: #2f476f;
+
+  --titlebar-h: 34px;
+  --panel-header-h: 42px;
+  --tl-toolbar-h: 32px;
+  --gap-outer: 9px;
+  --gap-panel: 8px;
+  --gap-v: 6px;
+  --category-w: 120px;
+  --r-panel: 6px;
+  --r-control: 4px;
+  --r-card: 8px;
+  --r-pill: 999px;
+  --s1: 4px; --s2: 8px; --s3: 12px; --s4: 16px; --s5: 24px;
+
+  --font: "Segoe UI", "Segoe UI Variable", Tahoma, "Noto Sans Arabic", system-ui, sans-serif;
+  --fs-xs: 11px; --fs-sm: 12px; --fs-md: 13px; --fs-lg: 16px; --fs-xl: 24px;
+  --shadow-pop: 0 8px 28px rgba(0, 0, 0, 0.55);
+}
