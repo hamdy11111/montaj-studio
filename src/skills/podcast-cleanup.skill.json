@@ -1,0 +1,34 @@
+{
+  "schema": "montaj.skill/1",
+  "id": "podcast-cleanup",
+  "name": "Podcast clean-up",
+  "description": "Cuts out the pauses in spoken recordings, reduces background noise, enhances the voice and evens out loudness for podcasts and talking-head videos.",
+  "version": "1.1.0",
+  "author": "Montaj Studio",
+  "source": "official",
+  "category": "audio",
+  "tags": ["podcast", "silence", "voice", "loudness", "بودكاست", "صمت"],
+  "goals": ["Remove dead air", "Clear, even voice"],
+  "capabilities": ["silence removal", "noise reduction", "voice enhancement", "loudness normalization"],
+  "inputs": {
+    "type": "object",
+    "properties": {
+      "removeSilences": { "type": "boolean", "default": true, "description": "Cut pauses longer than minPauseS" },
+      "minPauseS": { "type": "number", "minimum": 0.3, "maximum": 5, "default": 0.7 },
+      "paddingMs": { "type": "number", "minimum": 0, "maximum": 600, "default": 150, "description": "Speech kept on each side of a cut" }
+    },
+    "additionalProperties": false
+  },
+  "outputs": ["Shorter timeline without long pauses", "Denoised, enhanced, normalized audio on every audible clip"],
+  "permissions": ["read", "media", "edit"],
+  "settings": { "audio.loudness": -16 },
+  "steps": [
+    { "id": "silences", "title": "Remove pauses", "op": "timeline_remove_silences", "when": "inputs.removeSilences", "with": { "timelineId": "{{ctx.timelineId}}", "minDurS": "{{inputs.minPauseS}}", "paddingMs": "{{inputs.paddingMs}}" } },
+    { "id": "voice", "title": "Clean up voice", "op": "audio_enhance_voice", "with": { "timelineId": "{{ctx.timelineId}}", "denoise": true, "enhanceVoice": true } },
+    { "id": "loudness", "title": "Even out loudness", "op": "audio_normalize", "with": { "timelineId": "{{ctx.timelineId}}", "targetLufs": "{{settings.audio.loudness}}" } }
+  ],
+  "success": ["timeline_not_empty"],
+  "rollback": "restore",
+  "tests": [{ "name": "removes the pause in a recording with a gap", "fixture": "speech_with_pauses", "inputs": {}, "expect": ["duration_reduced", "timeline_not_empty"] }],
+  "examples": ["Clean up this podcast episode", "نظّف صوت البودكاست واحذف السكتات"]
+}

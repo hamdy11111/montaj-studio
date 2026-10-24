@@ -19,6 +19,8 @@ export function makePaths(root) {
     luts: path.join(root, "library", "luts"),
     library: path.join(root, "library"),
     logs: path.join(root, "logs"),
+    skills: path.join(root, "skills"), // user and imported skills (data only)
+    agents: path.join(root, "agents"), // agent clients (token hashes), audit log
   };
   for (const [k, v] of Object.entries(p)) if (k !== "root" && k !== "db") fs.mkdirSync(v, { recursive: true });
   fs.mkdirSync(path.dirname(p.db), { recursive: true });

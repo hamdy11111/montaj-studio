@@ -1,0 +1,83 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://montaj.studio/schemas/skill-1.json",
+  "title": "Montaj Studio skill",
+  "description": "A reusable editing skill. Data only: steps call operations from the Montaj Editing API (or other skills); no code is ever executed from a skill.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "id", "name", "version", "description", "permissions", "steps"],
+  "properties": {
+    "schema": { "const": "montaj.skill/1" },
+    "id": { "type": "string", "pattern": "^[a-z][a-z0-9-]{1,63}$", "description": "Stable id (kebab-case)" },
+    "name": { "type": "string", "minLength": 1, "maxLength": 80 },
+    "description": { "type": "string", "minLength": 1, "maxLength": 1000 },
+    "version": { "type": "string", "pattern": "^\\d+\\.\\d+\\.\\d+$" },
+    "author": { "type": "string", "maxLength": 80 },
+    "source": { "type": "string", "maxLength": 200, "description": "Where the skill came from (official, user, a file, an agent)" },
+    "trust": { "enum": ["official", "user", "external"], "description": "Set by the registry, not by the file" },
+    "category": { "type": "string", "maxLength": 40 },
+    "tags": { "type": "array", "items": { "type": "string", "maxLength": 40 }, "maxItems": 20 },
+    "goals": { "type": "array", "items": { "type": "string", "maxLength": 200 }, "maxItems": 20 },
+    "capabilities": { "type": "array", "items": { "type": "string", "maxLength": 60 }, "maxItems": 30 },
+    "inputs": {
+      "type": "object",
+      "description": "JSON Schema of the skill's inputs (type object). Defaults are applied before running.",
+      "properties": {
+        "type": { "const": "object" },
+        "properties": { "type": "object" },
+        "required": { "type": "array", "items": { "type": "string" } },
+        "additionalProperties": { "type": "boolean" }
+      },
+      "required": ["type"]
+    },
+    "outputs": { "type": "array", "items": { "type": "string", "maxLength": 200 }, "maxItems": 20 },
+    "permissions": {
+      "type": "array", "minItems": 1, "uniqueItems": true,
+      "items": { "enum": ["read", "media", "edit", "export"] },
+      "description": "Scopes the skill needs; the caller must hold all of them"
+    },
+    "requires": {
+      "type": "object", "additionalProperties": false,
+      "properties": {
+        "app": { "type": "string", "pattern": "^>=\\d+\\.\\d+\\.\\d+$", "description": "Minimum app version" },
+        "providers": { "type": "array", "items": { "enum": ["whisper"] } }
+      }
+    },
+    "dependsOn": {
+      "type": "array", "maxItems": 20,
+      "items": { "type": "object", "additionalProperties": false, "required": ["id"], "properties": { "id": { "type": "string" }, "version": { "type": "string", "pattern": "^\\^?\\d+\\.\\d+\\.\\d+$" } } }
+    },
+    "settings": {
+      "type": "object",
+      "description": "Style settings this skill owns (e.g. canvas.ratio, look.filter). Two composed skills setting the same key differently is a conflict.",
+      "additionalProperties": { "type": ["string", "number", "boolean"] }
+    },
+    "steps": {
+      "type": "array", "minItems": 1, "maxItems": 50,
+      "items": {
+        "type": "object", "additionalProperties": false, "required": ["id"],
+        "properties": {
+          "id": { "type": "string", "pattern": "^[a-z][a-z0-9_]{0,31}$" },
+          "title": { "type": "string", "maxLength": 120 },
+          "op": { "type": "string", "pattern": "^[a-z_]+$", "description": "Operation name from the Editing API" },
+          "skill": { "type": "string", "pattern": "^[a-z][a-z0-9-]{1,63}$", "description": "Run another skill (composition)" },
+          "with": { "type": "object", "description": "Arguments; strings may use {{inputs.x}}, {{steps.<id>.result.<path>}}, {{ctx.timelineId}}" },
+          "when": { "type": "string", "pattern": "^(!)?(inputs|steps|ctx)\\.[A-Za-z0-9_.]+$", "description": "Run only if this value is truthy (or falsy with !)" },
+          "onError": { "enum": ["fail", "skip"], "default": "fail" }
+        },
+        "oneOf": [{ "required": ["op"] }, { "required": ["skill"] }]
+      }
+    },
+    "success": {
+      "type": "array", "maxItems": 10,
+      "items": { "enum": ["timeline_not_empty", "duration_reduced", "duration_unchanged", "has_captions"] }
+    },
+    "rollback": { "enum": ["restore", "keep"], "default": "restore" },
+    "tests": {
+      "type": "array", "maxItems": 10,
+      "items": { "type": "object", "required": ["name"], "properties": { "name": { "type": "string" }, "fixture": { "enum": ["speech_with_pauses", "two_clips", "silent_clip"] }, "inputs": { "type": "object" }, "expect": { "type": "array", "items": { "type": "string" } } } }
+    },
+    "examples": { "type": "array", "items": { "type": "string", "maxLength": 300 }, "maxItems": 10 },
+    "integrity": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$", "description": "Set by the registry on save/export" }
+  }
+}

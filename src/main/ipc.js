@@ -1,6 +1,6 @@
 // IPC bridge: one "api:call" channel with an explicit allowlist of methods. Every result is an envelope
 // {ok, data} | {ok:false, error:{code, messageKey, details}} — the renderer never sees raw exceptions or Realm objects.
-import { ipcMain, dialog, shell, BrowserWindow, desktopCapturer, Notification, app } from "electron";
+import { ipcMain, dialog, shell, BrowserWindow, desktopCapturer, Notification, app, clipboard } from "electron";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -16,8 +16,9 @@ const id = (v, field = "id") => validateId(v, field);
 const obj = (v) => (v && typeof v === "object" ? v : {});
 const arr = (v, field) => { if (!Array.isArray(v)) throw new AppError("VALIDATION", "err.array", { field }); return v; };
 
-export function registerIpc({ getServices, getWindow, appInfo }) {
+export function registerIpc({ getServices, getAgents = () => null, getWindow, appInfo }) {
   const S = () => getServices();
+  const A = () => { const a = getAgents(); if (!a) throw new AppError("VALIDATION", "err.agentsUnavailable"); return a; };
   const win = () => getWindow() || BrowserWindow.getFocusedWindow();
 
   const methods = {
@@ -42,7 +43,7 @@ export function registerIpc({ getServices, getWindow, appInfo }) {
       const filters = { media: [{ name: "Media files", extensions: ["mp4", "mov", "m4v", "mkv", "avi", "webm", "wmv", "mpg", "mpeg", "mts", "m2ts", "3gp", "flv", "jpg", "jpeg", "png", "webp", "bmp", "gif", "tif", "tiff", "heic", "mp3", "wav", "aac", "m4a", "flac", "ogg", "opus", "wma"] }],
         audio: [{ name: "Audio", extensions: ["mp3", "wav", "aac", "m4a", "flac", "ogg", "opus", "wma"] }], image: [{ name: "Images", extensions: ["png", "jpg", "jpeg", "webp", "gif", "svg"] }],
         captions: [{ name: "Captions", extensions: ["srt", "vtt", "lrc"] }], lut: [{ name: "LUT", extensions: ["cube", "3dl"] }], package: [{ name: "Montaj package", extensions: ["mstudio", "zip"] }],
-        exe: [{ name: "Program", extensions: ["exe"] }], model: [{ name: "Model", extensions: ["bin", "gguf"] }], any: [{ name: "All files", extensions: ["*"] }] };
+        exe: [{ name: "Program", extensions: ["exe"] }], model: [{ name: "Model", extensions: ["bin", "gguf"] }], json: [{ name: "JSON", extensions: ["json"] }], any: [{ name: "All files", extensions: ["*"] }] };
       const r = await dialog.showOpenDialog(win(), { title: o.title, properties: ["openFile", ...(o.multi ? ["multiSelections"] : [])], filters: filters[o.kind || "media"] || filters.any });
       return r.canceled ? [] : r.filePaths;
     },
@@ -180,6 +181,43 @@ export function registerIpc({ getServices, getWindow, appInfo }) {
     "package.import": (file) => S().packages.importPackage(str(file, "file")),
     "share.list": (direction) => S().repos.shares.list(direction || null),
 
+    // ---------------------------------------------------------------- agents (MCP bridge) — management from the app
+    "agents.status": () => {
+      const a = A();
+      return { enabled: S().settings.get("agents").enabled, listening: !!a.server, pipe: a.pipe || null, lastError: a.lastError || null, clients: a.clients.all().map((c) => a.clients.public(c)), scopes: ["read", "media", "edit", "skills.run", "skills.write", "export", "delete"], launch: mcpLaunch() };
+    },
+    "agents.createClient": (o) => {
+      const q = obj(o);
+      const r = A().clients.create({ name: q.name ? str(q.name, "name") : "Agent", scopes: q.scopes ? arr(q.scopes, "scopes") : ["read"], projects: q.projects === undefined ? "*" : q.projects, importRoots: q.importRoots ? arr(q.importRoots, "importRoots") : [], exportDir: q.exportDir || "" });
+      return { ...r, config: mcpConfig(r.tokenFile) };
+    },
+    "agents.updateClient": (cid, patch) => A().clients.update(id(cid), obj(patch)),
+    "agents.revokeClient": (cid) => A().clients.revoke(id(cid)),
+    "agents.config": (cid) => mcpConfig(path.join(S().paths.agents, "tokens", `${id(cid)}.token`)),
+    "agents.audit": (n) => A().recentAudit(Math.min(500, Number(n) || 100)),
+    "agents.jobs": () => A().jobs.list(),
+    "agents.respond": (rid, allow) => A().respond(str(rid, "id"), !!allow),
+    "app.copyText": (text) => { clipboard.writeText(str(text, "text").slice(0, 20000)); return true; },
+
+    // ---------------------------------------------------------------- skills (the user's own Skills panel)
+    "skills.list": (q) => A().skills.list({ ...obj(q), includeDisabled: true }).map((s) => A().skills.card(s)),
+    "skills.get": (sid, v) => A().skills.get(str(sid, "id"), v || null, { includeDisabled: true }),
+    "skills.validate": (skill) => A().skills.validate(obj(skill)),
+    "skills.buildFromText": (text, o) => A().skills.buildFromText(str(text, "text"), obj(o)),
+    "skills.save": (skill) => A().skills.save(obj(skill), { author: "user" }),
+    "skills.import": (file) => { const f = str(file, "file"); if (fs.statSync(f).size > 256 * 1024) throw new AppError("VALIDATION", "err.fileTooLarge"); return A().skills.importSkill(JSON.parse(fs.readFileSync(f, "utf8")), { from: path.basename(f) }); },
+    "skills.export": (sid, file) => { fs.writeFileSync(str(file, "file"), JSON.stringify(A().skills.exportSkill(str(sid, "id")), null, 1)); return true; },
+    "skills.remove": (sid) => A().skills.remove(str(sid, "id")),
+    "skills.setEnabled": (sid, v) => A().skills.setEnabled(str(sid, "id"), !!v),
+    "skills.history": (sid) => A().skills.history(sid ? str(sid, "id") : null),
+    "skills.run": async (sid, tid, inputs) => {
+      const hub = A();
+      const ctx = hub.userContext();
+      const job = hub.jobs.start({ kind: "skill", clientId: "user", label: str(sid, "id"), run: (j) => hub.runtime.run({ skillId: sid, timelineId: id(tid), inputs: obj(inputs), ctx, job: j }) });
+      return hub.jobs.wait(job.jobId, 15 * 60_000, "user");
+    },
+    "skills.cancel": (jid) => A().jobs.cancel(str(jid, "jobId"), "user"),
+
     // ---------------------------------------------------------------- recording (FEAT-014)
     "record.sources": async () => (await desktopCapturer.getSources({ types: ["screen", "window"], thumbnailSize: { width: 240, height: 135 } })).map((x) => ({ id: x.id, name: x.name, thumbnail: x.thumbnail.toDataURL() })),
     "record.save": async (pid, bytes, ext) => {
@@ -212,6 +250,32 @@ export function registerIpc({ getServices, getWindow, appInfo }) {
   });
 
   return { notifyAll, methods };
+}
+
+/**
+ * How an MCP client starts the bridge: the app's own executable in Node mode (ELECTRON_RUN_AS_NODE) running
+ * src/mcp/server.mjs — no separate Node install needed. In packaged builds the script and its modules load straight
+ * from app.asar (Electron's Node mode reads ES modules from the archive).
+ */
+function mcpLaunch() {
+  const script = path.join(app.getAppPath(), "src", "mcp", "server.mjs");
+  return { command: process.execPath, args: [script], env: { ELECTRON_RUN_AS_NODE: "1" } };
+}
+
+/** Ready-to-paste client configuration for one agent client (the token stays in its file). */
+function mcpConfig(tokenFile) {
+  const l = mcpLaunch();
+  const env = { ...l.env, MONTAJ_USER_DATA: app.getPath("userData"), MONTAJ_TOKEN_FILE: tokenFile };
+  const q = (s) => `"${s.replace(/"/g, '\\"')}"`;
+  return {
+    json: { mcpServers: { "montaj-studio": { command: l.command, args: l.args, env } } },
+    claudeCode: `claude mcp add montaj-studio --scope user ${Object.entries(env).map(([k, v]) => `--env ${k}=${q(v)}`).join(" ")} -- ${q(l.command)} ${l.args.map(q).join(" ")}`,
+    codexToml: `[mcp_servers.montaj-studio]
+command = ${JSON.stringify(l.command)}
+args = ${JSON.stringify(l.args)}
+env = { ${Object.entries(env).map(([k, v]) => `${k} = ${JSON.stringify(v)}`).join(", ")} }
+`,
+  };
 }
 
 /** "Add Montaj Studio to Windows right-click menu" (Settings › General) — per-user registry keys only. */

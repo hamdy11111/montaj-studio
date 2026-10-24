@@ -27,6 +27,20 @@ export class History {
     return true;
   }
 
+  /**
+   * Merge every entry pushed since `depth` into one, labelled `label` (a skill run is one undo step). Returns
+   * true when something was merged.
+   */
+  squashSince(depth, label) {
+    if (this.undoStack.length <= depth) return false;
+    const first = this.undoStack[depth];
+    this.undoStack.length = depth;
+    this.undoStack.push({ state: first.state, label });
+    this.redoStack = [];
+    this.lastKey = null;
+    return true;
+  }
+
   canUndo() { return this.undoStack.length > 0; }
   canRedo() { return this.redoStack.length > 0; }
 

@@ -1,6 +1,7 @@
 // Editor command executor (main process is the source of truth). Each command: snapshot → mutate (pure ops) →
 // validate → persist (one Realm transaction) → history push. Returns the new state for the renderer.
 import fs from "node:fs";
+import { AsyncLocalStorage } from "node:async_hooks";
 import path from "node:path";
 import * as ops from "../core/timelineOps.js";
 import { History } from "../core/history.js";
@@ -14,6 +15,10 @@ import { KEYFRAME_PROPS, EASINGS, TRANSITIONS } from "../core/layerMath.js";
 const PATCHABLE = new Set(["name", "transform", "crop", "adjust", "videoFx", "audioFx", "animation", "clipEffects", "volumeDb", "fadeInUs", "fadeOutUs",
   "text", "effect", "filter", "sticker", "changePitch", "colorTag", "disabled"]);
 
+// Who is editing (the UI, or "agent:<client>"), kept per call across awaits.
+const editSource = new AsyncLocalStorage();
+const currentSource = () => editSource.getStore() || "ui";
+
 export class TimelineService {
   constructor({ repos, media, settings, exporter = null, analysis = null }) {
     this.repos = repos;
@@ -21,13 +26,16 @@ export class TimelineService {
     this.settings = settings;
     this.exporter = exporter; // set later (circular: exporter renders compound clips)
     this.analysis = analysis;
-    this.open = new Map(); // timelineId -> { state, history }
+    this.open = new Map(); // timelineId -> { state, history, revision }
+    // Called after every change with { timelineId, revision, label, source } — the app forwards it to the window so
+    // edits made by agents appear live in the editor ("ui" edits are already applied there).
+    this.onChange = () => {};
   }
 
   load(timelineId) {
     let entry = this.open.get(timelineId);
     if (!entry) {
-      entry = { state: this.repos.timelines.get(timelineId), history: new History() };
+      entry = { state: this.repos.timelines.get(timelineId), history: new History(), revision: 0 };
       this.open.set(timelineId, entry);
     }
     return entry;
@@ -35,7 +43,33 @@ export class TimelineService {
 
   get(timelineId) {
     const e = this.load(timelineId);
-    return { timeline: e.state, history: e.history.info() };
+    return { timeline: e.state, history: e.history.info(), revision: e.revision };
+  }
+
+  /** Optimistic concurrency: an edit planned against an older revision is refused rather than applied blindly. */
+  checkRevision(timelineId, expected) {
+    if (expected === undefined || expected === null) return;
+    const cur = this.load(timelineId).revision;
+    if (Number(expected) !== cur) throw new AppError("CONFLICT", "err.revisionConflict", { expected: Number(expected), current: cur });
+  }
+
+  changed(timelineId, entry, label, source) {
+    entry.revision++;
+    try { this.onChange({ timelineId, revision: entry.revision, label, source }); } catch { /* listener errors never break an edit */ }
+  }
+
+  /** Merge the history entries made since `depth` into one undo step (a skill run). */
+  squash(timelineId, depth, label) { return this.load(timelineId).history.squashSince(depth, label); }
+
+  /** Roll back to a snapshot taken at history `depth` (a failed skill): restores state, drops the partial steps. */
+  restore(timelineId, state, depth, source = "system") {
+    const entry = this.load(timelineId);
+    this.repos.timelines.saveState(state);
+    entry.state = deepClone(state);
+    entry.history.undoStack.length = Math.min(entry.history.undoStack.length, depth);
+    entry.history.redoStack = [];
+    this.changed(timelineId, entry, "rollback", source);
+    return { timeline: entry.state, history: entry.history.info(), revision: entry.revision };
   }
 
   close(timelineId) { this.open.delete(timelineId); }
@@ -46,7 +80,7 @@ export class TimelineService {
   }
 
   /** Apply a synchronous mutation with history + persistence. */
-  commit(timelineId, label, mutate, { coalesceKey = null } = {}) {
+  commit(timelineId, label, mutate, { coalesceKey = null, source = currentSource() } = {}) {
     const entry = this.load(timelineId);
     const before = deepClone(entry.state);
     const work = deepClone(entry.state);
@@ -56,7 +90,8 @@ export class TimelineService {
     this.repos.timelines.saveState(work);
     entry.history.push(before, label, coalesceKey);
     entry.state = work;
-    return { timeline: work, history: entry.history.info(), result };
+    this.changed(timelineId, entry, label, source);
+    return { timeline: work, history: entry.history.info(), result, revision: entry.revision };
   }
 
   undo(timelineId) {
@@ -65,7 +100,8 @@ export class TimelineService {
     if (!r) return { timeline: entry.state, history: entry.history.info(), result: null };
     this.repos.timelines.saveState(r.state);
     entry.state = r.state;
-    return { timeline: entry.state, history: entry.history.info(), result: r.label };
+    this.changed(timelineId, entry, `undo:${r.label}`, currentSource());
+    return { timeline: entry.state, history: entry.history.info(), result: r.label, revision: entry.revision };
   }
 
   redo(timelineId) {
@@ -74,7 +110,8 @@ export class TimelineService {
     if (!r) return { timeline: entry.state, history: entry.history.info(), result: null };
     this.repos.timelines.saveState(r.state);
     entry.state = r.state;
-    return { timeline: entry.state, history: entry.history.info(), result: r.label };
+    this.changed(timelineId, entry, `redo:${r.label}`, currentSource());
+    return { timeline: entry.state, history: entry.history.info(), result: r.label, revision: entry.revision };
   }
 
   mediaDuration(mediaId) {
@@ -83,7 +120,14 @@ export class TimelineService {
   }
 
   // ------------------------------------------------------------------ command router
+  /** Run a command on behalf of `source` (e.g. "agent:<client>") — recorded on the change event. */
+  execAs(source, timelineId, cmd, a = {}) { return editSource.run(source, () => this.exec(timelineId, cmd, a)); }
+
+  /** Run `fn` with every edit inside it attributed to `source`. */
+  runAs(source, fn) { return editSource.run(source, fn); }
+
   async exec(timelineId, cmd, a = {}) {
+    this.checkRevision(timelineId, a.expectedRevision);
     const o = this.editOpts();
     const imageDurationUs = (this.settings.get("edit").imageDurationS || 5) * US;
     switch (cmd) {

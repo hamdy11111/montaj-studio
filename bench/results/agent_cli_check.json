@@ -1,0 +1,59 @@
+{
+ "date": "2026-10-24T09:12:19.981Z",
+ "versions": {
+  "claude": "2.1.216 (Claude Code)",
+  "codex": "codex-cli 0.153.4"
+ },
+ "results": [
+  {
+   "agent": "Claude Code",
+   "exitCode": 0,
+   "seconds": 29,
+   "reply": {
+    "before": 5000000,
+    "after": 3883590,
+    "undoLabel": "skill:podcast-cleanup",
+    "montajTools": 36
+   },
+   "app": {
+    "undoLabel": "skill:podcast-cleanup",
+    "durationUs": 3883590,
+    "calls": [
+     "hello:ok",
+     "project_list:ok",
+     "timeline_inspect:ok",
+     "skills_execute:ok",
+     "timeline_inspect:ok"
+    ],
+    "hello": true
+   },
+   "pass": true
+  },
+  {
+   "agent": "Codex",
+   "exitCode": 0,
+   "seconds": 19,
+   "reply": {
+    "before": 5000000,
+    "after": 3883590,
+    "undoLabel": "skill:podcast-cleanup",
+    "montajTools": 36
+   },
+   "app": {
+    "undoLabel": "skill:podcast-cleanup",
+    "durationUs": 3883590,
+    "calls": [
+     "hello:ok",
+     "project_list:ok",
+     "timeline_inspect:ok",
+     "skills_execute:ok",
+     "timeline_inspect:ok"
+    ],
+    "hello": true
+   },
+   "pass": true,
+   "date": "2026-10-24T04:08:00.424Z",
+   "note": "model override gpt-5.6-sol via -c (configured gpt-6-sol unavailable on ChatGPT account)"
+  }
+ ]
+}

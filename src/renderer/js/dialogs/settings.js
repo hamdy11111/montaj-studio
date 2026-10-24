@@ -19,7 +19,7 @@ export function openSettings(initialTab = "draft") {
   let tab = initialTab;
   const side = h("div", { class: "settings-tabs", role: "tablist" });
   const pane = h("div", { class: "settings-pane" });
-  const TABS = [["draft", t("set.draft"), "folder"], ["edit", t("set.edit"), "scissors"], ["performance", t("set.performance"), "speed"], ["general", t("set.general"), "gear"], ["providers", t("set.providers"), "sparkle"], ["backup", t("set.backup"), "backup"]];
+  const TABS = [["draft", t("set.draft"), "folder"], ["edit", t("set.edit"), "scissors"], ["performance", t("set.performance"), "speed"], ["general", t("set.general"), "gear"], ["providers", t("set.providers"), "sparkle"], ["agents", t("ag.tab"), "layers"], ["backup", t("set.backup"), "backup"]];
 
   function drawTabs() {
     mount(side, ...TABS.map(([id, label, ic]) => h("button", { class: tab === id ? "active" : "", role: "tab", "aria-selected": tab === id ? "true" : "false", onclick: () => { tab = id; drawTabs(); drawPane(); } }, icon(ic), label)));
@@ -97,6 +97,9 @@ export function openSettings(initialTab = "draft") {
         row(t("set.whisperLang"), sel("providers", "whisperLanguage", [["auto", "Auto"], ["ar", "العربية"], ["en", "English"], ["fr", "Français"], ["tr", "Türkçe"], ["es", "Español"], ["de", "Deutsch"]].map(([value, label]) => ({ value, label })))),
         row(t("lib.autoCaptions"), h("span", { class: ["badge", st?.autoCaptions ? "local" : "na"] }, st?.autoCaptions ? t("c.done") : t("c.notAvailable"))),
         h("p", { class: "muted", style: { lineHeight: 1.7 } }, t("tool.providerExplain")));
+    } else if (tab === "agents") {
+      const { drawAgentsPane } = await import("./agents.js");
+      await drawAgentsPane(pane, () => { if (tab === "agents") drawPane(); });
     } else if (tab === "backup") {
       const list = h("div", { class: "col" }, h("div", { class: "loading" }, h("div", { class: "spinner" })));
       mount(pane,

@@ -1,0 +1,27 @@
+{
+  "schema": "montaj.skill/1",
+  "id": "auto-captions",
+  "name": "Auto captions",
+  "description": "Transcribes speech with the local whisper.cpp model (Settings › Providers) and adds caption text clips synced to the speech.",
+  "version": "1.0.0",
+  "author": "Montaj Studio",
+  "source": "official",
+  "category": "captions",
+  "tags": ["captions", "subtitles", "transcription", "كابشن", "ترجمة"],
+  "goals": ["Readable captions synced to speech"],
+  "capabilities": ["speech recognition (local)", "caption clips"],
+  "inputs": {
+    "type": "object",
+    "properties": { "language": { "type": "string", "pattern": "^(auto|[a-z]{2})$", "default": "auto" } },
+    "additionalProperties": false
+  },
+  "outputs": ["Caption text clips"],
+  "permissions": ["read", "media", "edit"],
+  "requires": { "providers": ["whisper"] },
+  "steps": [
+    { "id": "captions", "title": "Transcribe and add captions", "op": "timeline_add_captions", "with": { "timelineId": "{{ctx.timelineId}}", "language": "{{inputs.language}}" } }
+  ],
+  "success": ["has_captions"],
+  "rollback": "restore",
+  "examples": ["Add Arabic captions", "أضف كابشن عربي"]
+}

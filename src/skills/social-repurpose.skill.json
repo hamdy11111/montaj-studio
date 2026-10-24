@@ -1,0 +1,33 @@
+{
+  "schema": "montaj.skill/1",
+  "id": "social-repurpose",
+  "name": "Social repurpose",
+  "description": "Composite skill: cleans up the voice (podcast-cleanup, without its pause removal) and then makes a vertical fast reel (fast-reels); adds captions when captions=true and a local speech model is configured. It decides audio.loudness (-14 LUFS), so podcast-cleanup normalizes to -14 instead of its own -16.",
+  "version": "1.1.0",
+  "author": "Montaj Studio",
+  "source": "official",
+  "category": "workflow",
+  "tags": ["workflow", "repurpose", "social", "إعادة استخدام"],
+  "goals": ["One step from a long talk to a social-ready vertical edit"],
+  "capabilities": ["composition"],
+  "inputs": {
+    "type": "object",
+    "properties": {
+      "captions": { "type": "boolean", "default": false },
+      "language": { "type": "string", "pattern": "^(auto|[a-z]{2})$", "default": "auto" }
+    },
+    "additionalProperties": false
+  },
+  "outputs": ["Everything podcast-cleanup and fast-reels produce", "Optional captions"],
+  "permissions": ["read", "media", "edit"],
+  "settings": { "audio.loudness": -14 },
+  "dependsOn": [{ "id": "podcast-cleanup", "version": "^1.0.0" }, { "id": "fast-reels", "version": "^1.0.0" }, { "id": "auto-captions", "version": "^1.0.0" }],
+  "steps": [
+    { "id": "voice", "title": "Voice clean-up (fast-reels cuts the pauses tighter)", "skill": "podcast-cleanup", "with": { "removeSilences": false } },
+    { "id": "reel", "title": "Vertical fast reel", "skill": "fast-reels", "with": {} },
+    { "id": "captions", "title": "Captions", "skill": "auto-captions", "when": "inputs.captions", "with": { "language": "{{inputs.language}}" } }
+  ],
+  "success": ["timeline_not_empty"],
+  "rollback": "restore",
+  "examples": ["Repurpose this talk for Instagram", "حوّل المحاضرة لريل جاهز للنشر"]
+}

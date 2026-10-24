@@ -22,6 +22,7 @@ import { Inspector } from "./inspector.js";
 import { openExport, overlaysFor } from "./exportDialog.js";
 import { record } from "./recorder.js";
 import { openPilot } from "./pilot.js";
+import { openSkills } from "./skills.js";
 import { openSettings } from "../dialogs/settings.js";
 import { openShortcuts } from "../dialogs/shortcuts.js";
 import { openAbout } from "../dialogs/about.js";
@@ -68,6 +69,7 @@ export async function openEditor(root, params) {
     inOut: () => ({ in: st.inPoint, out: st.outPoint }),
     compoundVersion: (id) => st.compoundVersions[id] || 0,
     compoundReady: (id) => !!st.compoundReady[id],
+    reloadTimeline,
     select, seek, exec, run, patchLive, dropItem, importDropped, importDialog, importFolder, refreshMedia, globalEdit, autoCaptions, importCaptions, deleteCaptions,
     applyFilterToClip, openPanel: (tab) => materials.setTab(tab), openSettings: (tab) => openSettings(tab), relayout: () => { player.lastLayout = null; player.layout(); },
     segmentAtPlayhead, clipMenu, emptyMenu, markerMenu, pickColor, coverMenu,
@@ -101,6 +103,7 @@ export async function openEditor(root, params) {
     h("button", { class: "btn ghost", onclick: (e) => mainMenu(e.currentTarget) }, icon("logo"), t("ed.menu"), icon("chevronDown")),
     savedEl, tlSel, h("div", { class: "grow" }),
     h("button", { class: "btn ghost", title: t("ai.title"), onclick: () => openPilot(ed) }, icon("sparkle"), t("ai.title")),
+    h("button", { class: "btn ghost", title: t("sk.title"), onclick: () => openSkills(ed) }, icon("layers"), t("sk.title")),
     h("button", { class: "icon-btn", title: t("ed.layout"), "aria-label": t("ed.layout"), onclick: (e) => layoutMenu(e.currentTarget) }, icon("layout")),
     h("button", { class: "icon-btn", title: t("ed.shortcuts"), "aria-label": t("ed.shortcuts"), onclick: () => openShortcuts() }, icon("shortcuts")),
     h("button", { class: "btn", onclick: () => sharePackage() }, icon("share"), t("ed.share")),
@@ -188,6 +191,24 @@ export async function openEditor(root, params) {
     }
     player.invalidate();
   }
+
+  /** Adopt the stored timeline state (after a skill run or an edit made by an agent through MCP). */
+  async function reloadTimeline() {
+    const cur = await call("timeline.get", st.timelineId).catch(() => null);
+    if (!cur) return;
+    st.timeline = cur.timeline; st.history = cur.history; st.savedAt = Date.now();
+    st.selection = st.selection.filter((id) => ed.segment(id));
+    await refreshMedia();
+    renderAll();
+  }
+  // An agent edited a timeline (source "agent:<name>"): show the change live and say who made it.
+  let agentToastAt = 0;
+  const offAgentEdit = on("timeline:changed", throttle((e) => {
+    if (e.timelineId !== st.timelineId) return;
+    reloadTimeline();
+    // One notice per burst (a skill run is many small edits), not one per edit.
+    if (String(e.source).startsWith("agent:") && Date.now() - agentToastAt > 4000) { agentToastAt = Date.now(); toast(t("ag.edited", { name: e.source.slice(6) }), "info", { ms: 3000 }); }
+  }, 250));
 
   async function refreshMedia() { st.media = (await guard(() => call("media.list", st.project.id))) || st.media; materials.refresh(); timeline.render(); player.invalidate(); }
   // Thumbnails / waveforms / proxies finished (or media imported elsewhere, e.g. TTS, recording): reload the list.
@@ -614,7 +635,7 @@ export async function openEditor(root, params) {
   return async () => {
     player.pause();
     document.removeEventListener("keydown", onKey);
-    offMedia(); offShortcuts(); offSettings();
+    offMedia(); offShortcuts(); offSettings(); offAgentEdit();
     player.destroy(); timeline.destroy();
     const editSeconds = Math.round((Date.now() - st.openedAt) / 1000);
     await call("project.finalize", st.project.id, { editSeconds }).catch(() => {});

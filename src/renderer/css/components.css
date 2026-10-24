@@ -76,6 +76,7 @@ input[type="range"].gradient::-webkit-slider-runnable-track { height: 4px; }
 
 /* Modals */
 .backdrop { position: fixed; inset: 0; background: var(--bg-backdrop); display: grid; place-items: center; z-index: 100; }
+.backdrop:has(> .approval-modal) { z-index: 150; } /* an agent approval stays above any dialog opened after it */
 .modal { background: var(--bg-panel); border-radius: 8px; box-shadow: var(--shadow-pop); min-width: 360px; max-width: calc(100vw - 40px); max-height: calc(100vh - 60px); display: flex; flex-direction: column; }
 .modal-head { display: flex; align-items: center; justify-content: space-between; height: 40px; padding: 0 12px; font-size: var(--fs-md); border-bottom: 1px solid #1b1b1c; }
 .modal-body { padding: 14px 16px; overflow: auto; }

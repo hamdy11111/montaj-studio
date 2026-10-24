@@ -1,10 +1,11 @@
 // Renderer entry: boot (settings, language, shortcuts), router (home ↔ editor), global events and drag & drop guard.
 import { h, mount, $ } from "./dom.js";
 import { icon } from "./icons.js";
-import { setLang, t, errorText } from "./i18n.js";
+import { setLang, t, errorText, has } from "./i18n.js";
 import { call, on } from "./api.js";
 import { app, pushNotification } from "./state.js";
 import { toast } from "./ui/toast.js";
+import { modal } from "./ui/modal.js";
 import { renderHome } from "./pages/home.js";
 import { formatBytes } from "../core/util.js";
 
@@ -64,12 +65,22 @@ function wireGlobalEvents() {
     call("app.notify", t("ex.done"), p.path).catch(() => {});
   });
   on("app:openFile", (p) => openPackage(p.path));
+  on("agents:approval", (req) => approvalDialog(req));
   on("export:error", (p) => pushNotification({ kind: "export", ok: false, text: p.cancelled ? t("ex.cancelled") : `${t("ex.failed")}: ${errorText(p.error)}` }));
   // Files dropped outside an import zone must not navigate the window.
   window.addEventListener("dragover", (e) => e.preventDefault());
   window.addEventListener("drop", (e) => e.preventDefault());
   window.addEventListener("unhandledrejection", (e) => { if (e.reason?.messageKey) { toast(errorText(e.reason), "error"); e.preventDefault(); } });
   app.events.on("settings", (s) => { const before = document.documentElement.lang; setLang(s.general.language); if (before !== document.documentElement.lang) go(app.current.route, app.current.params); });
+}
+
+/** An agent asked for an action that needs the user's consent (e.g. moving a project to Trash). Closing = deny. */
+function approvalDialog(req) {
+  let answered = false;
+  const answer = (allow) => { if (answered) return; answered = true; call("agents.respond", req.id, allow).catch(() => {}); m.close(true); };
+  const m = modal({ title: t("ag.approveTitle"), width: 480, className: "approval-modal", onClose: () => { if (!answered) { answered = true; call("agents.respond", req.id, false).catch(() => {}); } },
+    body: h("div", { class: "col" }, h("p", { style: { lineHeight: 1.7 } }, t("ag.approveMsg", { client: req.client, action: has(`ag.op.${req.op}`) ? t(`ag.op.${req.op}`, { target: req.target || "" }) : req.title })), h("code", { class: "muted small ltr" }, req.summary), h("div", { class: "muted small" }, t("ag.approveHint"))),
+    footer: [h("button", { class: "btn", onclick: () => answer(false) }, t("ag.deny")), h("button", { class: "btn danger", onclick: () => answer(true) }, t("ag.allow"))] });
 }
 
 /** Short 880 Hz notification tone as a WAV blob URL (no bundled audio assets needed; CSP allows blob: media). */

@@ -79,3 +79,23 @@ code { font-family: Consolas, monospace; font-size: var(--fs-xs); background: va
 .pilot-msg { padding: 8px 10px; border-radius: 10px; max-width: 85%; line-height: 1.6; }
 .pilot-msg.bot { background: var(--bg-raised); align-self: flex-start; }
 .pilot-msg.me { background: #024e57; align-self: flex-end; }
+
+/* Skills panel */
+.skills-body { align-items: stretch; gap: 14px; min-height: 380px; max-height: 64vh; }
+.skills-list { width: 250px; flex: none; display: flex; flex-direction: column; gap: 4px; overflow-y: auto; }
+.skill-item { text-align: start; padding: 8px 10px; border-radius: 6px; background: var(--bg-raised); display: flex; flex-direction: column; gap: 3px; align-items: flex-start; }
+.skill-item.active { outline: 1px solid var(--accent); }
+.skill-item.off { opacity: .55; }
+.skill-name { font-weight: 600; }
+.skills-detail { overflow-y: auto; padding-inline-end: 4px; }
+.skills-detail h3 { margin: 0 0 4px; }
+.skill-steps { margin: 6px 0; padding-inline-start: 20px; line-height: 1.7; }
+.skill-steps li.skipped { opacity: .6; }
+.skill-result { margin-top: 10px; display: flex; flex-direction: column; gap: 6px; }
+
+/* Agents & MCP */
+.code-block { white-space: pre-wrap; word-break: break-all; font-family: Consolas, monospace; font-size: var(--fs-xs); background: var(--bg-input); padding: 8px; border-radius: 6px; margin: 0; max-height: 160px; overflow: auto; user-select: text; }
+code.token { user-select: all; }
+.audit-log { max-height: 220px; overflow-y: auto; gap: 2px; }
+.audit-row { font-size: var(--fs-xs); padding: 2px 0; }
+.audit-row.failed b { color: var(--danger); }

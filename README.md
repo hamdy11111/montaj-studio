@@ -10,6 +10,8 @@
 
 المثبّت الجاهز لـ Windows 10/11 (x64) في صفحة [الإصدارات](https://github.com/hamdy11111/montaj-studio/releases). المثبّت غير موقَّع رقميًا، لذا قد يعرض Windows SmartScreen تحذيرًا عند أول تشغيل («More info» ← «Run anyway»).
 
+**التحكم بالوكلاء (MCP) والمهارات:** يمكن لوكلاء مثل Claude Code وCodex فحص المشاريع وتحريرها وتشغيل «مهارات» مونتاج عبر بروتوكول MCP، من قناة محلية على الجهاز فقط، بصلاحيات يحددها المستخدم، مع سجل لكل عملية وتراجع كامل. الميزة معطّلة افتراضيًا، وتُفعَّل من الإعدادات › الوكلاء وMCP. التفاصيل ونتائج الاختبار الفعلية في [docs/AGENT_PLATFORM.md](docs/AGENT_PLATFORM.md).
+
 مقارنة التطبيق بـ CapCut بالقياس الفعلي (الأداء والجودة والوظائف) في [docs/CAPCUT_COMPARISON.md](docs/CAPCUT_COMPARISON.md).
 
 ## المتطلبات
@@ -111,6 +113,7 @@ npm run dist
 - [docs/TRACEABILITY.md](docs/TRACEABILITY.md): مصفوفة تتبّع المتطلبات الـ148.
 - [docs/VERIFICATION.md](docs/VERIFICATION.md): تقرير التحقق النهائي.
 - [docs/CAPCUT_COMPARISON.md](docs/CAPCUT_COMPARISON.md): المقارنة بـ CapCut والمراحل المنفّذة بعدها.
+- [docs/AGENT_PLATFORM.md](docs/AGENT_PLATFORM.md): منصة الوكلاء: المهارات، وخادم MCP، والأمان، وربط Claude Code وCodex، ونتائج الاختبار.
 
 ## الترخيص
 

@@ -4,7 +4,7 @@
 // No Node.js objects leak into the page (contextIsolation + sandbox + nodeIntegration:false).
 const { contextBridge, ipcRenderer, webUtils } = require("electron");
 
-const EVENTS = new Set(["export:progress", "export:done", "export:error", "media:updated", "app:openFile"]);
+const EVENTS = new Set(["export:progress", "export:done", "export:error", "media:updated", "app:openFile", "timeline:changed", "agents:approval", "agents:job", "agents:connected", "agents:activity"]);
 
 contextBridge.exposeInMainWorld("api", {
   async call(method, ...args) {

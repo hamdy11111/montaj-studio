@@ -1,0 +1,38 @@
+{
+  "schema": "montaj.skill/1",
+  "id": "fast-reels",
+  "name": "Fast reels",
+  "description": "Vertical short-form edit: tight cuts (pauses removed with little padding), quick transitions, vivid colour and loudness for social platforms.",
+  "version": "1.1.0",
+  "author": "Montaj Studio",
+  "source": "official",
+  "category": "social",
+  "tags": ["reels", "shorts", "tiktok", "vertical", "ريلز", "شورتس"],
+  "goals": ["Vertical framing", "Fast pacing", "Punchy colour", "Social loudness"],
+  "capabilities": ["reframe", "silence removal", "transitions", "color look", "loudness normalization"],
+  "inputs": {
+    "type": "object",
+    "properties": {
+      "ratio": { "type": "string", "enum": ["9:16", "4:5", "1:1"], "default": "9:16" },
+      "background": { "type": "string", "enum": ["blur", "color"], "default": "blur" },
+      "tightCuts": { "type": "boolean", "default": true },
+      "look": { "type": "string", "enum": ["vivid", "warm", "cool", "dramatic"], "default": "vivid" },
+      "transition": { "type": "string", "enum": ["push_left", "slide_left", "zoom_in", "dissolve", "none"], "default": "push_left" }
+    },
+    "additionalProperties": false
+  },
+  "outputs": ["Vertical canvas with blurred background", "Pauses removed", "Transitions on every cut", "Look layer", "-14 LUFS audio"],
+  "permissions": ["read", "media", "edit"],
+  "settings": { "canvas.ratio": "9:16", "look.filter": "vivid", "audio.loudness": -14 },
+  "steps": [
+    { "id": "frame", "title": "Vertical canvas", "op": "timeline_set_canvas", "with": { "timelineId": "{{ctx.timelineId}}", "ratio": "{{inputs.ratio}}", "bgType": "{{inputs.background}}" } },
+    { "id": "pace", "title": "Tight cuts", "op": "timeline_remove_silences", "when": "inputs.tightCuts", "with": { "timelineId": "{{ctx.timelineId}}", "minDurS": 0.35, "paddingMs": 60 } },
+    { "id": "cuts", "title": "Transitions", "op": "timeline_transition_all", "when": "ctx.hasCuts", "with": { "timelineId": "{{ctx.timelineId}}", "type": "{{inputs.transition}}", "durationUs": 250000 } },
+    { "id": "grade", "title": "Look", "op": "timeline_add_layer", "with": { "timelineId": "{{ctx.timelineId}}", "kind": "filter", "settings": { "preset": "{{inputs.look}}", "intensity": 70 } } },
+    { "id": "loudness", "title": "Social loudness", "op": "audio_normalize", "with": { "timelineId": "{{ctx.timelineId}}", "targetLufs": "{{settings.audio.loudness}}" } }
+  ],
+  "success": ["timeline_not_empty"],
+  "rollback": "restore",
+  "tests": [{ "name": "reframes and tightens a talk clip", "fixture": "speech_with_pauses", "inputs": {}, "expect": ["duration_reduced"] }],
+  "examples": ["Turn this into a reel", "حوّل الفيديو لريل سريع"]
+}

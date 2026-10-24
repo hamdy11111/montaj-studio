@@ -1,0 +1,36 @@
+{
+  "schema": "montaj.skill/1",
+  "id": "cinematic-look",
+  "name": "Cinematic look",
+  "description": "A film-like grade (cinematic or another look), widescreen letterbox bars and soft dissolves between clips.",
+  "version": "1.0.0",
+  "author": "Montaj Studio",
+  "source": "official",
+  "category": "look",
+  "tags": ["cinematic", "film", "grade", "letterbox", "سينمائي"],
+  "goals": ["Film-like colour", "Widescreen framing", "Smooth cuts"],
+  "capabilities": ["color look", "letterbox", "transitions"],
+  "inputs": {
+    "type": "object",
+    "properties": {
+      "look": { "type": "string", "enum": ["cinematic", "teal", "golden", "dramatic", "noir", "vintage"], "default": "cinematic" },
+      "intensity": { "type": "number", "minimum": 10, "maximum": 100, "default": 80 },
+      "letterbox": { "type": "boolean", "default": true },
+      "transition": { "type": "string", "enum": ["none", "dissolve", "fade_black"], "default": "dissolve" },
+      "transitionUs": { "type": "integer", "minimum": 200000, "maximum": 2000000, "default": 600000 }
+    },
+    "additionalProperties": false
+  },
+  "outputs": ["Filter layer over the whole timeline", "Letterbox effect layer", "Transitions between main-track clips"],
+  "permissions": ["read", "edit"],
+  "settings": { "look.filter": "cinematic" },
+  "steps": [
+    { "id": "grade", "title": "Colour look", "op": "timeline_add_layer", "with": { "timelineId": "{{ctx.timelineId}}", "kind": "filter", "settings": { "preset": "{{inputs.look}}", "intensity": "{{inputs.intensity}}" } } },
+    { "id": "bars", "title": "Letterbox", "op": "timeline_add_layer", "when": "inputs.letterbox", "with": { "timelineId": "{{ctx.timelineId}}", "kind": "effect", "settings": { "type": "letterbox", "intensity": 50 } } },
+    { "id": "cuts", "title": "Transitions", "op": "timeline_transition_all", "when": "ctx.hasCuts", "with": { "timelineId": "{{ctx.timelineId}}", "type": "{{inputs.transition}}", "durationUs": "{{inputs.transitionUs}}" } }
+  ],
+  "success": ["timeline_not_empty", "duration_unchanged"],
+  "rollback": "restore",
+  "tests": [{ "name": "grades two clips without changing the length", "fixture": "two_clips", "inputs": {}, "expect": ["duration_unchanged"] }],
+  "examples": ["Make it cinematic", "اجعل الفيديو سينمائيًا"]
+}

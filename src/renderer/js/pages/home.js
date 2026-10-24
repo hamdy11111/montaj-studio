@@ -3,7 +3,7 @@
 import { h, mount, clear, debounce } from "../dom.js";
 import { icon } from "../icons.js";
 import { t, fmtDate, fmtDateTime, getLang } from "../i18n.js";
-import { call, guard, coverUrl, exportUrl } from "../api.js";
+import { call, guard, coverUrl, exportUrl, on } from "../api.js";
 import { app } from "../state.js";
 import { toast } from "../ui/toast.js";
 import { showMenu, dropdown } from "../ui/menu.js";
@@ -80,6 +80,8 @@ export function renderHome(root, params = {}) {
   mount(root, h("div", { class: "home" }, nav, content));
   draw();
   offs.push(app.events.on("notifications", () => { if (view === "notifications") draw(); }));
+  // Projects created, filled or trashed by an agent (MCP) appear without reopening the page.
+  offs.push(on("agents:activity", debounce((e) => { if ((view === "projects" || view === "space") && /^(project_|media_import|timeline_add_clip|skills_execute)/.test(e.op)) draw(); }, 400)));
   return () => { offs.forEach((f) => f()); return true; };
 }
 

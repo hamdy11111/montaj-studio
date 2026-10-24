@@ -17,6 +17,8 @@ export function defaultSettings(paths) {
     general: { language: "ar", notifications: true, updates: "notify", shellMenu: false, layout: "default", onboarded: false },
     providers: { whisperPath: "", whisperModel: "", whisperLanguage: "auto" },
     export: { resolution: "1080p", bitrate: "recommended", codec: "h264", format: "mp4", fps: 30, audioFormat: "flac", gifResolution: "320p", captionsFormat: "srt", dir: paths.media },
+    // Agent Control Server (local named pipe for MCP / external agents) — off until the user enables it.
+    agents: { enabled: false },
     ui: { lastShortcutPreset: 1, recentColors: [], presets: [] }, // presets: JSON strings {name, attrs} from "Save preset"
   };
 }
