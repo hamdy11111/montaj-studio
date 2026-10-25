@@ -2,35 +2,24 @@
 // Engine: ComfyUI 0.40.0 from the music runtime, started only when the user asks (the "start engine" button or a
 // generation) — opening the app, the tab or the library loads nothing. It runs on a free local port with only the app's
 // own node package enabled, its data in the app's data folder, offline; "stop engine" ends the process the app started
-// (never another ComfyUI). One job at a time; a job waits while a video export runs; RAM, GPU memory and disk are checked
-// first. Progress: "music:job" events with the real stage, the elapsed time and — only while the model samples —
+// (never another ComfyUI). One heavy GPU job at a time across the app (the shared GpuQueue: music, video) and none
+// during a video export; RAM, GPU memory and disk are checked first. Progress: "music:job" events with the real stage, the elapsed time and — only while the model samples —
 // the step count. Results: library items (kind audio, category "music") whose meta keeps the work group, the version,
 // its parent, the settings, the plan, the seed and the engine; their files live in the app's data folder.
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
-import net from "node:net";
 import crypto from "node:crypto";
-import { spawn, spawnSync } from "node:child_process";
+import { spawnSync } from "node:child_process";
 import { AppError } from "../core/validation.js";
 import { uid, US } from "../core/util.js";
 import { binaries, run } from "./ffmpeg.js";
 import { musicRuntime, NODE_PACKAGE } from "./musicSetupService.js";
 import { MODEL_SETS } from "./music/catalog.js";
+import { ComfyEngine, gpuFree } from "./comfyEngine.js";
+import { GpuQueue } from "./gpuQueue.js";
 
-const freePort = () => new Promise((resolve) => { const s = net.createServer(); s.listen(0, "127.0.0.1", () => { const p = s.address().port; s.close(() => resolve(p)); }); });
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 export const MUSIC_FORMATS = ["wav", "mp3", "flac"];
-
-/** Free GPU memory in MiB (NVIDIA), or null. */
-export function gpuFree() {
-  try {
-    const r = spawnSync("nvidia-smi", ["--query-gpu=memory.free,memory.total,memory.used", "--format=csv,noheader,nounits"], { windowsHide: true, timeout: 8000, encoding: "utf8" });
-    if (r.status !== 0) return null;
-    const [free, total, used] = r.stdout.split("\n")[0].split(",").map((x) => Number(x.trim()));
-    return { free, total, used };
-  } catch { return null; }
-}
+export { gpuFree };
 
 /** A file name from a title: the title's own words (Arabic kept), no characters Windows refuses. */
 export function fileTitle(s) {
@@ -38,7 +27,7 @@ export function fileTitle(s) {
 }
 
 export class MusicService {
-  constructor({ repos, paths, settings, media, setup, exporter = null, notify = () => {}, log = () => {} }) {
+  constructor({ repos, paths, settings, media, setup, exporter = null, gpu = null, notify = () => {}, log = () => {} }) {
     this.repos = repos;
     this.paths = paths;
     this.settings = settings;
@@ -49,8 +38,11 @@ export class MusicService {
     this.log = log;
     this.dir = path.join(paths.root, "music");
     this.resultsDir = path.join(paths.library, "music");
-    this.engine = null; // { child, port, url, pid, started }
-    this.starting = null;
+    this.gpu = gpu || new GpuQueue({ exporter });
+    this.engine = new ComfyEngine({ name: "music", dir: this.dir, logs: paths.logs, runtime: () => musicRuntime(paths.root), modelsDir: () => setup.modelsDir(),
+      modelFolders: ["diffusion_models", "text_encoders", "vae", "checkpoints", "loras", "audio_encoders"], nodePackages: [{ name: "montaj_music", src: NODE_PACKAGE }],
+      readyNode: "MontajMusicCompose", notify: (ev) => { this.notify("music:engine", this.status()); if (ev === "stopped") this.failRunning("err.musicEngineStopped"); } });
+    this.gpu.register("music", this.engine);
     this.jobs = new Map();
     this.jobsFile = path.join(this.dir, "jobs.json");
     fs.mkdirSync(this.dir, { recursive: true });
@@ -60,113 +52,33 @@ export class MusicService {
   // ---------------------------------------------------------------- engine
   status() {
     const job = [...this.jobs.values()].find((j) => ["queued", "waiting", "starting", "running"].includes(j.state)) || null;
-    return { engine: this.engine ? { running: true, port: this.engine.port, pid: this.engine.pid, workPid: this.engine.workPid, since: this.engine.started } : { running: false, starting: !!this.starting },
-      job: job && this.view(job), runtime: !!musicRuntime(this.paths.root), keepLoaded: !!this.settings.get("music").keepLoaded };
+    return { engine: this.engine.status(), job: job && this.view(job), runtime: !!musicRuntime(this.paths.root), keepLoaded: !!this.settings.get("music").keepLoaded };
   }
 
   /** Resources now (shown before and after the engine runs). */
-  resources() {
-    const g = gpuFree();
-    let disk = null;
-    try { const st = fs.statfsSync(this.dir); disk = Math.round((st.bavail * st.bsize) / 2 ** 20); } catch { /* unknown */ }
-    let engineRam = null;
-    if (this.engine?.pid) {
-      const r = spawnSync("tasklist", ["/FI", `PID eq ${this.engine.workPid}`, "/FO", "CSV", "/NH"], { windowsHide: true, encoding: "utf8" });
-      const m = /"([\d,.\s]+) K"/.exec(r.stdout || "");
-      if (m) engineRam = Math.round(Number(m[1].replace(/[^\d]/g, "")) / 1024);
-    }
-    return { ramFreeMB: Math.round(os.freemem() / 2 ** 20), ramTotalMB: Math.round(os.totalmem() / 2 ** 20), gpu: g, diskFreeMB: disk, engineRamMB: engineRam };
-  }
+  resources() { return this.engine.resources(); }
 
   /** Before loading a model: enough RAM, GPU memory and disk, or a clear message (nothing is started). */
-  checkResources() {
-    const r = this.resources();
-    if (r.ramFreeMB < 4000) throw new AppError("RESOURCE", "err.musicRam", { free: Math.round(r.ramFreeMB / 1024 * 10) / 10 });
-    if (r.gpu && r.gpu.free < 5000) throw new AppError("RESOURCE", "err.musicVram", { free: Math.round(r.gpu.free / 1024 * 10) / 10 });
-    if (r.diskFreeMB !== null && r.diskFreeMB < 2000) throw new AppError("RESOURCE", "err.diskLow", { free: Math.round(r.diskFreeMB / 1024 * 10) / 10 });
-    return r;
-  }
+  checkResources() { return this.engine.checkResources({ ramMB: 4000, vramMB: 5000, diskMB: 2000 }); }
 
-  /** Start the engine (once; a second call while it starts waits for the same start). */
-  start() {
-    if (this.engine) return Promise.resolve(this.status());
-    if (this.starting) return this.starting;
-    this.starting = this.launch().finally(() => { this.starting = null; });
-    return this.starting;
-  }
-
-  async launch() {
-    const rt = musicRuntime(this.paths.root);
-    if (!rt) throw new AppError("PROVIDER", "err.musicNotReady", { missing: ["runtime"] });
-    const models = this.setup.modelsDir();
-    // The app's node package, fresh for this version of the app.
-    const dest = path.join(rt.comfy, "custom_nodes", "montaj_music");
-    fs.rmSync(dest, { recursive: true, force: true });
-    fs.cpSync(NODE_PACKAGE, dest, { recursive: true, filter: (p) => !p.includes("__pycache__") });
-    const port = await freePort();
-    const dirs = { out: path.join(this.dir, "engine-out"), input: path.join(this.dir, "engine-in"), temp: path.join(this.dir, "engine-temp"), user: path.join(this.dir, "engine-user") };
-    for (const d of Object.values(dirs)) fs.mkdirSync(d, { recursive: true });
-    const args = ["-X", "utf8", path.join(rt.comfy, "main.py"), "--listen", "127.0.0.1", "--port", String(port), "--disable-auto-launch",
-      "--base-directory", rt.comfy, "--output-directory", dirs.out, "--input-directory", dirs.input, "--temp-directory", dirs.temp, "--user-directory", dirs.user,
-      "--database-url", `sqlite:///${path.join(dirs.user, "comfy.db").replace(/\\/g, "/")}`, "--disable-all-custom-nodes", "--whitelist-custom-nodes", "montaj_music",
-      "--extra-model-paths-config", this.modelPathsFile(models)];
-    const logFile = path.join(this.paths.logs, "music-engine.log");
-    const out = fs.openSync(logFile, "a");
-    const child = spawn(rt.python, args, { cwd: rt.comfy, windowsHide: true, stdio: ["ignore", out, out],
-      env: { ...process.env, PYTHONUTF8: "1", HF_HUB_OFFLINE: "1", TRANSFORMERS_OFFLINE: "1", HF_HOME: path.join(this.dir, "hf") } });
-    let exited = null;
-    child.on("exit", (code) => { exited = code; if (this.engine?.child === child) { this.engine = null; this.notify("music:engine", this.status()); this.failRunning("err.musicEngineStopped"); } });
-    const url = `http://127.0.0.1:${port}`;
-    for (let i = 0; i < 600; i++) { // up to 5 minutes (a cold start loads torch)
-      if (exited !== null) throw new AppError("PROVIDER", "err.musicEngineFailed", { code: exited, log: tail(logFile) });
-      try { const r = await fetch(`${url}/object_info/MontajMusicCompose`); if (r.ok && Object.keys(await r.json()).length) break; } catch { /* not up yet */ }
-      await sleep(500);
-      if (i === 599) { child.kill(); throw new AppError("PROVIDER", "err.musicEngineFailed", { log: tail(logFile) }); }
-    }
-    // The process that holds the models (the venv's python.exe is a launcher that starts it): measured in resources().
-    const work = await fetch(`${url}/montaj-music/process`).then((r) => r.json()).catch(() => ({}));
-    this.engine = { child, port, url, pid: child.pid, workPid: work.pid || child.pid, started: new Date().toISOString() };
-    fs.writeFileSync(path.join(this.dir, "engine.pid"), String(child.pid));
-    this.notify("music:engine", this.status());
-    return this.status();
-  }
-
-  /** ComfyUI's extra model paths: the music models folder (whatever folder the user chose). */
-  modelPathsFile(models) {
-    const f = path.join(this.dir, "model-paths.yaml");
-    const q = (p) => JSON.stringify(p.replace(/\\/g, "/"));
-    fs.writeFileSync(f, `montaj:\n  base_path: ${q(models)}\n  diffusion_models: diffusion_models\n  text_encoders: text_encoders\n  vae: vae\n  checkpoints: checkpoints\n  loras: loras\n  audio_encoders: audio_encoders\n`);
-    return f;
-  }
+  start() { return this.engine.start(); }
 
   /** Stop the engine the app started (a job running is cancelled first). Frees its RAM and GPU memory. */
   async stop() {
-    const e = this.engine;
-    if (!e) return this.status();
     const job = [...this.jobs.values()].find((j) => j.state === "running");
     if (job) await this.cancel(job.id);
-    this.engine = null;
-    try { spawnSync("taskkill", ["/PID", String(e.pid), "/T", "/F"], { windowsHide: true }); } catch { e.child.kill(); }
-    fs.rmSync(path.join(this.dir, "engine.pid"), { force: true });
-    this.notify("music:engine", this.status());
-    return this.status();
+    return this.engine.stop();
   }
 
   /** End the engine at once (the app is closing): only the process the app started. */
   killNow() {
-    const e = this.engine;
-    this.engine = null;
-    if (e) { try { spawnSync("taskkill", ["/PID", String(e.pid), "/T", "/F"], { windowsHide: true }); } catch { e.child.kill(); } }
+    this.engine.stop();
     for (const j of this.jobs.values()) if (["queued", "waiting", "starting", "running"].includes(j.state)) Object.assign(j, { state: "interrupted", stage: "interrupted", endedAt: new Date().toISOString() });
     try { this.saveJobs(); } catch { /* closing */ }
   }
 
   /** Free the models from memory without stopping the engine. */
-  async release() {
-    if (!this.engine) return false;
-    await fetch(`${this.engine.url}/free`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ unload_models: true, free_memory: true }) }).catch(() => {});
-    return true;
-  }
+  release() { return this.engine.release(); }
 
   // ---------------------------------------------------------------- jobs
   loadJobs() {
@@ -220,12 +132,15 @@ export class MusicService {
   }
 
   async runJob(j) {
-    // A video export uses the GPU: wait for it (the user sees "waiting" and can cancel).
-    while (this.exporter?.busy?.()) {
-      if (j.state === "cancelled") return;
-      if (j.state !== "waiting") this.update(j, { state: "waiting", stage: "waitExport" });
-      await sleep(2000);
-    }
+    // One heavy GPU job at a time in the app (music, video) and none during a video export: wait for the turn.
+    let release;
+    try {
+      release = await this.gpu.acquire("music", j.id, { onWait: (why) => { if (j.state !== "cancelled") this.update(j, { state: "waiting", stage: why === "export" ? "waitExport" : "waitQueue" }); } });
+    } catch (e) { if (e.cancelled) return; throw e; }
+    try { await this.runTurn(j); } finally { release(); }
+  }
+
+  async runTurn(j) {
     if (j.state === "cancelled") return;
     const st = await this.setup.status();
     const set = st.sets.find((s) => s.id === j.set);
@@ -243,33 +158,19 @@ export class MusicService {
     const request = { ...j.req, reference: ref, job: j.id, client: clientId, out_dir: outDir, name, ffmpeg: binaries().ffmpeg, keep_loaded: !!this.settings.get("music").keepLoaded,
       // The models' SHA-256 for the result's report: checked by the model manager when they were installed or imported.
       model_sha256: Object.fromEntries((MODEL_SETS.find((s) => s.id === j.set)?.files || []).map((x) => [x.file, x.sha256])) };
-    const ws = new WebSocket(`ws://127.0.0.1:${this.engine.port}/ws?clientId=${encodeURIComponent(clientId)}`);
-    const finished = new Promise((resolve, reject) => {
-      ws.onmessage = (ev) => {
-        let m;
-        try { m = JSON.parse(typeof ev.data === "string" ? ev.data : ""); } catch { return; }
-        const d = m.data || {};
-        if (d.prompt_id && j.promptId && d.prompt_id !== j.promptId) return;
-        if (m.type === "montaj-music.progress" && d.job === j.id) this.update(j, { state: "running", stage: d.stage, message: d.message, step: null, steps: null });
-        else if (m.type === "progress") this.update(j, { step: d.value, steps: d.max });
-        else if (m.type === "execution_error") reject(new AppError("PROVIDER", "err.musicFailed", { message: String(d.exception_message || "").slice(0, 800) }));
-        else if (m.type === "execution_interrupted") reject(new AppError("CONFLICT", "err.cancelled", { cancelled: true }));
-        else if (m.type === "execution_success" || (m.type === "executing" && d.node === null && j.promptId)) resolve();
-      };
-      ws.onerror = () => reject(new AppError("PROVIDER", "err.musicEngineStopped"));
-    });
-    await new Promise((r) => { ws.onopen = r; setTimeout(r, 3000); });
-    const res = await fetch(`${this.engine.url}/prompt`, { method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ client_id: clientId, prompt: { 1: { class_type: "MontajMusicCompose", inputs: { request: JSON.stringify(request) } } } }) });
-    const body = await res.json().catch(() => ({}));
-    if (!res.ok || !body.prompt_id) { ws.close(); throw new AppError("PROVIDER", "err.musicFailed", { message: JSON.stringify(body.error || body.node_errors || body).slice(0, 800) }); }
-    this.update(j, { promptId: body.prompt_id, state: "running", stage: "load" });
-    try { await finished; } catch (e) {
-      ws.close();
+    try {
+      await this.engine.runPrompt({ 1: { class_type: "MontajMusicCompose", inputs: { request: JSON.stringify(request) } } }, {
+        clientId, failKey: "err.musicFailed",
+        onQueued: (promptId) => this.update(j, { promptId, state: "running", stage: "load" }),
+        onEvent: (type, d) => {
+          if (type === "montaj-music.progress" && d.job === j.id) this.update(j, { state: "running", stage: d.stage, message: d.message, step: null, steps: null });
+          else if (type === "progress") this.update(j, { step: d.value, steps: d.max });
+        },
+      });
+    } catch (e) {
       if (e.details?.cancelled) { this.update(j, { state: "cancelled", stage: "cancelled", endedAt: new Date().toISOString() }); fs.rmSync(outDir, { recursive: true, force: true }); return; }
       throw e;
     }
-    ws.close();
     const report = JSON.parse(fs.readFileSync(path.join(outDir, "report.json"), "utf8"));
     const item = await this.addResult(j, version, outDir, report);
     this.update(j, { state: "done", stage: "done", endedAt: new Date().toISOString(), result: item.id });
@@ -278,11 +179,9 @@ export class MusicService {
   async cancel(jobId) {
     const j = this.jobs.get(jobId);
     if (!j) throw new AppError("NOT_FOUND", "err.notFound");
-    if (["queued", "waiting"].includes(j.state)) { this.update(j, { state: "cancelled", stage: "cancelled", endedAt: new Date().toISOString() }); return this.view(j); }
-    if (this.engine && j.promptId) {
-      await fetch(`${this.engine.url}/interrupt`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ prompt_id: j.promptId }) }).catch(() => {});
-      await fetch(`${this.engine.url}/queue`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ delete: [j.promptId] }) }).catch(() => {});
-    } else if (j.state === "starting") this.update(j, { state: "cancelled", stage: "cancelled", endedAt: new Date().toISOString() });
+    if (["queued", "waiting"].includes(j.state)) { this.update(j, { state: "cancelled", stage: "cancelled", endedAt: new Date().toISOString() }); this.gpu.cancel(j.id); return this.view(j); }
+    if (this.engine.running && j.promptId) await this.engine.interrupt(j.promptId);
+    else if (j.state === "starting") this.update(j, { state: "cancelled", stage: "cancelled", endedAt: new Date().toISOString() });
     return this.view(j);
   }
 
@@ -427,5 +326,5 @@ export class MusicService {
 }
 
 function meta(x) { try { return typeof x.meta === "string" ? JSON.parse(x.meta || "{}") : x.meta || {}; } catch { return {}; } }
-function tail(file) { try { const s = fs.readFileSync(file, "utf8"); return s.slice(-2000); } catch { return ""; } }
+
 export const musicHash = (s) => crypto.createHash("sha1").update(String(s)).digest("hex").slice(0, 10);

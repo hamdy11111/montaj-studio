@@ -91,6 +91,9 @@ export function handleProtocols(o) {
       if (kind === "matte") { const v = url.searchParams.get("v") === "stab" ? "stab" : ""; return fileResponse(s.mattes?.ready(id, v) ? s.mattes.file(id, v) : null, request); } // person matte (text behind the person)
       if (kind === "stab") { const fps = Number(url.searchParams.get("fps")) || 30; return fileResponse(s.stabilizer?.ready(id, fps) ? s.stabilizer.file(id, fps) : null, request); } // stabilized copy
       if (kind === "musicsrc") return fileResponse(s.music?.sourcePath(id), request); // a music studio source sound
+      if (kind === "vidsrc") return fileResponse(url.searchParams.get("thumb") === "1" ? s.video?.sourceThumb(id) : s.video?.sourcePath(id), request); // a video studio source (or its picture)
+      if (kind === "vidthumb") return fileResponse(s.video?.thumbPath(id), request); // a generated video's picture
+      if (kind === "vidinput") { const w = url.searchParams.get("w"); return fileResponse(/^(source|ref[1-3])$/.test(w || "") ? s.video?.inputPath(id, w) : null, request); } // what a result was made from
       if (kind === "export") { const r = s.repos.exports.list().find((x) => x.id === id); return fileResponse(r?.path, request); }
     } catch {
       return new Response("not found", { status: 404 });

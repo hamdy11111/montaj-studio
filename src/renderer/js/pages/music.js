@@ -288,7 +288,7 @@ export function musicView(params = {}) {
     const elapsed = since ? ((j.endedAt ? new Date(j.endedAt) : new Date()) - new Date(since)) / 1000 : 0;
     const stateChip = h("span", { class: ["badge", j.state === "done" ? "local" : j.state === "failed" ? "danger" : "na"] }, t(`mu.state.${j.state}`));
     mount(progressBox,
-      h("div", { class: "row", style: { gap: "8px" } }, stateChip, h("b", {}, j.state === "waiting" ? t("mu.waitExport") : j.message || t(`mu.stage.${j.stage}`) || j.stage), h("div", { class: "grow" }),
+      h("div", { class: "row", style: { gap: "8px" } }, stateChip, h("b", {}, j.state === "waiting" ? t(j.stage === "waitQueue" ? "mu.waitQueue" : "mu.waitExport") : j.message || t(`mu.stage.${j.stage}`) || j.stage), h("div", { class: "grow" }),
         h("span", { class: "muted ltr" }, mmss(elapsed)),
         running ? h("button", { class: "btn small ghost", onclick: async () => { await guard(() => call("music.cancel", j.id)); } }, t("c.cancel")) : null),
       j.steps ? h("div", { class: "col", style: { gap: "2px" } }, h("div", { class: "progress" }, h("div", { style: { width: `${Math.round((j.step / j.steps) * 100)}%` } })), h("span", { class: "muted small" }, t("mu.steps", { a: j.step, b: j.steps }))) : null,

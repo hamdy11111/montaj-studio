@@ -21,6 +21,8 @@ export function defaultSettings(paths) {
     // Music studio: where the music models are kept ("" = the app's data folder) and whether a model stays in memory
     // after a generation (off: it is released so the GPU is free for editing).
     music: { modelsDir: "", keepLoaded: false },
+    // Video studio: where its models are kept ("" = the app's data folder) and whether they stay in memory after a job.
+    video: { modelsDir: "", keepLoaded: false },
     agents: { enabled: false },
     ui: { lastShortcutPreset: 1, recentColors: [], presets: [] }, // presets: JSON strings {name, attrs} from "Save preset"
   };
@@ -47,6 +49,8 @@ const RULES = {
   "providers.whisperLanguage": (v) => String(v).slice(0, 12),
   "music.modelsDir": (v) => String(v || "").slice(0, 500),
   "music.keepLoaded": (v) => !!v,
+  "video.modelsDir": (v) => String(v || "").slice(0, 500),
+  "video.keepLoaded": (v) => !!v,
   "providers.asrEngine": (v) => validateEnum(v, ["auto", "nemo", "whispercpp", "fasterwhisper"], "asrEngine"),
   "providers.pythonPath": (v) => String(v).slice(0, 500),
   "providers.fwModel": (v) => { if (!/^[A-Za-z0-9._/-]{1,120}$/.test(String(v))) throw new AppError("VALIDATION", "err.enum", { field: "fwModel" }); return String(v); },

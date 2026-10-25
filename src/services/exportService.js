@@ -112,6 +112,14 @@ export class ExportService {
     return [...ids];
   }
 
+  /** A part of a timeline as a video file (the video studio's "selected range" source): picture and sound only. */
+  async renderRange(timelineId, range, out) {
+    const tl = this.repos.timelines.get(timelineId);
+    await this.runJob({ projectId: tl.projectId, timeline: tl, mode: "video", out, record: false,
+      opts: { resolution: "1080p", codec: "h264", bitrate: "higher", format: "mp4", fps: tl.fps, range } });
+    return out;
+  }
+
   /** Render a compound clip's child timeline to the cache (Pre-process compound clip). */
   async renderCompound(timelineId, { overlays = {}, compoundOverlays = {} } = {}) {
     const tl = this.repos.timelines.get(timelineId);

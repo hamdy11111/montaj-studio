@@ -16,6 +16,9 @@ import { StabilizeService } from "./stabilizeService.js";
 import { DubService } from "./dubService.js";
 import { DubSetupService } from "./dubSetupService.js";
 import { MusicSetupService } from "./musicSetupService.js";
+import { GpuQueue } from "./gpuQueue.js";
+import { VideoSetupService } from "./videoSetupService.js";
+import { VideoService } from "./videoService.js";
 import { MusicService } from "./musicService.js";
 import { BackupService } from "./backupService.js";
 import { PackageService } from "./packageService.js";
@@ -48,7 +51,11 @@ export async function createServices({ root, appVersion = "1.0.0", notify = () =
   const dubSetup = new DubSetupService({ paths, notify, log });
   // Music studio: nothing starts here; the engine starts only when the user asks.
   const musicSetup = new MusicSetupService({ paths, settings, notify, log });
-  const music = new MusicService({ repos, paths, settings, media, setup: musicSetup, exporter, notify, log });
+  const gpu = new GpuQueue({ exporter });
+  const music = new MusicService({ repos, paths, settings, media, setup: musicSetup, exporter, gpu, notify, log });
+  // Video studio («توليد الفيديو»): the same — nothing starts here; one heavy GPU job at a time with the music (gpu).
+  const videoSetup = new VideoSetupService({ paths, settings, notify, log });
+  const video = new VideoService({ repos, paths, settings, media, timelines, setup: videoSetup, exporter, gpu, notify, log });
   exporter.mattes = mattes;
   exporter.stabilizer = stabilizer;
   exporter.captions = captions;
@@ -59,5 +66,5 @@ export async function createServices({ root, appVersion = "1.0.0", notify = () =
   const packages = new PackageService({ repos, paths, media });
   const purged = projects.purgeExpired();
   if (settings.get("draft").autoBackup) { try { backup.autoBackup(); } catch (e) { log("auto backup failed", e.message); } }
-  return { paths, repos, settings, media, analysis, timelines, exporter, projects, tts, captions, asrSetup, mattes, stabilizer, dubber, dubSetup, musicSetup, music, backup, packages, startup: { purged } };
+  return { paths, repos, settings, media, analysis, timelines, exporter, projects, tts, captions, asrSetup, mattes, stabilizer, dubber, dubSetup, musicSetup, music, videoSetup, video, gpu, backup, packages, startup: { purged } };
 }

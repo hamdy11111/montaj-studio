@@ -84,6 +84,28 @@ from its own source and checked by SHA-256. The engine is started by the app onl
 The music nodes in `src/services/music/engine/montaj_music` are ported from the author's AI Creative Studio (Music Rework
 Studio V3: the composition plan and presets, the timbre-only reference adapter, the fixed-loudness export).
 
+## Video studio (downloaded or imported on request, not in the installer)
+
+«توليد الفيديو» — the video studio's «Models and requirements» (`src/services/videoSetupService.js`, catalog in
+`src/services/video/catalog.js`) puts these in the app's data folder (the models folder is the user's choice), each
+from its own source at a pinned revision and checked by SHA-256. Its environment is separate from the music studio's.
+The engine is started by the app only when the user asks. The MiniMax H3 models are used only after the user accepts
+their licence in the model manager.
+
+| Component | License | Source |
+|---|---|---|
+| ComfyUI 0.40.0 (the engine the app starts as a separate program; not linked into the app) | GPL-3.0 | [Comfy-Org/ComfyUI](https://github.com/Comfy-Org/ComfyUI) tag v0.40.0 |
+| Python 3.12.15 (python-build-standalone 20261009, shared with the music studio) | PSF License | [astral-sh/python-build-standalone](https://github.com/astral-sh/python-build-standalone) |
+| PyTorch 2.11.0 + torchaudio + torchvision (CUDA 13.0) | BSD-3-Clause | download.pytorch.org |
+| The pinned packages of `src/services/video/requirements-video.txt` | their own (MIT, BSD, Apache-2.0, …) | PyPI |
+| MiniMax H3 reference-to-video: diffusion model (INT8), Qwen3-VL 32B text encoder (NVFP4), video and audio VAEs, Turbo LoRA (Comfy-Org repack) | MiniMax H3 Community License — not for use in the EU, the UK, South Korea or the US; companies above USD 20M yearly revenue need MiniMax's written permission; interfaces built on it show «MiniMax H3»; Acceptable Use Policy | [Comfy-Org/MiniMax-H3](https://huggingface.co/Comfy-Org/MiniMax-H3) (revision e5eb578), licence: [MiniMaxAI/MiniMax-H3](https://huggingface.co/MiniMaxAI/MiniMax-H3/blob/main/LICENSE) |
+| SAM 3.1 multiplex (FP16) | SAM License (Meta) | [Comfy-Org/sam3.1](https://huggingface.co/Comfy-Org/sam3.1) (revision 7bb8374) |
+| SeedVR2 3B (INT8) and its VAE | Apache-2.0 | [Comfy-Org/SeedVR2](https://huggingface.co/Comfy-Org/SeedVR2) (revision df48879) |
+
+No third-party ComfyUI node packages are used: the graphs use ComfyUI's own nodes and the app's `montaj_video` package.
+The video studio's rules and its description helper (scenes, styles, extra attention) are ported from the author's
+H3 Studio; the prompt is the helper's own structured text.
+
 ## Installed by the user, not bundled
 
 Local speech recognition and the person cut-out ("text behind the person") run with the user's own Python

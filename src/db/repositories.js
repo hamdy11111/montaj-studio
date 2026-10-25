@@ -286,6 +286,8 @@ export class MediaRepository {
   }
 
   usageCount(id) { return this.realm.objects("Segment").filtered("media._id == $0", id).length; }
+  /** Does any project's media use this file? */
+  usesPath(file) { return this.realm.objects("MediaAsset").filtered("path == $0", file).length > 0; }
 
   /** Detach from a project; refused while a segment still uses it. */
   detach(projectId, id) {

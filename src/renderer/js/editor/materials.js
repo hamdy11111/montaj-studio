@@ -108,7 +108,19 @@ export class Materials {
       for (const m of items) grid.append(this.mediaCard(m, used.has(m.id)));
     };
     drawGrid();
-    this.body.append(h("div", { class: "mat-head" }, importBtn, h("div", { class: "search grow" }, icon("search"), search)), chips, grid);
+    // Generated videos («الفيديوهات المولّدة»): drag onto the timeline or add at the playhead; the studio opens with this project.
+    const gen = h("div", { class: "vg-strip" });
+    call("video.library", {}).then((items) => {
+      if (!items?.length) return;
+      mount(gen, h("div", { class: "row", style: { gap: "6px" } }, h("b", { class: "small" }, t("vg.s6")), h("span", { class: "muted small" }, String(items.length))),
+        h("div", { class: "media-grid" }, items.slice(0, 12).map((x) => h("div", { class: "media-card", draggable: x.exists, title: x.name,
+          ondragstart: (e) => e.dataTransfer.setData("text/x-montaj-item", JSON.stringify({ type: "libVideo", id: x.id })) },
+        h("div", { class: "media-thumb" }, h("img", { src: `media://vidthumb/${encodeURIComponent(x.id)}`, alt: "" }), h("span", { class: "media-dur" }, formatDuration(x.durationUs)),
+          h("button", { class: "icon-btn media-add", "aria-label": t("vg.addToTimeline"), title: t("vg.addToTimeline"), onclick: (e) => { e.stopPropagation(); ed.dropItem({ type: "libVideo", id: x.id }, ed.playhead()); } }, icon("plus"))),
+        h("div", { class: "media-name nowrap" }, x.name)))));
+    }).catch(() => {});
+    const studioBtn = h("button", { class: "btn", title: t("vg.openStudioHint"), onclick: () => ed.openVideoStudio() }, icon("sparkle"), t("nav.video"));
+    this.body.append(h("div", { class: "mat-head" }, importBtn, studioBtn, h("div", { class: "search grow" }, icon("search"), search)), chips, grid, gen);
     // Drop files from Explorer onto the panel to import them.
     this.body.ondragover = (e) => { if ([...e.dataTransfer.types].includes("Files")) { e.preventDefault(); this.body.classList.add("drop"); } };
     this.body.ondragleave = () => this.body.classList.remove("drop");

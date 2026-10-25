@@ -54,7 +54,7 @@ def _routes():
     from aiohttp import web
     from server import PromptServer
 
-    @PromptServer.instance.routes.get("/montaj-music/process")
+    @PromptServer.instance.routes.get("/montaj/process")
     async def process(_request):
         return web.json_response({"pid": os.getpid()})
 

@@ -70,6 +70,7 @@ export async function openEditor(root, params) {
     duration: () => player.endUs(),
     tool: () => st.tool,
     inOut: () => ({ in: st.inPoint, out: st.outPoint }),
+    openVideoStudio: (extra) => openVideoStudio(extra),
     compoundVersion: (id) => st.compoundVersions[id] || 0,
     compoundReady: (id) => !!st.compoundReady[id],
     reloadTimeline,
@@ -276,6 +277,12 @@ export async function openEditor(root, params) {
     const at = Math.max(0, Math.round(atUs ?? player.timeUs));
     if (item.type === "libAudio") {
       const m = await guard(() => call("library.useAudio", st.project.id, item.id));
+      if (!m) return null;
+      await refreshMedia();
+      return exec("addMedia", { mediaId: m.id, toMain: false, atUs: at });
+    }
+    if (item.type === "libVideo") { // a generated video («الفيديوهات المولّدة»): into the project once, on a track of its own
+      const m = await guard(() => call("video.addToProject", item.id, st.project.id));
       if (!m) return null;
       await refreshMedia();
       return exec("addMedia", { mediaId: m.id, toMain: false, atUs: at });
@@ -581,6 +588,12 @@ export async function openEditor(root, params) {
     if (res) toast(t("c.done"), "success", { action: { label: t("ex.openFolder"), run: () => call("app.showInFolder", file) } });
   }
 
+  /** The video studio, opened from here: results go to this project, at the playhead or the In/Out range. */
+  function openVideoStudio(extra = {}) {
+    const range = st.inPoint !== null || st.outPoint !== null ? { timelineId: st.timelineId, startUs: st.inPoint ?? 0, endUs: st.outPoint ?? player.endUs() } : null;
+    app.go("home", { view: "video", videoProject: st.project.id, videoAtUs: player.timeUs, videoRange: range, ...extra });
+  }
+
   function clipMenu(e, seg) {
     const ids = st.selection.length ? st.selection : [seg.id];
     const m = ed.media(seg.mediaId);
@@ -609,6 +622,7 @@ export async function openEditor(root, params) {
       "-",
       isVisual || seg.kind === "audio" ? { label: t("ctx.replace"), run: replaceClip } : null,
       seg.kind === "video" ? { label: t("tl.splitScenes"), run: () => run("splitScenes") } : null,
+      seg.kind === "video" && m ? { label: t("ctx.useInVideoGen"), run: () => openVideoStudio({ videoSourceMedia: m.id, videoStart: (seg.sourceStart || 0) / US }) } : null,
       m ? { label: t("ctx.openLocation"), run: () => call("app.showInFolder", m.path) } : null,
       m?.status === "missing" ? { label: t("ed.linkMedia"), run: () => materials.relink(m) } : null,
       { label: t("ctx.render"), items: [{ label: t("ctx.wholeTimeline"), run: () => run("export") }, { label: t("ctx.inOut"), disabled: st.inPoint === null && st.outPoint === null, run: () => run("export") }, { label: t("ctx.deleteCache"), run: async () => { if (await guard(() => call("settings.clearCache", "render")) !== undefined) toast(t("set.cacheCleared"), "success"); } }] },

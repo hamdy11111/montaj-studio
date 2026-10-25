@@ -129,3 +129,17 @@ code.token { user-select: all; }
 .mu-wave.small { height: 40px; cursor: default; }
 .mu-drop { border: 1px dashed #3a4a4c; border-radius: var(--r-card); padding: 18px; text-align: center; color: var(--text-secondary); }
 .mu-result .icon-btn.active { outline: 1px solid var(--accent); }
+/* Video studio (pages/video.js): players, references, comparison and the generated-videos grid — the app's tokens only. */
+.vg-two { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 12px; align-items: start; }
+.vg-player { width: 100%; max-height: 420px; background: #000; border-radius: var(--r-card); }
+.vg-refs { display: flex; flex-wrap: wrap; gap: 8px; }
+.vg-ref { position: relative; width: 120px; display: flex; flex-direction: column; gap: 4px; align-items: center; }
+.vg-ref img { width: 120px; height: 150px; object-fit: cover; border-radius: var(--r-card); background: var(--bg-input); }
+.vg-ref .icon-btn { position: absolute; top: 4px; inset-inline-end: 4px; background: rgba(0,0,0,.6); }
+.vg-ref.add { width: auto; min-width: 200px; min-height: 150px; justify-content: center; border: 1px dashed #3a4a4c; border-radius: var(--r-card); padding: 10px; }
+.vg-compare .vg-player { max-height: 420px; }
+.vg-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 10px; }
+.vg-tile { display: flex; flex-direction: column; background: var(--bg-home-card); border: 1px solid #1b2a2c; border-radius: var(--r-card); overflow: hidden; cursor: grab; }
+.vg-tile:hover { border-color: #2b4a4e; }
+.vg-tile img, .vg-tile video { width: 100%; aspect-ratio: 16 / 9; object-fit: cover; background: #000; display: block; }
+.vg-tile-meta { display: flex; align-items: center; gap: 6px; padding: 6px 8px; }
