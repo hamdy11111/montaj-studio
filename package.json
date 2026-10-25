@@ -1,7 +1,7 @@
 {
   "name": "montaj-studio",
   "productName": "Montaj Studio",
-  "version": "1.4.0",
+  "version": "1.5.0",
   "description": "Offline desktop video editor built from the CapCut 9.6 reconstruction blueprint (Electron + Realm, no UI framework).",
   "type": "module",
   "main": "src/main/main.js",
@@ -22,6 +22,7 @@
     "test:e2e": "node --test --test-concurrency=1 \"tests/e2e/*.test.mjs\"",
     "test:all": "npm test && npm run test:e2e",
     "traceability": "node scripts/traceability.js",
+    "setup:asr": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/setup-asr.ps1",
     "pack": "electron-builder --dir",
     "dist": "electron-builder --win nsis"
   },
@@ -49,6 +50,7 @@
       "src/**/*",
       "package.json",
       "!**/*.map",
+      "!src/services/asr/models/**",
       "!node_modules/realm/prebuilds/android/**",
       "!node_modules/realm/prebuilds/apple/**",
       "!node_modules/realm/react-native/**",

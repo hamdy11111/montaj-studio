@@ -2,3 +2,8 @@ node_modules/
 dist/
 tests/e2e/artifacts/
 *.log
+
+# The Egyptian speech model (459 MB) lives in the source folder but is too large for git; see docs/AUTOMATION.md
+src/services/asr/models/*.nemo
+# The speech engine's Python runtime (torch + NeMo, several GB), created by scripts/setup-asr.ps1
+runtime/

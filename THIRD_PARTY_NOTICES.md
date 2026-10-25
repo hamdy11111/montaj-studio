@@ -31,6 +31,15 @@ will be provided.
 
 You can use a different FFmpeg build (for example an LGPL build) in Settings › Performance › FFmpeg program.
 
+## Speech engine (in the source, not in the public repository)
+
+- **Egyptian Arabic ASR model** `src/services/asr/models/asr-egyptian-nemo-v2.0.nemo` — a NeMo FastConformer
+  hybrid RNNT-CTC model. Its origin and licence are not recorded; it is kept out of git (`.gitignore`) and must not
+  be published or bundled in a public installer until they are (the installer build excludes it; an installed copy
+  reads it from `models` in the app's data folder).
+- Its runtime (`runtime/asr`, made by `npm run setup:asr`, also outside git): NVIDIA NeMo (Apache 2.0) and PyTorch
+  (BSD-3-Clause) with their dependencies, pinned in `src/services/asr/requirements-nemo.txt`.
+
 ## Installed by the user, not bundled
 
 Local speech recognition and the person cut-out ("text behind the person") run with the user's own Python

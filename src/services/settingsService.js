@@ -42,7 +42,7 @@ const RULES = {
   "export.format": (v) => validateEnum(v, ["mp4", "mov"], "format"),
   "export.audioFormat": (v) => validateEnum(v, ["flac", "mp3", "wav", "aac"], "audioFormat"),
   "providers.whisperLanguage": (v) => String(v).slice(0, 12),
-  "providers.asrEngine": (v) => validateEnum(v, ["auto", "whispercpp", "fasterwhisper"], "asrEngine"),
+  "providers.asrEngine": (v) => validateEnum(v, ["auto", "nemo", "whispercpp", "fasterwhisper"], "asrEngine"),
   "providers.pythonPath": (v) => String(v).slice(0, 500),
   "providers.fwModel": (v) => { if (!/^[A-Za-z0-9._/-]{1,120}$/.test(String(v))) throw new AppError("VALIDATION", "err.enum", { field: "fwModel" }); return String(v); },
 };

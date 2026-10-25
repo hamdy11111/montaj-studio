@@ -1,5 +1,7 @@
 // Captions and speech (FEAT-083..088): import SRT/VTT into caption text clips, and local speech recognition with
-// word timings through one of two LOCAL providers configured in Settings › Providers — no cloud service is used:
+// word timings through a LOCAL provider — no cloud service is used:
+//   nemo           the Egyptian Arabic NeMo model that ships in the source (src/services/asr/models), run by the
+//                  program's own Python runtime (runtime/asr, made by scripts/setup-asr.ps1) — the default engine
 //   whispercpp     a whisper.cpp executable + ggml model chosen by the user
 //   fasterwhisper  the faster-whisper Python package with a model already in the local Hugging Face cache
 //                  (src/services/asr/faster_whisper_words.py; models are never downloaded by the app)
@@ -17,7 +19,36 @@ import { uid, US } from "../core/util.js";
 import { TEXT_PRESETS } from "../core/presets.js";
 
 // The Python helper must be a real file for the interpreter: in packaged builds it is unpacked next to app.asar.
-const FW_SCRIPT = path.join(path.dirname(fileURLToPath(import.meta.url)), "asr", "faster_whisper_words.py").replace(/app\.asar([\\/])/, "app.asar.unpacked$1");
+const HERE = path.dirname(fileURLToPath(import.meta.url));
+const ASR_DIR = path.join(HERE, "asr").replace(/app\.asar([\\/])/, "app.asar.unpacked$1");
+const FW_SCRIPT = path.join(ASR_DIR, "faster_whisper_words.py");
+const NEMO_SCRIPT = path.join(ASR_DIR, "nemo_words.py");
+const NEMO_FILE = "asr-egyptian-nemo-v2.0.nemo";
+export const NEMO_MODEL = path.join(ASR_DIR, "models", NEMO_FILE);
+const NEMO_NAME = "egyptian-nemo-v2.0";
+
+/**
+ * The model file: in the source (src/services/asr/models) or, for an installed copy (the public installer does not
+ * carry the model), in <user data>/models — which survives updates. Null when neither exists.
+ */
+export function nemoModel(userData) {
+  for (const f of [NEMO_MODEL, ...(userData ? [path.join(userData, "models", NEMO_FILE)] : [])]) if (fs.existsSync(f)) return f;
+  return null;
+}
+
+/**
+ * The program's own Python runtime for the NeMo engine: <app root>/runtime/asr — the project folder in development,
+ * the resources folder next to app.asar when packaged — or, failing that, <user data>/runtime/asr. Never a Python
+ * from another project or the system PATH.
+ */
+export function nemoPython(userData) {
+  const root = path.resolve(HERE, "..", "..");
+  const base = /\.asar$/i.test(root) ? path.dirname(root) : root;
+  const exe = process.platform === "win32" ? path.join("Scripts", "python.exe") : path.join("bin", "python");
+  const dirs = [path.join(base, "runtime", "asr"), ...(userData ? [path.join(userData, "runtime", "asr")] : [])];
+  for (const d of dirs) if (fs.existsSync(path.join(d, exe))) return path.join(d, exe);
+  return null;
+}
 
 /** 10 ms RMS envelope of a 16-bit PCM WAV (the 16 kHz mono file extracted for recognition). */
 export function wavEnvelope(file, frameMs = 10) {
@@ -102,6 +133,8 @@ export class CaptionService {
     this.settings = settings;
     this.fw = null;          // faster-whisper detection result (cached per python path + model)
     this.fwChecking = null;
+    this.nemo = null;        // NeMo runtime detection result
+    this.nemoChecking = null;
   }
 
   /** Text segments for cues (offset in µs), styled as captions near the bottom of the frame. */
@@ -141,29 +174,60 @@ export class CaptionService {
     return promise;
   }
 
+  /** Check (once; a failure is retried after 20 s) that the program's NeMo runtime and the shipped model work. */
+  async detectNemo(force = false) {
+    const py = nemoPython(this.paths.root), model = nemoModel(this.paths.root);
+    const key = `${py}|${model}`;
+    if (!force && this.nemo?.key === key && (this.nemo.ok || Date.now() - this.nemo.at < 20_000)) return this.nemo;
+    if (!force && this.nemoChecking?.key === key) return this.nemoChecking.promise;
+    const base = { key, at: Date.now(), python: py, modelFile: !!model, model: NEMO_NAME };
+    const promise = (!py || !base.modelFile
+      ? Promise.resolve({ ...base, ok: false, installed: !!py })
+      : exec(py, ["-X", "utf8", NEMO_SCRIPT, "--audio", "-", "--check", "--model", model], { timeoutMs: 120_000 })
+        .then((out) => { const j = JSON.parse(out.trim().split("\n").pop()); return { ...base, ok: !!j.model, installed: true, version: j.nemo, cuda: !!j.cuda }; })
+        .catch((e) => ({ ...base, ok: false, installed: false, error: String(e?.details?.stderr || e?.details?.message || e?.message || e).slice(-300) })))
+      .then((r) => { this.nemo = r; this.nemoChecking = null; return r; });
+    this.nemoChecking = { key, promise };
+    return promise;
+  }
+
   whisperCppOk() {
     const p = this.settings.get("providers");
     return !!p.whisperPath && fs.existsSync(p.whisperPath) && !!p.whisperModel && fs.existsSync(p.whisperModel);
   }
 
-  /** Which provider transcription will use (null if none is available). Sync: uses the last detection. */
-  engine() {
+  /**
+   * Which provider transcription of `language` will use (null if none is available). Sync: uses the last detection.
+   * The Egyptian model understands Arabic only: another language named explicitly goes to the other engines.
+   */
+  engine(language = "auto") {
     const want = this.settings.get("providers").asrEngine || "auto";
-    const cpp = this.whisperCppOk(), fw = !!this.fw?.ok;
+    const cpp = this.whisperCppOk(), fw = !!this.fw?.ok, nemo = !!this.nemo?.ok && (language === "ar" || language === "auto");
+    if (want === "nemo") return nemo ? "nemo" : null;
     if (want === "whispercpp") return cpp ? "whispercpp" : null;
     if (want === "fasterwhisper") return fw ? "fasterwhisper" : null;
-    return fw ? "fasterwhisper" : cpp ? "whispercpp" : null; // auto: word timings are more accurate with faster-whisper
+    // auto: the Egyptian model first (measured 7.6 % word errors on Egyptian speech against 10.6 % for whisper turbo)
+    return nemo ? "nemo" : fw ? "fasterwhisper" : cpp ? "whispercpp" : null;
   }
 
   providerStatus() {
     const p = this.settings.get("providers");
     const engine = this.engine();
     return { autoCaptions: !!engine, words: !!engine, engine, whisperPath: p.whisperPath, whisperModel: p.whisperModel,
-      fasterWhisper: this.fw ? { installed: this.fw.installed, modelCached: this.fw.ok, version: this.fw.version, cuda: this.fw.cuda, model: p.fwModel } : null };
+      fasterWhisper: this.fw ? { installed: this.fw.installed, modelCached: this.fw.ok, version: this.fw.version, cuda: this.fw.cuda, model: p.fwModel } : null,
+      nemo: this.nemo ? { installed: this.nemo.installed, ready: this.nemo.ok, modelFile: this.nemo.modelFile, version: this.nemo.version, cuda: this.nemo.cuda, model: NEMO_NAME, python: this.nemo.python, error: this.nemo.error } : null };
   }
 
-  /** providerStatus after (re)detecting faster-whisper. */
-  async status(force = false) { await this.detectFasterWhisper(force); return this.providerStatus(); }
+  /** Detect the engines that may be used (the Egyptian model always; faster-whisper only when it could be chosen). */
+  async detectEngines(force = false, language = "auto") {
+    const nemo = await this.detectNemo(force);
+    const want = this.settings.get("providers").asrEngine || "auto";
+    const arabic = language === "ar" || language === "auto";
+    if (want === "fasterwhisper" || (want === "auto" && !(nemo.ok && arabic))) await this.detectFasterWhisper(force);
+  }
+
+  /** providerStatus after (re)detecting the engines. */
+  async status(force = false) { await this.detectEngines(force); return this.providerStatus(); }
 
   // ------------------------------------------------------------------ transcription
   async extractWav(m, work, { fromUs = 0, durUs = null, signal } = {}) {
@@ -178,14 +242,14 @@ export class CaptionService {
    * Cached in cache/transcripts; `fresh` ignores the cache.
    */
   async transcribeWords({ mediaId, language = "auto", fresh = false, signal } = {}) {
-    await this.detectFasterWhisper();
-    const engine = this.engine();
+    const lang = /^[a-z]{2}$|^auto$/.test(language) ? language : "auto";
+    await this.detectEngines(false, lang);
+    const engine = this.engine(lang);
     if (!engine) throw new AppError("PROVIDER", "err.whisperNotConfigured");
     const m = this.repos.media.get(mediaId);
     if (!m.hasAudio) throw new AppError("VALIDATION", "err.noAudio");
-    const lang = /^[a-z]{2}$|^auto$/.test(language) ? language : "auto";
     const p = this.settings.get("providers");
-    const model = engine === "fasterwhisper" ? p.fwModel : path.basename(p.whisperModel);
+    const model = engine === "nemo" ? NEMO_NAME : engine === "fasterwhisper" ? p.fwModel : path.basename(p.whisperModel);
     let stamp = "";
     try { const st = fs.statSync(m.path); stamp = `${st.size}:${st.mtimeMs}`; } catch { throw new AppError("IO", "err.fileNotFound", { file: path.basename(m.path) }); }
     const dir = path.join(this.paths.cache, "transcripts");
@@ -195,7 +259,8 @@ export class CaptionService {
     fs.mkdirSync(work, { recursive: true });
     try {
       const wav = await this.extractWav(m, work, { signal });
-      const result = engine === "fasterwhisper" ? await this.runFasterWhisper(wav, lang, signal) : await this.runWhisperCppWords(wav, work, lang, signal);
+      const result = engine === "nemo" ? await this.runNemo(wav, signal)
+        : engine === "fasterwhisper" ? await this.runFasterWhisper(wav, lang, signal) : await this.runWhisperCppWords(wav, work, lang, signal);
       const snapped = refineWordTimes(result.data.words, wavEnvelope(wav));
       for (const sg of result.data.segments) { const a = snapped.words[sg.w0], b = snapped.words[sg.w1]; if (a && b) { sg.startUs = a.startUs; sg.endUs = b.endUs; } }
       const out = { mediaId: m.id, engine, model, language: result.language || lang, durationUs: m.durationUs, ...result.data, words: snapped.words, timing: { snappedToAudio: snapped.moved } };
@@ -220,6 +285,17 @@ export class CaptionService {
   async runFasterWhisper(wav, lang, signal) {
     const p = this.settings.get("providers");
     const out = await exec(this.pythonCmd(), ["-X", "utf8", FW_SCRIPT, "--audio", wav, "--model", p.fwModel || "large-v3-turbo", "--language", lang], { timeoutMs: 60 * 60_000, signal });
+    return this.parseWordJson(out);
+  }
+
+  /** The Egyptian model through the program's runtime; same JSON as faster-whisper. */
+  async runNemo(wav, signal) {
+    const py = nemoPython(this.paths.root), model = nemoModel(this.paths.root);
+    if (!py || !model) throw new AppError("PROVIDER", "err.whisperNotConfigured");
+    return this.parseWordJson(await exec(py, ["-X", "utf8", NEMO_SCRIPT, "--audio", wav, "--model", model], { timeoutMs: 60 * 60_000, signal }));
+  }
+
+  parseWordJson(out) {
     let j;
     try { j = JSON.parse(out); } catch { throw new AppError("PROVIDER", "err.whisperFailed", { message: "invalid output" }); }
     const words = [], segments = [];
@@ -248,13 +324,14 @@ export class CaptionService {
 
   /** Auto captions for one media span; returns cues in timeline time. */
   async transcribe({ mediaId, sourceStartUs = 0, durationUs = null, timelineStartUs = 0, speed = 1, language = "auto", signal } = {}) {
-    await this.detectFasterWhisper();
-    const engine = this.engine();
+    const asked = /^[a-z]{2}$|^auto$/.test(language) ? language : "auto";
+    await this.detectEngines(false, asked);
+    const engine = this.engine(asked);
     if (!engine) throw new AppError("PROVIDER", "err.whisperNotConfigured");
     const m = this.repos.media.get(mediaId);
     if (!m.hasAudio) throw new AppError("VALIDATION", "err.noAudio");
     const srcEnd = durationUs ? sourceStartUs + durationUs * speed : Infinity;
-    if (engine === "fasterwhisper") {
+    if (engine !== "whispercpp") {
       // Whole-file transcript (cached), cut to the clip's source span and mapped to the timeline.
       const tr = await this.transcribeWords({ mediaId, language, signal });
       return tr.segments.map((sg) => {

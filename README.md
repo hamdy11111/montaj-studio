@@ -101,7 +101,7 @@ npm run dist
 
 | الميزة | ما المطلوب |
 |---|---|
-| الترجمة التلقائية / كلمات الأغاني | برنامج [whisper.cpp](https://github.com/ggerganov/whisper.cpp) (`whisper-cli.exe`) ونموذج `.bin`، يُحدَّدان في الإعدادات › المزوّدات. يعمل محليًا بالكامل |
+| التفريغ والكابشن بتوقيت كل كلمة | النموذج المصري المدمج (`src/services/asr/models/asr-egyptian-nemo-v2.0.nemo`) ببيئة تشغيل البرنامج: `npm run setup:asr` مرة واحدة. يعمل محليًا بالكامل. اختياريًا للغات الأخرى: faster-whisper أو [whisper.cpp](https://github.com/ggerganov/whisper.cpp) من الإعدادات › المزوّدات |
 | تحويل النص إلى كلام | أصوات Windows المثبّتة. صوت «Microsoft Hoda» العربي يأتي مع حزمة اللغة العربية |
 
 الميزات التي تعتمد في المنتج الأصلي على نماذج توليدية سحابية (AI video، AI image، Extend، Lip sync، Avatars، Video translator…) **تظهر في الواجهة كغير متاحة دون اتصال ولا تُحاكى**. التفاصيل في [docs/TRACEABILITY.md](docs/TRACEABILITY.md).

@@ -90,9 +90,15 @@ export function openSettings(initialTab = "draft") {
         row(t("ed.shortcuts"), h("button", { class: "btn small", onclick: async () => { const { openShortcuts } = await import("./shortcuts.js"); openShortcuts(); } }, icon("shortcuts"), t("ed.shortcuts"))));
     } else if (tab === "providers") {
       const st = app.caps?.captions;
-      const fwStatus = h("span", { class: "muted" }, "…");
+      const fwStatus = h("span", { class: "muted" }, "…"), nemoStatus = h("span", { class: "muted" }, "…");
       const showFw = (c) => {
+        const nm = c?.nemo;
+        nemoStatus.textContent = nm?.ready ? t("set.nemoReady", { version: nm.version, device: "CPU" })
+          : !nm?.modelFile ? t("set.nemoNoModel") : !nm?.python ? t("set.nemoNoRuntime") : t("set.nemoBroken");
+        nemoStatus.className = nm?.ready ? "badge local" : "muted";
+        if (nm?.error) nemoStatus.title = nm.error;
         const fw = c?.fasterWhisper;
+        if (!fw) { fwStatus.textContent = t("set.fwUnused"); fwStatus.className = "muted"; return; }
         fwStatus.textContent = !fw?.installed ? t("set.fwMissing") : fw.modelCached ? t("set.fwReady", { version: fw.version, device: fw.cuda ? "GPU" : "CPU" }) : t("set.fwNoModel");
         fwStatus.className = fw?.modelCached ? "badge local" : "muted";
       };
@@ -100,7 +106,8 @@ export function openSettings(initialTab = "draft") {
       const modelIn = h("input", { type: "text", value: s.providers.fwModel || "large-v3-turbo", style: { width: "220px" }, class: "ltr" });
       modelIn.addEventListener("change", () => set("providers", "fwModel", modelIn.value.trim()));
       mount(pane,
-        row(t("set.asrEngine"), sel("providers", "asrEngine", [{ value: "auto", label: t("set.asrAuto") }, { value: "fasterwhisper", label: "faster-whisper (Python)" }, { value: "whispercpp", label: "whisper.cpp" }])),
+        row(t("set.asrEngine"), sel("providers", "asrEngine", [{ value: "auto", label: t("set.asrAuto") }, { value: "nemo", label: t("set.nemo") }, { value: "fasterwhisper", label: "faster-whisper (Python)" }, { value: "whispercpp", label: "whisper.cpp" }])),
+        row(t("set.nemo"), nemoStatus),
         fileRow(t("set.pythonPath"), "providers", "pythonPath", "exe"),
         row(t("set.fwModel"), modelIn),
         row(t("set.asrStatus"), h("div", { class: "row" }, fwStatus, h("button", { class: "btn small", onclick: async () => { for (const [k, v] of Object.entries(pending.providers || {})) await guard(() => call("settings.set", "providers", { [k]: v })); fwStatus.textContent = "…"; showFw(await guard(() => call("captions.status", true))); } }, t("set.check")))),
