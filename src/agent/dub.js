@@ -34,7 +34,7 @@ function brief(r) {
   return {
     lang: r.lang, summary: r.summary,
     speakers: r.speakers.map((s) => ({ id: s.id, kind: s.kind, gender: s.gender, child: !!s.child, speech: s.speech })),
-    lines: r.lines.map((l, n) => ({ n, spk: l.spk, start: l.start, end: l.end, ar: l.ar, text: l.spoken || l.text, emotion: l.emotion, intensity: l.intensity, speed: l.speed, fill: l.fill ?? null, edited: !!l.edited, check: l.check ?? null })),
+    lines: r.lines.map((l, n) => ({ n, spk: l.spk, start: l.start, end: l.end, ar: l.ar, text: l.spoken || l.text, emotion: l.emotion, intensity: l.intensityByUser ? l.intensity : l.arousal ?? l.intensity, speed: l.speed, fill: l.fill ?? null, edited: !!l.edited, check: l.check ?? null })),
   };
 }
 

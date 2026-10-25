@@ -124,10 +124,10 @@ test("the run is planned in stages; cached audio work costs nothing; every langu
   for (const k of ["err.dubNotReady", "err.dubNotArabic", "err.dubFailed", "err.dubTranslator", "err.dubNone", "err.dubNoClip", "err.dubOneVideo", "err.dubBusy", "dub.heard", "dub.thin"]) assert.ok(has(k), k);
 });
 
-test("who says each word: quick replies between a man and a woman, two men, one person split in two (the dub runtime's Python)", async (t) => {
+test("who says each word (a man and a woman, two men, one person split in two) and how worked-up each line sounds (the dub runtime's Python)", async (t) => {
   const py = path.join(process.cwd(), "runtime", "dub", process.platform === "win32" ? "Scripts/python.exe" : "bin/python");
   if (!fs.existsSync(py)) return t.skip("dub runtime not set up");
   const r = spawnSync(py, ["-X", "utf8", path.join("tests", "python", "test_dub_speakers.py")], { encoding: "utf8", timeout: 120_000 });
   assert.equal(r.status, 0, (r.stdout || "") + (r.stderr || "").slice(-1500));
-  assert.equal((r.stdout.match(/^ok /gm) || []).length, 3);
+  assert.equal((r.stdout.match(/^ok /gm) || []).length, 4);
 });

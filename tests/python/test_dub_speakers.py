@@ -87,6 +87,33 @@ def test_one_person_split_in_two_is_one_again():
     assert all(w["spk"] != list(men)[0] for w in out if w["who"] == "w")
 
 
+def tone(f0, secs, amp, sr=16000):
+    t = np.arange(int(secs * sr)) / sr
+    return (amp * np.sin(2 * np.pi * f0 * t * (1 + 0.03 * np.sin(2 * np.pi * 3 * t)))).astype(np.float32)
+
+
+def test_feeling_strength_from_the_voice():
+    # One speaker, four calm lines and one shouted (louder, higher): the shouted one is the most worked-up; a whole
+    # scene spoken far above a calm voice of that kind is above 0.5; a strength the user set wins.
+    parts, words, lines, t = [], [], [], 0.0
+    for k, (f0, amp) in enumerate([(130, 0.1), (128, 0.1), (132, 0.1), (131, 0.1), (190, 0.5)]):
+        parts.append(tone(f0, 1.5, amp)); parts.append(np.zeros(8000, dtype=np.float32))
+        words.append({"word": "w", "start": t, "end": t + 1.5})
+        lines.append({"from": k, "to": k, "spk": 0, "emotion": "neutral"})
+        t += 2.0
+    a16 = np.concatenate(parts)
+    dub.voice_arousal(lines, words, a16, {0: "male"})
+    shouted, calm = lines[4]["arousal"], max(l["arousal"] for l in lines[:4])
+    assert shouted > calm + 0.2, (shouted, calm)
+    ex_calm, _ = dub.voice_controls(lines[0]); ex_shout, cfg_shout = dub.voice_controls(lines[4])
+    assert ex_shout > ex_calm and cfg_shout < 0.5
+    high = [dict(l) for l in lines[:4]]
+    dub.voice_arousal(high, words, a16 * 0 + np.concatenate([tone(300, 1.5, 0.1) if i % 2 == 0 else np.zeros(8000, dtype=np.float32) for i in range(8)] + [np.zeros(len(a16) - 4 * (24000 + 8000), dtype=np.float32)])[: len(a16)], {0: "male"})
+    assert all(l["arousal"] > 0.5 for l in high if "arousal" in l)
+    user = dict(lines[4], intensity=0.1, intensityByUser=True)
+    assert dub.voice_controls(user)[0] < ex_shout
+
+
 if __name__ == "__main__":
     for name, fn in list(globals().items()):
         if name.startswith("test_"):
