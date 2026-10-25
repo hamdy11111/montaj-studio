@@ -751,12 +751,20 @@ def cmd_synth(a):
     lang = data.get("lang", a.lang)
     dev = "cuda" if torch.cuda.is_available() and a.device != "cpu" else "cpu"
     progress(0.01, "voices")
-    if lang == "en":
+    # Chatterbox Multilingual V3 for every language, English too (compared on a real dub against the English model,
+    # V3 and two other open models: the most natural voice, fewer misspoken words). An older Chatterbox without V3
+    # keeps the previous models.
+    import inspect
+    from chatterbox.mtl_tts import ChatterboxMultilingualTTS
+    if "t3_model" in inspect.signature(ChatterboxMultilingualTTS.from_pretrained).parameters:
+        model = ChatterboxMultilingualTTS.from_pretrained(device=dev, t3_model="v3")
+        model.t3_model_name = "v3"
+        gen = lambda text, ref, ex, cfg: model.generate(text, language_id=lang, audio_prompt_path=ref, exaggeration=ex, cfg_weight=cfg)  # noqa: E731
+    elif lang == "en":
         from chatterbox.tts import ChatterboxTTS
         model = ChatterboxTTS.from_pretrained(device=dev)
         gen = lambda text, ref, ex, cfg: model.generate(text, audio_prompt_path=ref, exaggeration=ex, cfg_weight=cfg)  # noqa: E731
     else:
-        from chatterbox.mtl_tts import ChatterboxMultilingualTTS
         model = ChatterboxMultilingualTTS.from_pretrained(device=dev)
         gen = lambda text, ref, ex, cfg: model.generate(text, language_id=lang, audio_prompt_path=ref, exaggeration=ex, cfg_weight=cfg)  # noqa: E731
     sr = model.sr
@@ -770,7 +778,7 @@ def cmd_synth(a):
         as meant (similarity >= 0.85) or else the closest. Kept in tts/, so voicing again after a few lines changed
         (fitting, the user's edits) only voices those."""
         import hashlib
-        key = hashlib.sha1(f"{lang}|{spk['ref']}|{ex:.3f}|{cfg:.3f}|{seed}|{text}".encode("utf-8")).hexdigest()[:20]
+        key = hashlib.sha1(f"{type(model).__name__}:{getattr(model, 't3_model_name', '')}|{lang}|{spk['ref']}|{ex:.3f}|{cfg:.3f}|{seed}|{text}".encode("utf-8")).hexdigest()[:20]
         wav, meta = os.path.join(cache, key + ".wav"), os.path.join(cache, key + ".json")
         if os.path.exists(wav) and os.path.exists(meta):
             m = jload(meta)

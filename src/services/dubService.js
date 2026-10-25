@@ -119,17 +119,18 @@ export class DubService {
 
   /**
    * Expected seconds per stage for a media of `durationS`, from real runs on the development machine (RTX 4090; a
-   * 150 s two-speaker video into English took 21 + 42 + 61 + 123 + 200 s): separation 10 s + 0.06 × duration; the
-   * clean speech's words 10 s + 0.2 ×; speakers 15 s + 0.3 ×; translation 30 s + 0.65 ×; voices (each line spoken,
-   * heard back, re-taken when needed, fitted to its time) 20 s + 1.2 ×. Cached stages cost ~1 s.
+   * 150 s two-speaker video into English took 31 + 44 + 115 + 189 + 264 s with Chatterbox V3 and the voice-checked
+   * speakers): separation 10 s + 0.06 × duration; the clean speech's words 10 s + 0.2 ×; speakers 20 s + 0.6 ×;
+   * translation 30 s + 0.8 ×; voices (each line spoken, heard back, re-taken when needed, fitted to its time)
+   * 20 s + 1.6 ×. Cached stages cost ~1 s.
    */
   estimate(durationS, cached = {}) {
     const stages = [
       { key: "separate", sec: cached.separate ? 1 : 10 + 0.06 * durationS },
       { key: "words", sec: cached.words ? 1 : 10 + 0.2 * durationS },
-      { key: "speakers", sec: cached.speakers ? 1 : 15 + 0.3 * durationS },
-      { key: "translate", sec: 30 + 0.65 * durationS },
-      { key: "voices", sec: 20 + 1.2 * durationS },
+      { key: "speakers", sec: cached.speakers ? 1 : 20 + 0.6 * durationS },
+      { key: "translate", sec: 30 + 0.8 * durationS },
+      { key: "voices", sec: 20 + 1.6 * durationS },
       { key: "timeline", sec: 3 },
     ];
     return { stages, totalSec: Math.round(stages.reduce((n, s) => n + s.sec, 0)) };
