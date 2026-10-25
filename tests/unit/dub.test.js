@@ -4,6 +4,9 @@
 // a second language keeps the first (muted); a hand-moved line keeps its shift when voiced again; export lowers the
 // background under the voice clips where they are.
 import { test } from "node:test";
+import fs from "node:fs";
+import path from "node:path";
+import { spawnSync } from "node:child_process";
 import assert from "node:assert/strict";
 import * as ops from "../../src/core/timelineOps.js";
 import { newTimeline, mainTrack } from "../../src/core/model.js";
@@ -119,4 +122,12 @@ test("the run is planned in stages; cached audio work costs nothing; every langu
   for (const l of DUB_LANGUAGES) assert.ok(has(`dub.l.${l}`), l);
   for (const s of fresh.stages) assert.ok(has(`dub.stage.${s.key}`), s.key);
   for (const k of ["err.dubNotReady", "err.dubNotArabic", "err.dubFailed", "err.dubTranslator", "err.dubNone", "err.dubNoClip", "err.dubOneVideo", "err.dubBusy", "dub.heard", "dub.thin"]) assert.ok(has(k), k);
+});
+
+test("who says each word: quick replies between a man and a woman, two men, one person split in two (the dub runtime's Python)", async (t) => {
+  const py = path.join(process.cwd(), "runtime", "dub", process.platform === "win32" ? "Scripts/python.exe" : "bin/python");
+  if (!fs.existsSync(py)) return t.skip("dub runtime not set up");
+  const r = spawnSync(py, ["-X", "utf8", path.join("tests", "python", "test_dub_speakers.py")], { encoding: "utf8", timeout: 120_000 });
+  assert.equal(r.status, 0, (r.stdout || "") + (r.stderr || "").slice(-1500));
+  assert.equal((r.stdout.match(/^ok /gm) || []).length, 3);
 });

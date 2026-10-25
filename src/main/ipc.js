@@ -13,7 +13,7 @@ import { uid } from "../core/util.js";
 import { CAPTION_TEMPLATES } from "../core/captionTemplates.js";
 import { OPERATION_INDEX } from "../agent/operations.js";
 import { autoEdit, directorEstimate } from "../agent/director.js";
-import { dubEstimate, dubDetect, dubTimeline, redubLines, removeDubbing, dubSetLanguage, dubOnTimeline } from "../agent/dub.js";
+import { dubEstimate, dubDetect, dubTimeline, redubLines, removeDubbing, dubSetLanguage, dubOnTimeline, dubSpeakerSample } from "../agent/dub.js";
 import { applyCaptions, restyleCaptions, transact } from "../agent/captions.js";
 
 const str = (v, field) => { if (typeof v !== "string") throw new AppError("VALIDATION", "err.string", { field }); return v; };
@@ -202,6 +202,7 @@ export function registerIpc({ getServices, getAgents = () => null, getWindow, ap
     "dub.remove": (tid, o) => removeDubbing(A().userContext(), id(tid), obj(o)),
     "dub.setLanguage": (tid, o) => dubSetLanguage(A().userContext(), id(tid), obj(o)),
     "dub.languages": (tid, o) => dubOnTimeline(A().userContext(), id(tid), obj(o)),
+    "dub.speakerSample": (tid, o) => dubSpeakerSample(A().userContext(), id(tid), obj(o)),
     // A motion graphic through the same operation as agents (person-aware templates get the head's track).
     "graphics.add": async (tid, o) => { const q = obj(o); return OPERATION_INDEX.get("timeline_add_graphic").run(A().userContext(), { timelineId: id(tid), template: str(q.template, "template"), params: q.params ? obj(q.params) : {}, atUs: Math.max(0, Number(q.atUs) || 0), durationUs: q.durationUs ? Number(q.durationUs) : undefined, inline: true }); },
     "captions.restyle": (tid, o) => restyleCaptions(A().userContext(), id(tid), obj(o)),

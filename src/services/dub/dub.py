@@ -137,12 +137,13 @@ def classify_speakers(a16, spans_by_speaker, models_dir, dev):
     return out
 
 
-def reference_clip(a_full, sr, spans, out_path, target=10.0):
-    """A clean voice sample: the speaker's longest steady stretches, 6–12 s, joined with short gaps."""
+def reference_clip(a_full, sr, spans, out_path, target=10.0, ordered=False):
+    """A clean voice sample: the speaker's longest steady stretches (or `spans` in the order given), 6–12 s, joined with
+    short gaps."""
     import numpy as np
     import soundfile as sf
     parts, total = [], 0.0
-    for t0, t1 in sorted(spans, key=lambda x: -(x[1] - x[0])):
+    for t0, t1 in (spans if ordered else sorted(spans, key=lambda x: -(x[1] - x[0]))):
         if t1 - t0 < 1.2:
             continue
         seg = a_full[int(t0 * sr):int(t1 * sr)]
@@ -161,94 +162,269 @@ def reference_clip(a_full, sr, spans, out_path, target=10.0):
     return out_path
 
 
-SAME_VOICE = 0.55  # TitaNet cosine between two speakers' samples: one person measured 0.61-0.91, two people 0.29
+class VoicePrints:
+    """Voice print (TitaNet, unit vector) and how female a stretch of speech sounds (ECAPA gender classifier), for
+    stretches of a 16 kHz recording."""
+
+    def __init__(self, a16, models_dir, dev):
+        import sherpa_onnx
+        import torch
+        self.a16, self.dev, self.torch = a16, dev, torch
+        self.ex = sherpa_onnx.SpeakerEmbeddingExtractor(sherpa_onnx.SpeakerEmbeddingExtractorConfig(model=os.path.join(models_dir, "nemo_en_titanet_large.onnx"), num_threads=8))
+        self.gender = None
+        try:
+            sys.path.insert(0, HERE)
+            from ecapa_gender import ECAPA_gender
+            self.gender = ECAPA_gender.from_pretrained("JaesungHuh/voice-gender-classifier", cache_dir=os.path.join(models_dir, "hf")).to(dev).eval()
+        except Exception as e:  # noqa: BLE001
+            print("gender model unavailable:", e, file=sys.stderr)
+
+    def clip(self, t0, t1):
+        return self.a16[int(t0 * 16000):int(t1 * 16000)]
+
+    def embed(self, t0, t1):
+        import numpy as np
+        st = self.ex.create_stream()
+        st.accept_waveform(16000, self.clip(t0, t1))
+        st.input_finished()
+        e = np.array(self.ex.compute(st))
+        return e / (np.linalg.norm(e) + 1e-9)
+
+    def female(self, t0, t1):
+        if self.gender is None:
+            return None
+        with self.torch.no_grad():
+            x = self.torch.from_numpy(self.clip(t0, t1)[: 16000 * 20]).unsqueeze(0).to(self.dev)
+            return float(self.torch.softmax(self.gender(x), 1)[0, 1])
 
 
-def voice_print(path, models):
+PIECE_GAP = 0.3     # a pause this long starts a new piece of speech
+SURE = 0.8          # a piece at least this long gets a voice print; 1.2 s+ pieces define a speaker's voice
+SAME_PERSON = 0.6   # two speakers' voices (mean of their long pieces) this close, and the same gender, are one person
+SMALL = 3.0         # a "speaker" with less speech than this is checked piece by piece against the others
+
+
+def assign_speakers(words, turns, vp):
+    """Who says each word, checked by voice. The diarization is the start; then every piece of speech (a run of one
+    speaker's words without a pause) is given to the speaker whose voice it is closest to — a woman's piece never
+    stays with a man's voice or the other way round — speakers that are one person are joined, and a "speaker" of a few
+    seconds is split among the real ones when its pieces sound like them. Returns {speaker: [pieces]}; each piece
+    {t0, t1, words: [indices], emb, pf}."""
     import numpy as np
-    import sherpa_onnx
-    ex = sherpa_onnx.SpeakerEmbeddingExtractor(sherpa_onnx.SpeakerEmbeddingExtractorConfig(model=os.path.join(models, "nemo_en_titanet_large.onnx"), num_threads=4))
-    st = ex.create_stream()
-    st.accept_waveform(16000, load_mono(path, 16000))
-    st.input_finished()
-    e = np.array(ex.compute(st))
-    return e / (np.linalg.norm(e) + 1e-9)
+    for w in words:
+        w["spk"] = speaker_of(w["start"], w["end"], turns)
+    pieces = []
+    for i, w in enumerate(words):
+        p = pieces[-1] if pieces else None
+        if p and p["spk"] == w["spk"] and w["start"] - p["t1"] < PIECE_GAP:
+            p["t1"], p["words"] = w["end"], p["words"] + [i]
+        else:
+            pieces.append({"spk": w["spk"], "t0": w["start"], "t1": w["end"], "words": [i]})
+    for p in pieces:
+        d = p["t1"] - p["t0"]
+        p["emb"] = vp.embed(p["t0"], p["t1"]) if d >= SURE else None
+        p["pf"] = vp.female(p["t0"], p["t1"]) if d >= SURE else None
+
+    def voices():
+        """Each speaker's voice: the mean print and the median femaleness of its long pieces (all printed ones when it
+        has no long piece)."""
+        out = {}
+        for s in {p["spk"] for p in pieces}:
+            mine = [p for p in pieces if p["spk"] == s and p["emb"] is not None]
+            core = [p for p in mine if p["t1"] - p["t0"] >= 1.2] or mine
+            if not core:
+                continue
+            c = np.mean([p["emb"] * (p["t1"] - p["t0"]) for p in core], axis=0)
+            pfs = [p["pf"] for p in core if p["pf"] is not None]
+            out[s] = {"c": c / (np.linalg.norm(c) + 1e-9), "pf": float(np.median(pfs)) if pfs else None,
+                      "speech": sum(p["t1"] - p["t0"] for p in pieces if p["spk"] == s)}
+        return out
+
+    def clash(pf, v):
+        """A piece clearly of the other gender than a speaker."""
+        return pf is not None and v["pf"] is not None and abs(pf - v["pf"]) > 0.6
+
+    def score(p, v):
+        return float(p["emb"] @ v["c"]) - (0.5 if clash(p["pf"], v) else 0.0)
+
+    for _ in range(3):
+        V = voices()
+        # Speakers that are one person (close voices, same gender) become one; the one who speaks more keeps the name.
+        for a in sorted(V, key=lambda s: V[s]["speech"]):
+            for b in sorted(V, key=lambda s: -V[s]["speech"]):
+                if a == b or a not in V or b not in V or V[b]["speech"] < V[a]["speech"]:
+                    continue
+                same_gender = V[a]["pf"] is None or V[b]["pf"] is None or abs(V[a]["pf"] - V[b]["pf"]) < 0.5
+                if same_gender and float(V[a]["c"] @ V[b]["c"]) >= SAME_PERSON:
+                    print(f"speaker {a} is {b} (voice {float(V[a]['c'] @ V[b]['c']):.2f})", file=sys.stderr)
+                    for p in pieces:
+                        if p["spk"] == a:
+                            p["spk"] = b
+                    V.pop(a)
+                    break
+        V = voices()
+        moved = 0
+        for p in pieces:
+            if p["emb"] is None or p["spk"] not in V:
+                continue
+            best = max(V, key=lambda s: score(p, V[s]))
+            here = score(p, V[p["spk"]])
+            small = V[p["spk"]]["speech"] < SMALL
+            if best != p["spk"] and (clash(p["pf"], V[p["spk"]]) or score(p, V[best]) - here > (0.0 if small else 0.08)) and score(p, V[best]) > 0.25:
+                p["spk"] = best
+                moved += 1
+        if not moved:
+            break
+        print(f"{moved} pieces moved to the speaker whose voice they are", file=sys.stderr)
+    # A short piece with no print of its own, clearly of the other gender than its speaker (heard on its own), goes to
+    # the nearest speaker of its gender in time.
+    V = voices()
+    for p in pieces:
+        if p["emb"] is None and p["t1"] - p["t0"] >= 0.45 and p["spk"] in V:
+            pf = vp.female(p["t0"], p["t1"])
+            if clash(pf, V[p["spk"]]):
+                other = [s for s in V if not clash(pf, V[s])]
+                if other:
+                    p["spk"] = min(other, key=lambda s: min(abs(q["t0"] - p["t0"]) for q in pieces if q["spk"] == s))
+    for p in pieces:
+        for i in p["words"]:
+            words[i]["spk"] = p["spk"]
+    by = {}
+    for p in pieces:
+        by.setdefault(p["spk"], []).append(p)
+    V = voices()
+    # The pitch of the words of long pieces first (enough to see whether two speakers' voices are far apart).
+    sample = [i for ps in by.values() for p in ps if p["t1"] - p["t0"] >= 1.2 for i in p["words"]]
+    for i in sample:
+        words[i]["lf0"] = word_pitch(vp.a16, words[i])
+    if by_pitch(words, vp.a16, by, V):
+        pieces = []
+        for i, w in enumerate(words):
+            p = pieces[-1] if pieces else None
+            if p and p["spk"] == w["spk"] and w["start"] - p["t1"] < PIECE_GAP:
+                p["t1"], p["words"] = w["end"], p["words"] + [i]
+            else:
+                pieces.append({"spk": w["spk"], "t0": w["start"], "t1": w["end"], "words": [i]})
+        for p in pieces:
+            d = p["t1"] - p["t0"]
+            p["emb"] = vp.embed(p["t0"], p["t1"]) if d >= SURE else None
+            p["pf"] = vp.female(p["t0"], p["t1"]) if d >= SURE else None
+        by = {}
+        for p in pieces:
+            by.setdefault(p["spk"], []).append(p)
+        V = voices()
+    for w in words:
+        w.pop("lf0", None)
+    return by, V
 
 
-def same_voice(refs, profiles, models):
-    """{speaker: the speaker it is the same person as} — pairs of the same kind whose voices match, the one who
-    speaks less joining the one who speaks more, the closest pair first."""
-    import itertools
-    prints = {k: voice_print(r, models) for k, r in refs.items() if r}
-    pairs = sorted(((float(prints[x] @ prints[y]), x, y) for x, y in itertools.combinations(prints, 2)), reverse=True)
-    into = {}
-    root = lambda k: root(into[k]) if k in into else k  # noqa: E731
-    for sim, x, y in pairs:
-        x, y = root(x), root(y)
-        if sim < SAME_VOICE or x == y or profiles[x]["kind"] != profiles[y]["kind"]:
-            continue
-        small, big = (x, y) if profiles[x]["speech"] < profiles[y]["speech"] else (y, x)
-        into[small] = big
-        print(f"speaker {small} is {big} (voice match {sim:.2f})", file=sys.stderr)
-    return {k: root(k) for k in into}
+def word_pitch(a16, w):
+    """The median pitch of one word (log Hz), or None when it is hardly voiced."""
+    import numpy as np
+    import librosa
+    seg = a16[int(w["start"] * 16000):int(w["end"] * 16000)]
+    if len(seg) < 1200:
+        return None
+    f0, vf, _ = librosa.pyin(seg, fmin=70, fmax=500, sr=16000, frame_length=1024)
+    v = f0[vf & ~np.isnan(f0)]
+    return float(np.log(np.median(v))) if len(v) >= 3 else None
+
+
+APART = 0.405   # two speakers whose usual pitch differs by 1.5× or more (a man and a woman, an adult and a child)
+
+
+def by_pitch(words, a16, by, V):
+    """In a conversation between voices of clearly different pitch (a man and a woman, an adult and a child) the
+    diarization often puts a quick reply in the other person's turn, or makes a "speaker" of a stretch where both talk.
+    Here each word goes to the speaker whose usual pitch it has, the neighbouring words weighing in (a change of speaker
+    costs more without a pause between the words; the diarization's own choice counts a little). A small "speaker" whose
+    pitch lies between two others' is such a mix: its words go to them. Nothing changes when no two speakers' pitches
+    are that far apart (people of the same voice type are told apart by the voice prints only)."""
+    import numpy as np
+    total = sum(v["speech"] for v in V.values()) or 1.0
+    model = {}
+    for spk, ps in by.items():
+        sure = [p for p in ps if p["emb"] is not None and spk in V and float(p["emb"] @ V[spk]["c"]) >= 0.6] or ps
+        vals = [x for p in sure for i in p["words"] if (x := words[i].get("lf0")) is not None] if any("lf0" in words[i] for p in sure for i in p["words"]) else []
+        model[spk] = vals
+    if not any(abs(np.median(model[a] or [0]) - np.median(model[b] or [9])) > APART for a in model for b in model if a != b and len(model[a]) >= 8 and len(model[b]) >= 8):
+        return False
+    for w in words:
+        if "lf0" not in w:
+            w["lf0"] = word_pitch(a16, w)
+    stats = {}
+    for spk, ps in by.items():
+        sure = [p for p in ps if p["emb"] is not None and spk in V and float(p["emb"] @ V[spk]["c"]) >= 0.6] or ps
+        vals = np.array([words[i]["lf0"] for p in sure for i in p["words"] if words[i]["lf0"] is not None])
+        if len(vals) >= 8:
+            med = float(np.median(vals))
+            stats[spk] = (med, max(0.18, float(np.median(np.abs(vals - med))) * 1.4826), V.get(spk, {}).get("speech", 0))
+    states = dict(stats)
+    for c, (mc, _, sc) in stats.items():
+        lo = [m for k, (m, _, _) in stats.items() if k != c and m < mc - 0.2]
+        hi = [m for k, (m, _, _) in stats.items() if k != c and m > mc + 0.2]
+        if sc < 0.25 * total and lo and hi and max(hi) - min(lo) > 2 * APART:
+            print(f"speaker {c} is a mix of two voices (pitch between theirs): its words go to them", file=sys.stderr)
+            states.pop(c)
+    if len(states) < 2:
+        return False
+    keys = list(states)
+    n = len(words)
+    score = np.full((n, len(keys)), -1e9)
+    back = np.zeros((n, len(keys)), dtype=int)
+
+    def emit(i, k):
+        m, sd, _ = states[keys[k]]
+        x = words[i]["lf0"]
+        e = -0.5 * ((x - m) / sd) ** 2 - np.log(sd) if x is not None else 0.0
+        return e + (1.0 if words[i]["spk"] == keys[k] else 0.0)
+
+    for k in range(len(keys)):
+        score[0, k] = emit(0, k)
+    for i in range(1, n):
+        gap = words[i]["start"] - words[i - 1]["end"]
+        switch = 2.5 if gap < 0.15 else 1.5 if gap < 0.4 else 0.5
+        for k in range(len(keys)):
+            prev = score[i - 1] - np.array([0.0 if j == k else switch for j in range(len(keys))])
+            back[i, k] = int(np.argmax(prev))
+            score[i, k] = prev[back[i, k]] + emit(i, k)
+    path = [int(np.argmax(score[-1]))]
+    for i in range(n - 1, 0, -1):
+        path.append(back[i, path[-1]])
+    path.reverse()
+    changed = sum(1 for i, k in enumerate(path) if words[i]["spk"] != keys[k])
+    for i, k in enumerate(path):
+        words[i]["spk"] = keys[k]
+    print(f"{changed} words given to the speaker whose pitch they have", file=sys.stderr)
+    return changed > 0
+
+
+def clean_spans(pieces, voice, cut=0.6):
+    """A speaker's stretches whose voice is surely theirs (print close to the speaker's), longest first — for the voice
+    sample the dub copies. Pieces without a print come last."""
+    sure = [p for p in pieces if p["emb"] is not None and float(p["emb"] @ voice["c"]) >= cut]
+    rest = [p for p in pieces if p not in sure]
+    return [(p["t0"], p["t1"]) for p in sorted(sure, key=lambda p: -(p["t1"] - p["t0"]))] + [(p["t0"], p["t1"]) for p in sorted(rest, key=lambda p: -(p["t1"] - p["t0"]))]
 
 
 def cmd_analyze(a):
-    import numpy as np
     import torch
     dev = "cuda" if torch.cuda.is_available() and a.device != "cpu" else "cpu"
     progress(0.02, "speakers")
     words = [w for s in jload(a.words)["segments"] for w in s["words"]] if a.words.endswith(".json") else []
     a16 = load_mono(a.vocals, 16000)
     turns = diarize(a16, a.models)
-    progress(0.6, "speakers")
-    for w in words:
-        w["spk"] = speaker_of(w["start"], w["end"], turns)
-    # A run of under 1 s inside another speaker's talk (the same speaker before and after) is a diarization slip.
-    runs, k = [], 0
-    while k < len(words):
-        m = k
-        while m + 1 < len(words) and words[m + 1]["spk"] == words[k]["spk"]:
-            m += 1
-        runs.append((k, m))
-        k = m + 1
-    for r in range(1, len(runs) - 1):
-        a0, a1 = runs[r]
-        if words[a1]["end"] - words[a0]["start"] < 1.0 and words[runs[r - 1][0]]["spk"] == words[runs[r + 1][0]]["spk"]:
-            for k in range(a0, a1 + 1):
-                words[k]["spk"] = words[runs[r - 1][0]]["spk"]
-    # Each speaker's stretches of speech: runs of their words (gaps < 0.6 s), clipped to the diarization.
-    spans_by = {}
-    run = None
-    for w in words:
-        if run and run[2] == w["spk"] and w["start"] - run[1] < 0.6:
-            run[1] = w["end"]
-        else:
-            if run:
-                spans_by.setdefault(run[2], []).append((run[0], run[1]))
-            run = [w["start"], w["end"], w["spk"]]
-    if run:
-        spans_by.setdefault(run[2], []).append((run[0], run[1]))
+    progress(0.5, "speakers")
+    vp = VoicePrints(a16, a.models, dev)
+    by, V = assign_speakers(words, turns, vp)
+    progress(0.7, "speakers")
+    spans_by = {s: [(p["t0"], p["t1"]) for p in ps] for s, ps in by.items()}
     profiles = classify_speakers(a16, spans_by, a.models, dev)
     progress(0.85, "speakers")
     a24 = load_mono(a.vocals, 24000)
-    refs = {}
-    for spk, spans in spans_by.items():
-        refs[spk] = reference_clip(a24, 24000, spans, os.path.join(a.out, f"ref_S{spk}.wav"))
-    # One person split in two clusters (a change of tone, of distance to the microphone) is one speaker again.
-    joined = same_voice(refs, profiles, a.models)
-    if joined:
-        for w in words:
-            w["spk"] = joined.get(w["spk"], w["spk"])
-        for small, big in joined.items():
-            spans_by.setdefault(big, []).extend(spans_by.pop(small, []))
-            profiles[big]["speech"] = round(profiles[big]["speech"] + profiles.pop(small)["speech"], 2)
-            if refs.get(small):
-                os.remove(refs.pop(small))
-        for big in set(joined.values()):
-            refs[big] = reference_clip(a24, 24000, spans_by[big], os.path.join(a.out, f"ref_S{big}.wav"))
-    # Speakers who say almost nothing (a stray cluster) are merged into the nearest real speaker by time.
-    main = {s for s, p in profiles.items() if p["speech"] >= 2.0} or set(profiles)
+    refs = {s: reference_clip(a24, 24000, clean_spans(by[s], V[s]) if s in V else spans_by[s], os.path.join(a.out, f"ref_S{s}.wav"), ordered=s in V) for s in by}
+    # A "speaker" with almost nothing said and no voice of its own goes to the nearest speaker in time.
+    main = {s for s, p in profiles.items() if p["speech"] >= 1.0 and refs.get(s)} or set(profiles)
     for w in words:
         if w["spk"] not in main:
             w["spk"] = min(main, key=lambda s: min(abs(t0 - w["start"]) for t0, _ in spans_by[s]))
@@ -313,8 +489,8 @@ def fallback_lines(words, i0, i1):
 
 def repair_lines(got, words, i0, i1):
     """The model's lines made usable instead of thrown away: gaps and overlaps filled by rule, a line split at any pause
-    of 1.5 s or more and at a real change of speaker; a speaker label on less than 1.2 s of a line is taken as a
-    diarization slip at a turn's edge and corrected. Returns (lines, repairs)."""
+    of 1.5 s or more and at every change of speaker (who says each word was checked by voice: a short reply is a real
+    turn, said in its own voice). Returns (lines, repairs)."""
     out, pos, fixes = [], i0, 0
     for l in sorted([x for x in got if isinstance(x.get("from"), int) and isinstance(x.get("to"), int)], key=lambda x: x["from"]):
         f, t = max(l["from"], pos), min(l["to"], i1)
@@ -330,14 +506,6 @@ def repair_lines(got, words, i0, i1):
     final = []
     for l in out:
         idx = list(range(l["from"], l["to"] + 1))
-        dur = {}
-        for k in idx:
-            dur[words[k]["spk"]] = dur.get(words[k]["spk"], 0) + words[k]["end"] - words[k]["start"]
-        major = max(dur, key=dur.get)
-        if len(dur) > 1 and sum(v for s, v in dur.items() if s != major) < 1.2:
-            for k in idx:
-                words[k]["spk"] = major
-            fixes += 1
         cuts = [k for k in idx[1:] if words[k]["spk"] != words[k - 1]["spk"] or words[k]["start"] - words[k - 1]["end"] >= 1.5]
         if not cuts:
             final.append(l)
@@ -396,7 +564,7 @@ def cmd_translate(a):
         i = j + 1
         progress(0.1 + 0.4 * i / len(words), "translate")
     # A fragment under 0.7 s joins the line before it when the same speaker says it right after (< 0.5 s), else the
-    # line after it when that follows right away (< 0.5 s) — a word cut off at a turn's edge belongs to its sentence.
+    # line after it when the same speaker goes on right away (< 0.5 s); a short reply of another speaker stays its own.
     merged = []
     for l in lines:
         ws = words[l["from"]:l["to"] + 1]
@@ -410,9 +578,7 @@ def cmd_translate(a):
         l = merged[k]
         ws = words[l["from"]:l["to"] + 1]
         nx = merged[k + 1] if k + 1 < len(merged) else None
-        if nx and ws[-1]["end"] - ws[0]["start"] < 0.7 and words[nx["from"]]["start"] - ws[-1]["end"] < 0.5:
-            for i in range(l["from"], l["to"] + 1):
-                words[i]["spk"] = words[nx["from"]]["spk"]
+        if nx and ws[-1]["end"] - ws[0]["start"] < 0.7 and words[nx["from"]]["start"] - ws[-1]["end"] < 0.5 and words[nx["from"]]["spk"] == ws[0]["spk"]:
             nx["from"], nx["ar"] = l["from"], f"{l['ar']} {nx['ar']}"
         else:
             lines.append(l)
