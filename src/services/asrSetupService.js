@@ -38,14 +38,14 @@ export function cpuRequirements(text) {
   return text.split(/\r?\n/).map((l) => l.replace(/^(torch|torchaudio|torchvision)==([^+\s]+)\+cu\d+\s*$/, "$1==$2")).join("\n");
 }
 
-function sha256File(file) {
+export function sha256File(file) {
   return new Promise((resolve, reject) => {
     const h = crypto.createHash("sha256");
     fs.createReadStream(file).on("data", (d) => h.update(d)).on("error", reject).on("end", () => resolve(h.digest("hex")));
   });
 }
 
-function runProc(cmd, args, { signal, onLine } = {}) {
+export function runProc(cmd, args, { signal, onLine } = {}) {
   return new Promise((resolve, reject) => {
     const child = spawn(cmd, args, { windowsHide: true, env: { ...process.env, PYTHONUTF8: "1", PIP_DISABLE_PIP_VERSION_CHECK: "1" } });
     let tail = "", buf = "";

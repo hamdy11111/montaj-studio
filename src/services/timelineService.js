@@ -221,6 +221,11 @@ export class TimelineService {
       }
       case "pasteSegments": return this.commit(timelineId, "paste", (tl) => ops.pasteSegments(tl, a.clips, a.atUs, o));
       case "pasteAttributes": return this.commit(timelineId, "pasteAttributes", (tl) => ops.pasteAttributes(tl, a.ids, a.attrs));
+      case "applyDub": {
+        const layers = (a.layers || []).map((l) => ({ media: this.repos.media.get(l.mediaId), name: String(l.name || "").slice(0, 60), volumeDb: l.volumeDb === undefined ? 0 : validateNumber(l.volumeDb, { field: "volumeDb", min: -60, max: 20 }) }));
+        return this.commit(timelineId, "dub", (tl) => ops.applyDub(tl, a.mediaId, layers));
+      }
+      case "removeDub": return this.commit(timelineId, "dub", (tl) => ops.removeDub(tl, a.mediaId));
       case "setBehindPerson": return this.commit(timelineId, a.value === false ? "frontOfPerson" : "behindPerson", (tl) => ops.setBehindPerson(tl, a.ids || [], a.value !== false));
       case "group": return this.commit(timelineId, "group", (tl) => ops.group(tl, a.ids));
       case "ungroup": return this.commit(timelineId, "ungroup", (tl) => ops.ungroup(tl, a.ids));

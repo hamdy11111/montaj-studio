@@ -146,6 +146,42 @@ export function addMediaSegment(tl, media, { atUs = null, toMain = true, setting
  * track, under every other track; the cutout of the person is drawn over them at render time (core/cutout.js).
  * Returns the ids moved.
  */
+/** The role of a dub track: "dub:<the dubbed media id>" (the track names which media it dubs; no schema change). */
+export const dubRole = (mediaId) => `dub:${mediaId}`;
+
+/**
+ * Put a dub on the timeline: every clip of `sourceMediaId` keeps its picture but its own sound is turned off
+ * (audioDetached), and each layer (the dubbed voice, the background without the original speech — media of the same
+ * length and timing) gets its own audio track whose clips mirror those clips exactly (start, length, source span,
+ * speed), so cuts already made stay in sync. A previous dub of that media is replaced. Returns the new track ids.
+ */
+export function applyDub(tl, sourceMediaId, layers) {
+  const clips = tl.tracks.flatMap((t) => t.segments.filter((s) => s.mediaId === sourceMediaId && (s.kind === "video" || s.kind === "compound")));
+  if (!clips.length) throw new AppError("VALIDATION", "err.dubNoClip");
+  tl.tracks = tl.tracks.filter((t) => t.role !== dubRole(sourceMediaId));
+  for (const c of clips) c.audioDetached = true;
+  const ids = [];
+  for (const [k, layer] of layers.entries()) {
+    const track = newTrack("audio", { order: tl.tracks.length + k, name: layer.name || "", role: dubRole(sourceMediaId) });
+    for (const c of clips) {
+      track.segments.push(newSegment("audio", {
+        mediaId: layer.media.id, name: layer.name || layer.media.name, start: c.start, duration: c.duration, sourceStart: c.sourceStart,
+        sourceDuration: layer.media.durationUs, speed: c.speed, speedMode: c.speedMode, curve: deepClone(c.curve), changePitch: c.changePitch,
+        volumeDb: layer.volumeDb ?? 0,
+      }));
+    }
+    tl.tracks.push(track);
+    ids.push(track.id);
+  }
+  return ids;
+}
+
+/** Undo a dub of `sourceMediaId`: its tracks go, the clips' own sound comes back. */
+export function removeDub(tl, sourceMediaId) {
+  tl.tracks = tl.tracks.filter((t) => t.role !== dubRole(sourceMediaId));
+  for (const t of tl.tracks) for (const s of t.segments) if (s.mediaId === sourceMediaId && s.kind !== "audio") s.audioDetached = false;
+}
+
 export function setBehindPerson(tl, ids, behind = true) {
   const main = mainTrack(tl);
   const moved = [];

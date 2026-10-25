@@ -13,6 +13,8 @@ import { CaptionService } from "./captionService.js";
 import { AsrSetupService } from "./asrSetupService.js";
 import { MatteService } from "./matteService.js";
 import { StabilizeService } from "./stabilizeService.js";
+import { DubService } from "./dubService.js";
+import { DubSetupService } from "./dubSetupService.js";
 import { BackupService } from "./backupService.js";
 import { PackageService } from "./packageService.js";
 import { setBinaries } from "./ffmpeg.js";
@@ -40,6 +42,8 @@ export async function createServices({ root, appVersion = "1.0.0", notify = () =
   const asrSetup = new AsrSetupService({ paths, notify, log });
   const mattes = new MatteService({ repos, paths, settings, log, notify });
   const stabilizer = new StabilizeService({ repos, paths, log, notify });
+  const dubber = new DubService({ repos, paths, notify, log });
+  const dubSetup = new DubSetupService({ paths, notify, log });
   exporter.mattes = mattes;
   exporter.stabilizer = stabilizer;
   exporter.captions = captions;
@@ -50,5 +54,5 @@ export async function createServices({ root, appVersion = "1.0.0", notify = () =
   const packages = new PackageService({ repos, paths, media });
   const purged = projects.purgeExpired();
   if (settings.get("draft").autoBackup) { try { backup.autoBackup(); } catch (e) { log("auto backup failed", e.message); } }
-  return { paths, repos, settings, media, analysis, timelines, exporter, projects, tts, captions, asrSetup, mattes, stabilizer, backup, packages, startup: { purged } };
+  return { paths, repos, settings, media, analysis, timelines, exporter, projects, tts, captions, asrSetup, mattes, stabilizer, dubber, dubSetup, backup, packages, startup: { purged } };
 }

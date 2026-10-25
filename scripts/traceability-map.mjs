@@ -69,7 +69,7 @@ export const MAP = {
   "FEAT-058": { s: "done", f: [INS, LM, PL, EG], t: [U.core, U.exp] },
   "FEAT-059": { s: "done", f: [INS, EG, S + "settingsService.js"], t: [U.exp], n: "FFmpeg loudnorm to the target from Settings › Edit (export)." },
   "FEAT-060": { s: "alt", f: [C + "presets.js", EG], t: [U.svc], n: "Enhance voice → local EQ/compressor chain (not AI)." },
-  "FEAT-061": { s: "provider", f: [], t: [], n: "Video translator needs cloud speech/translation/voice models." },
+  "FEAT-061": { s: "partial", f: [R + "editor/dub.js", "src/agent/dub.js", S + "dubService.js", S + "dubSetupService.js", S + "dub/dub.py", OPS], t: ["tests/unit/dub.test.js", "tests/e2e/dub.e2e.test.mjs", "tests/e2e/dubui.e2e.test.mjs"], n: "Dub (local): Arabic speech → English or 21 other languages, each speaker's cloned voice and feeling, timed to the original lines, music and sounds kept. Source language: Arabic only; no lip sync." },
   "FEAT-062": { s: "done", f: [C + "presets.js", EG], t: [U.exp], n: "FFmpeg afftdn." },
   "FEAT-063": { s: "alt", f: [C + "presets.js", INS, ED], t: [U.exp], n: "Remove/keep vocal via stereo phase/band filters (approximation, not source separation)." },
   "FEAT-064": { s: "no", f: [], t: [], n: "Fill channel is not implemented." },

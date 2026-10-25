@@ -8,8 +8,8 @@
 |---|---|
 | منفّذ محليًا (done) | 85 |
 | بديل محلي (alt) | 20 |
-| جزئي (partial) | 7 |
-| يتطلب مزوّدًا خارجيًا (provider) | 22 |
+| جزئي (partial) | 8 |
+| يتطلب مزوّدًا خارجيًا (provider) | 21 |
 | غير منطبق (na) | 9 |
 | غير منفّذ (no) | 5 |
 | **المجموع** | **148** |
@@ -80,7 +80,7 @@
 | FEAT-058 | مستوى الصوت والتلاشي / Volume / Fade in / Fade out | SCREEN-036, SCREEN-023 | منفّذ محليًا | `renderer/js/editor/inspector.js`<br>`core/layerMath.js`<br>`renderer/js/editor/player.js`<br>`core/exportGraph.js` | `core.test.js`<br>`export.test.js` |  |
 | FEAT-059 | توحيد الجهارة / Normalize loudness | SCREEN-036, SCREEN-005 | منفّذ محليًا | `renderer/js/editor/inspector.js`<br>`core/exportGraph.js`<br>`services/settingsService.js` | `export.test.js` | FFmpeg loudnorm to the target from Settings › Edit (export). |
 | FEAT-060 | تحسين الصوت / Enhance voice | SCREEN-036 | بديل محلي | `core/presets.js`<br>`core/exportGraph.js` | `services.test.js` | Enhance voice → local EQ/compressor chain (not AI). |
-| FEAT-061 | مترجم الفيديو / Video translator | SCREEN-036, SCREEN-034 | يتطلب مزوّدًا خارجيًا | — | — | Video translator needs cloud speech/translation/voice models. |
+| FEAT-061 | مترجم الفيديو / Video translator | SCREEN-036, SCREEN-034 | جزئي | `renderer/js/editor/dub.js`<br>`agent/dub.js`<br>`services/dubService.js`<br>`services/dubSetupService.js`<br>`services/dub/dub.py`<br>`core/timelineOps.js` | `dub.test.js`<br>`dub.e2e.test.mjs`<br>`dubui.e2e.test.mjs` | Dub (local): Arabic speech → English or 21 other languages, each speaker's cloned voice and feeling, timed to the original lines, music and sounds kept. Source language: Arabic only; no lip sync. |
 | FEAT-062 | تقليل الضوضاء / Reduce noise | SCREEN-036 | منفّذ محليًا | `core/presets.js`<br>`core/exportGraph.js` | `export.test.js` | FFmpeg afftdn. |
 | FEAT-063 | عزل الصوت / Isolate voice | SCREEN-036, SCREEN-043 | بديل محلي | `core/presets.js`<br>`renderer/js/editor/inspector.js`<br>`renderer/js/editor/editor.js` | `export.test.js` | Remove/keep vocal via stereo phase/band filters (approximation, not source separation). |
 | FEAT-064 | ملء القناة / Fill channel | SCREEN-036 | غير منفّذ | — | — | Fill channel is not implemented. |

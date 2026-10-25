@@ -7,3 +7,5 @@ tests/e2e/artifacts/
 src/services/asr/models/*.nemo
 # The speech engine's Python runtime (torch + NeMo, several GB), created by scripts/setup-asr.ps1
 runtime/
+__pycache__/
+*.pyc

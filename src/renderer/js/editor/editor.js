@@ -23,6 +23,7 @@ import { openExport, overlaysFor } from "./exportDialog.js";
 import { record } from "./recorder.js";
 import { openPilot } from "./pilot.js";
 import { openDirector } from "./director.js";
+import { openDub } from "./dub.js";
 import { openSkills } from "./skills.js";
 import { openSettings } from "../dialogs/settings.js";
 import { openShortcuts } from "../dialogs/shortcuts.js";
@@ -104,6 +105,7 @@ export async function openEditor(root, params) {
     h("button", { class: "btn ghost", onclick: (e) => mainMenu(e.currentTarget) }, icon("logo"), t("ed.menu"), icon("chevronDown")),
     savedEl, tlSel, h("div", { class: "grow" }),
     h("button", { class: "btn primary", title: t("dir.title"), onclick: () => openDirector(ed) }, icon("wand"), t("dir.title")),
+    h("button", { class: "btn ghost", title: t("dub.title"), onclick: () => openDub(ed) }, icon("mic"), t("dub.title")),
     h("button", { class: "btn ghost", title: t("ai.title"), onclick: () => openPilot(ed) }, icon("sparkle"), t("ai.title")),
     h("button", { class: "btn ghost", title: t("sk.title"), onclick: () => openSkills(ed) }, icon("layers"), t("sk.title")),
     h("button", { class: "icon-btn", title: t("ed.layout"), "aria-label": t("ed.layout"), onclick: (e) => layoutMenu(e.currentTarget) }, icon("layout")),

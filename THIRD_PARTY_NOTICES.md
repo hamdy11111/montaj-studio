@@ -44,6 +44,28 @@ Settings › Providers › «Download and prepare» (or the prompt on first laun
 - NVIDIA NeMo (Apache 2.0), PyTorch (BSD-3-Clause) and their dependencies, pinned in
   `src/services/asr/requirements-nemo.txt`, installed from PyPI by pip.
 
+## Dubbing tools (downloaded on request, not in the installer)
+
+The Dub dialog's «Download and prepare» (`src/services/dubSetupService.js`) downloads into the app's data folder
+(`runtime/`), each from its own source, pinned and SHA-256 checked where the source publishes a fixed file:
+
+| Component | License | Source |
+|---|---|---|
+| Chatterbox TTS 0.1.7 and Chatterbox Multilingual (voice cloning, emotion control); its output carries Resemble AI's imperceptible Perth watermark | MIT | [resemble-ai/chatterbox](https://github.com/resemble-ai/chatterbox), weights [ResembleAI/chatterbox](https://huggingface.co/ResembleAI/chatterbox) |
+| Mel-Band RoFormer vocals model `vocals_mel_band_roformer.ckpt` (Kimberley Jensen) | MIT | [KimberleyJensen/Mel-Band-Roformer-Vocal-Model](https://github.com/KimberleyJensen/Mel-Band-Roformer-Vocal-Model), fetched by audio-separator |
+| audio-separator 0.39.1 | MIT | [nomadkaraoke/python-audio-separator](https://github.com/nomadkaraoke/python-audio-separator) |
+| sherpa-onnx 2.0.0 (speaker diarization) | Apache 2.0 | [k2-fsa/sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx) |
+| pyannote segmentation 3.0 (ONNX export) | MIT | [pyannote/segmentation-3.0](https://huggingface.co/pyannote/segmentation-3.0), via sherpa-onnx's releases |
+| NVIDIA NeMo TitaNet large speaker embeddings (ONNX export) | CC-BY-4.0 | [nvidia/speakerverification_en_titanet_large](https://huggingface.co/nvidia/speakerverification_en_titanet_large), via sherpa-onnx's releases |
+| Voice gender classifier (ECAPA-TDNN); `src/services/dub/ecapa_gender.py` is its model code, vendored | MIT | [JaesungHuh/voice-gender-classifier](https://huggingface.co/JaesungHuh/voice-gender-classifier) |
+| Adult/child voice classifier | Apache 2.0 | [bookbot/wav2vec2-xls-r-adult-child-cls](https://huggingface.co/bookbot/wav2vec2-xls-r-adult-child-cls) |
+| faster-whisper 1.2.1 and Whisper small / large-v3 (language check, hearing each dubbed line back) | MIT | [SYSTRAN/faster-whisper](https://github.com/SYSTRAN/faster-whisper) |
+| llama.cpp b11870 (`llama-server`, the local translator's runtime) | MIT | [ggml-org/llama.cpp](https://github.com/ggml-org/llama.cpp) |
+| Qwen3.5-35B-A3B, Q4_K_M GGUF (translation) | Apache 2.0 | [Qwen](https://huggingface.co/Qwen), GGUF by [unsloth/Qwen3.5-35B-A3B-GGUF](https://huggingface.co/unsloth/Qwen3.5-35B-A3B-GGUF) (pinned revision) |
+| PyTorch, transformers, librosa and the other pinned packages of `src/services/dub/requirements-dub.txt` and `requirements-sep.txt` | their own (BSD, Apache 2.0, MIT, ISC) | PyPI, PyTorch's wheel index |
+
+TitaNet (CC-BY-4.0): © NVIDIA, used unmodified as published by sherpa-onnx.
+
 ## Installed by the user, not bundled
 
 Local speech recognition and the person cut-out ("text behind the person") run with the user's own Python

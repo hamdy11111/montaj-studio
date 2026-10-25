@@ -19,6 +19,8 @@ import { subjectTrack, subjectReady } from "./subject.js";
 import { SFX } from "../core/sfx.js";
 import { addSfx } from "./sfx.js";
 import { autoEdit } from "./director.js";
+import { dubTimeline, removeDubbing } from "./dub.js";
+import { DUB_LANGUAGES } from "../services/dubService.js";
 import { DEFAULT_TEXT } from "../core/model.js";
 import { checkInputs } from "./skills/runtime.js";
 import { EDIT_PLAN_SCHEMA } from "../core/editPlan.js";
@@ -535,6 +537,23 @@ export const OPERATIONS = [
       if (!ctx.guard.hasScope("media")) throw new AppError("FORBIDDEN", "err.scopeMissing", { scope: "media", op: "edit_auto" });
       return asJob(ctx, "director", a.apply ? "auto edit" : "auto edit (plan)", (j) => autoEdit(ctx, a.timelineId, a, j), a.wait);
     },
+  },
+  {
+    name: "edit_dub", scope: "edit", title: "Dub an Arabic video",
+    description: "Dubs the Arabic speech of the timeline's video into another language on this computer: the speech is separated from the music and sounds (kept), written down (the Egyptian model), split by speaker (each one's kind — man, woman, child — and a sample of their voice), translated by a local LLM into lines that fit the time each sentence had (with its feeling: neutral, happy, excited, sad, angry, surprised, serious, warm, curious), then spoken in each speaker's own cloned voice with that feeling, every line heard back and re-taken when it was not said as meant, placed at its sentence's moment with no two voices at once. The new voice and the kept background become two audio tracks that follow the video's clips; the clip's own sound is turned off (edit_dub_remove turns it back on). Only Arabic videos (checked first). The result lists the speakers and every line (Arabic, the new words, feeling, speed, check = how closely it was heard back). Needs the media permission. Runs as a job.",
+    input: obj({ ...TIMELINE, mediaId: S.id("The video to dub (default: the one video on the main track)"), lang: S.enumOf(DUB_LANGUAGES, "Language to dub into (default en)"), context: S.str("What the video is about (helps names and terms)", 500), duckDb: { type: "number", minimum: 0, maximum: 20, description: "How much the background is lowered under the new voice (dB, default 6)" }, wait: WAIT }, ["timelineId"]),
+    timeline: (a) => a.timelineId,
+    run: (ctx, a) => {
+      if (!ctx.guard.hasScope("media")) throw new AppError("FORBIDDEN", "err.scopeMissing", { scope: "media", op: "edit_dub" });
+      return asJob(ctx, "dub", `dub (${a.lang || "en"})`, (j) => dubTimeline(ctx, a.timelineId, a, j), a.wait);
+    },
+  },
+  {
+    name: "edit_dub_remove", scope: "edit", title: "Remove a dub",
+    description: "Removes the dub tracks of the timeline's video and turns its own sound back on (one undo step).",
+    input: obj({ ...TIMELINE, mediaId: S.id("The dubbed video (default: the one video on the main track)") }, ["timelineId"]),
+    timeline: (a) => a.timelineId,
+    run: async (ctx, a) => { const r = await removeDubbing(ctx, a.timelineId, a); return { revision: r.revision }; },
   },
   {
     name: "edit_plan_schema", scope: "read", title: "Edit plan format",

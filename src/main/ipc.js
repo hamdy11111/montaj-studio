@@ -13,6 +13,7 @@ import { uid } from "../core/util.js";
 import { CAPTION_TEMPLATES } from "../core/captionTemplates.js";
 import { OPERATION_INDEX } from "../agent/operations.js";
 import { autoEdit, directorEstimate } from "../agent/director.js";
+import { dubEstimate, dubDetect, dubTimeline, redubLines, removeDubbing } from "../agent/dub.js";
 import { applyCaptions, restyleCaptions, transact } from "../agent/captions.js";
 
 const str = (v, field) => { if (typeof v !== "string") throw new AppError("VALIDATION", "err.string", { field }); return v; };
@@ -24,6 +25,16 @@ export function registerIpc({ getServices, getAgents = () => null, getWindow, ap
   const S = () => getServices();
   const A = () => { const a = getAgents(); if (!a) throw new AppError("VALIDATION", "err.agentsUnavailable"); return a; };
   const win = () => getWindow() || BrowserWindow.getFocusedWindow();
+  // One dub at a time (it uses the whole GPU); "dub.cancel" stops it.
+  let dubRun = null;
+  const dubOpts = (o) => { const q = obj(o); return { mediaId: q.mediaId ? id(q.mediaId, "mediaId") : undefined, lang: q.lang ? str(q.lang, "lang") : "en", context: q.context ? String(q.context).slice(0, 500) : "", duckDb: Number.isFinite(q.duckDb) ? Math.max(0, Math.min(20, q.duckDb)) : 6 }; };
+  async function dubJob(fn) {
+    if (dubRun) throw new AppError("CONFLICT", "err.dubBusy");
+    dubRun = new AbortController();
+    try {
+      return await fn({ signal: dubRun.signal, progress: (p, label) => notifyAll("dub:progress", { progress: p, label }) });
+    } finally { dubRun = null; }
+  }
 
   const methods = {
     // ---------------------------------------------------------------- app
@@ -174,6 +185,16 @@ export function registerIpc({ getServices, getAgents = () => null, getWindow, ap
     // Smart edit: the director plans and applies a whole edit (progress: "director:progress").
     "director.estimate": (tid, o) => directorEstimate(A().userContext(), id(tid), obj(o)),
     "director.run": async (tid, o) => { const q = obj(o); return autoEdit(A().userContext(), id(tid), { ...q, apply: true }, { progress: (p, label) => notifyAll("director:progress", { progress: p, label }) }); },
+    // Dubbing an Arabic video into another language, all on this computer (progress: "dub:progress"; one run at a time).
+    "dub.estimate": (tid, o) => dubEstimate(A().userContext(), id(tid), obj(o)),
+    "dub.detect": (tid, o) => dubDetect(A().userContext(), id(tid), obj(o)),
+    "dub.run": (tid, o) => dubJob((job) => dubTimeline(A().userContext(), id(tid), dubOpts(o), job)),
+    "dub.revoice": (tid, o) => dubJob((job) => redubLines(A().userContext(), id(tid), { ...dubOpts(o), edits: arr(obj(o).edits || [], "edits").map(obj) }, job)),
+    "dub.cancel": () => { dubRun?.abort(); return true; },
+    "dub.setupStatus": () => ({ ...S().dubSetup.status(), ready: S().dubber.status().ready }),
+    "dub.setupStart": async () => { await S().dubSetup.start(); return { ...S().dubSetup.status(), ready: S().dubber.status().ready }; },
+    "dub.setupCancel": () => S().dubSetup.cancel(),
+    "dub.remove": (tid, o) => removeDubbing(A().userContext(), id(tid), obj(o)),
     // A motion graphic through the same operation as agents (person-aware templates get the head's track).
     "graphics.add": async (tid, o) => { const q = obj(o); return OPERATION_INDEX.get("timeline_add_graphic").run(A().userContext(), { timelineId: id(tid), template: str(q.template, "template"), params: q.params ? obj(q.params) : {}, atUs: Math.max(0, Number(q.atUs) || 0), durationUs: q.durationUs ? Number(q.durationUs) : undefined, inline: true }); },
     "captions.restyle": (tid, o) => restyleCaptions(A().userContext(), id(tid), obj(o)),
