@@ -18,6 +18,9 @@ export function defaultSettings(paths) {
     providers: { whisperPath: "", whisperModel: "", whisperLanguage: "auto", asrEngine: "auto", pythonPath: "", fwModel: "large-v3-turbo" },
     export: { resolution: "1080p", bitrate: "recommended", codec: "h264", format: "mp4", fps: 30, audioFormat: "flac", gifResolution: "320p", captionsFormat: "srt", dir: paths.media },
     // Agent Control Server (local named pipe for MCP / external agents) — off until the user enables it.
+    // Music studio: where the music models are kept ("" = the app's data folder) and whether a model stays in memory
+    // after a generation (off: it is released so the GPU is free for editing).
+    music: { modelsDir: "", keepLoaded: false },
     agents: { enabled: false },
     ui: { lastShortcutPreset: 1, recentColors: [], presets: [] }, // presets: JSON strings {name, attrs} from "Save preset"
   };
@@ -42,6 +45,8 @@ const RULES = {
   "export.format": (v) => validateEnum(v, ["mp4", "mov"], "format"),
   "export.audioFormat": (v) => validateEnum(v, ["flac", "mp3", "wav", "aac"], "audioFormat"),
   "providers.whisperLanguage": (v) => String(v).slice(0, 12),
+  "music.modelsDir": (v) => String(v || "").slice(0, 500),
+  "music.keepLoaded": (v) => !!v,
   "providers.asrEngine": (v) => validateEnum(v, ["auto", "nemo", "whispercpp", "fasterwhisper"], "asrEngine"),
   "providers.pythonPath": (v) => String(v).slice(0, 500),
   "providers.fwModel": (v) => { if (!/^[A-Za-z0-9._/-]{1,120}$/.test(String(v))) throw new AppError("VALIDATION", "err.enum", { field: "fwModel" }); return String(v); },

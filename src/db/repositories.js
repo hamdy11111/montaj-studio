@@ -355,6 +355,7 @@ export class LibraryRepository {
       if (patch.name !== undefined) i.name = validateName(patch.name);
       if (patch.favorite !== undefined) i.favorite = !!patch.favorite;
       if (patch.category !== undefined) i.category = patch.category;
+      if (patch.meta !== undefined) i.meta = typeof patch.meta === "string" ? patch.meta : JSON.stringify(patch.meta);
       return true;
     });
   }

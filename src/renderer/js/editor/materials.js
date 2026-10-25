@@ -158,11 +158,23 @@ export class Materials {
     const ed = this.ed;
     const list = h("div", { class: "list" });
     this.body.append(h("div", { class: "mat-head" }, h("button", { class: "btn primary", onclick: async () => { const files = await call("dialog.openFiles", { kind: "audio", multi: true }); if (files.length && await guard(() => call("library.importFiles", "audio", files, "yours"))) this.draw(); } }, icon("upload"), t("lib.importAudio")),
-      h("button", { class: "btn", onclick: () => ed.run("voiceover") }, icon("mic"), t("ed.recordVoice"))), h("p", { class: "muted small" }, t("lib.audioEmpty")), list);
+      h("button", { class: "btn", onclick: () => ed.run("voiceover") }, icon("mic"), t("ed.recordVoice")),
+      // Music for this video: the music studio opens with the length of the In/Out range (or the whole timeline) and
+      // this project as the place to add the result.
+      h("button", { class: "btn", title: t("mu.forVideoHint"), onclick: async () => {
+        const io = ed.inOut(), start = io.in ?? 0, end = io.out ?? ed.duration();
+        const { app } = await import("../state.js");
+        app.go("home", { view: "music", musicSeconds: Math.max(4, Math.min(180, Math.round((end - start) / US))), musicProject: ed.project().id, musicRange: io.in !== null || io.out !== null });
+      } }, icon("audio"), t("nav.music"))), h("p", { class: "muted small" }, t("lib.audioEmpty")), list);
     const items = (await guard(() => call("library.list", { kind: "audio" }))) || [];
     const projectAudio = ed.mediaList().filter((m) => m.type === "audio");
     if (!items.length && !projectAudio.length) { list.append(h("div", { class: "empty" }, icon("audio"), t("lib.audioEmpty"))); return; }
-    for (const it of items) {
+    // Generated music (music studio) first, under its own heading; then the user's own sounds.
+    const music = items.filter((it) => it.category === "music");
+    const own = items.filter((it) => it.category !== "music");
+    if (music.length) list.append(h("div", { class: "muted small", style: { margin: "4px 0" } }, t("mu.generatedMusic")));
+    for (const it of [...music, ...own]) {
+      if (it === own[0] && music.length) list.append(h("div", { class: "muted small", style: { margin: "8px 0 4px" } }, t("lib.yours")));
       const preview = h("button", { class: "icon-btn", "aria-label": t("ex.play"), onclick: () => this.previewAudio(libUrl(it.id), preview) }, icon("play"));
       list.append(h("div", { class: "list-row", draggable: true, ondragstart: (e) => e.dataTransfer.setData("text/x-montaj-item", JSON.stringify({ type: "libAudio", id: it.id })) },
         preview, h("span", { class: "grow nowrap" }, it.name), h("span", { class: "muted" }, formatDuration(it.durationUs)),

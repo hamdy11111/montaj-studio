@@ -90,6 +90,7 @@ export function handleProtocols(o) {
       if (kind === "compound") return fileResponse(s.exporter.compoundPath(id), request); // pre-processed compound clip
       if (kind === "matte") { const v = url.searchParams.get("v") === "stab" ? "stab" : ""; return fileResponse(s.mattes?.ready(id, v) ? s.mattes.file(id, v) : null, request); } // person matte (text behind the person)
       if (kind === "stab") { const fps = Number(url.searchParams.get("fps")) || 30; return fileResponse(s.stabilizer?.ready(id, fps) ? s.stabilizer.file(id, fps) : null, request); } // stabilized copy
+      if (kind === "musicsrc") return fileResponse(s.music?.sourcePath(id), request); // a music studio source sound
       if (kind === "export") { const r = s.repos.exports.list().find((x) => x.id === id); return fileResponse(r?.path, request); }
     } catch {
       return new Response("not found", { status: 404 });

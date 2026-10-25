@@ -65,6 +65,7 @@
       "src/services/vision/**",
       "src/services/audio/**",
       "src/services/dub/**",
+      "src/services/music/**",
       "node_modules/ffmpeg-static/**",
       "node_modules/ffprobe-static/bin/win32/x64/**"
     ],

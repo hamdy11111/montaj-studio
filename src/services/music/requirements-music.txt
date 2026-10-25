@@ -1,0 +1,39 @@
+# The music engine's environment (runtime/music): ComfyUI 0.40.0 and the music nodes of src/services/music/engine.
+# Versions are the ones the source studio ran with (its settings/Python_Distributions.json). The +cu128 builds come
+# from https://download.pytorch.org/whl/cu128; without an NVIDIA GPU the PyPI CPU builds are used.
+torch==2.11.0+cu128
+torchaudio==2.11.0+cu128
+torchvision==0.26.0+cu128
+torchsde==0.2.6
+numpy==2.4.5
+einops==0.8.2
+transformers==5.8.1
+tokenizers==0.22.2
+sentencepiece==0.2.1
+safetensors==0.8.0rc0
+aiohttp==3.13.3
+yarl==1.22.0
+PyYAML==6.0.3
+pillow==12.2.0
+scipy==1.17.0
+tqdm==4.67.3
+psutil==7.2.2
+alembic==1.18.3
+SQLAlchemy==2.0.46
+filelock==3.29.0
+av==18.1.0
+comfy-kitchen==0.2.37
+comfy-aimdo==0.5.6
+requests==2.34.2
+simpleeval==1.0.3
+blake3==1.0.8
+pydantic==2.11.10
+pydantic-settings==2.12.0
+kornia==0.8.2
+spandrel==0.4.1
+comfyui-frontend-package==1.55.17
+comfyui-workflow-templates==0.11.82
+comfyui-embedded-docs==0.5.14
+soundfile==0.13.1
+librosa==0.11.0
+huggingface_hub==1.15.0

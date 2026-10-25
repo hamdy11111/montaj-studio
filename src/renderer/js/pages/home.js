@@ -14,6 +14,7 @@ import { SUGGESTIONS } from "../../core/assistant.js";
 import { openSettings } from "../dialogs/settings.js";
 import { openTrash } from "../dialogs/trash.js";
 import { openAbout } from "../dialogs/about.js";
+import { musicView } from "./music.js";
 import { openShortsTool, openTtsTool, openProviderOnly } from "../dialogs/tools.js";
 
 const VIEW_KEY = "montaj.home.view";
@@ -39,7 +40,7 @@ export function renderHome(root, params = {}) {
     const spaces = (await guard(() => call("workspace.list"))) || [];
     mount(nav,
       h("div", { class: "nav-group" },
-        navItem("projects", "home", t("nav.home")), navItem("templates", "template", t("nav.templates")), navItem("tools", "sparkle", t("nav.tools"))),
+        navItem("projects", "home", t("nav.home")), navItem("templates", "template", t("nav.templates")), navItem("tools", "sparkle", t("nav.tools")), navItem("music", "audio", t("nav.music"))),
       h("div", { class: "nav-title" }, t("nav.management")),
       h("div", { class: "nav-group" }, navItem("library", "library", t("nav.library")), navItem("notifications", "bell", t("notif.title")), navItem("shares", "share", t("share.title"))),
       h("div", { class: "nav-title" }, t("nav.spaces")),
@@ -65,8 +66,10 @@ export function renderHome(root, params = {}) {
     ], e.clientX, e.clientY);
   }
 
+  let disposeView = null;
   function draw() {
     drawNav();
+    disposeView?.(); disposeView = null;
     clear(content);
     if (view === "projects") content.append(projectsView(null));
     else if (view === "space") content.append(projectsView(spaceId));
@@ -75,6 +78,7 @@ export function renderHome(root, params = {}) {
     else if (view === "library") content.append(libraryView());
     else if (view === "notifications") content.append(notificationsView());
     else if (view === "shares") content.append(sharesView());
+    else if (view === "music") { const v = musicView(params); disposeView = v.dispose; content.append(v); }
   }
 
   mount(root, h("div", { class: "home" }, nav, content));
@@ -83,7 +87,7 @@ export function renderHome(root, params = {}) {
   // Projects created, filled or trashed by an agent (MCP) appear without reopening the page.
   offs.push(on("agents:activity", debounce((e) => { if ((view === "projects" || view === "space") && /^(project_|media_import|timeline_add_clip|skills_execute)/.test(e.op)) draw(); }, 400)));
   askSpeechModel();
-  return () => { offs.forEach((f) => f()); return true; };
+  return () => { offs.forEach((f) => f()); disposeView?.(); return true; };
 }
 
 /**

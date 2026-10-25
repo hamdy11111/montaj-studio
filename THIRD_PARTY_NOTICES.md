@@ -67,6 +67,23 @@ The Dub dialog's «Download and prepare» (`src/services/dubSetupService.js`) do
 
 TitaNet (CC-BY-4.0): © NVIDIA, used unmodified as published by sherpa-onnx.
 
+## Music studio (downloaded or imported on request, not in the installer)
+
+The Music studio's «Models and requirements» (`src/services/musicSetupService.js`, catalog in
+`src/services/music/catalog.js`) puts these in the app's data folder (the models folder is the user's choice), each
+from its own source and checked by SHA-256. The engine is started by the app only when the user asks.
+
+| Component | License | Source |
+|---|---|---|
+| ComfyUI 0.40.0 (the engine the app starts as a separate program; not linked into the app) | GPL-3.0 | [Comfy-Org/ComfyUI](https://github.com/Comfy-Org/ComfyUI) tag v0.40.0 |
+| Python 3.12.15 (python-build-standalone 20261009) | PSF License | [astral-sh/python-build-standalone](https://github.com/astral-sh/python-build-standalone) |
+| PyTorch 2.11.0 + torchaudio + torchvision (CUDA 12.8) | BSD-3-Clause | download.pytorch.org |
+| The pinned packages of `src/services/music/requirements-music.txt` | their own (MIT, BSD, Apache-2.0, …) | PyPI |
+| ACE-Step 1.5 Turbo, Qwen 0.6B/1.7B ACE text encoders, ACE 1.5 VAE (Comfy-Org repack) | Apache-2.0 (upstream ACE-Step MIT; Qwen Apache-2.0) | [Comfy-Org/ACE-Step-1.5](https://huggingface.co/Comfy-Org/ACE-Step-1.5) (revision 6707deb) |
+
+The music nodes in `src/services/music/engine/montaj_music` are ported from the author's AI Creative Studio (Music Rework
+Studio V3: the composition plan and presets, the timbre-only reference adapter, the fixed-loudness export).
+
 ## Installed by the user, not bundled
 
 Local speech recognition and the person cut-out ("text behind the person") run with the user's own Python

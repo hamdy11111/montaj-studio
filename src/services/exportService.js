@@ -43,6 +43,9 @@ export class ExportService {
     this.rasterize = null;
   }
 
+  /** Is an export running (other heavy GPU work, such as music generation, waits for it)? */
+  busy() { return this.jobs.size > 0; }
+
   mediaMap(projectId) {
     return Object.fromEntries(this.repos.media.listByProject(projectId).map((m) => [m.id, m]));
   }

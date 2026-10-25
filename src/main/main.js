@@ -143,7 +143,24 @@ app.whenReady().then(async () => {
 
 app.on("window-all-closed", () => { app.quit(); });
 
+// Closing while music is being generated: ask (wait for it, or stop it and close). Results already saved stay.
+let quitAsked = false;
+app.on("before-quit", (e) => {
+  if (quitAsked || !services?.music?.busy()) return;
+  e.preventDefault();
+  import("electron").then(({ dialog }) => {
+    const ar = (services.settings.get("general").language || "ar") === "ar";
+    const r = dialog.showMessageBoxSync(mainWindow || undefined, {
+      type: "question", buttons: ar ? ["انتظر لحد ما التوليد يخلص", "أوقف التوليد واقفل"] : ["Wait for the generation", "Stop it and close"], defaultId: 0, cancelId: 0,
+      title: "Montaj Studio", message: ar ? "فيه موسيقى بتتولد دلوقتي." : "Music is being generated.",
+      detail: ar ? "لو قفلت دلوقتي التوليد الحالي هيقف، والنتايج اللي اتحفظت قبل كده هتفضل في المكتبة." : "Closing now stops it; results saved before stay in the library.",
+    });
+    if (r === 1) { quitAsked = true; app.quit(); }
+  });
+});
+
 app.on("will-quit", () => {
+  try { services?.music?.killNow(); } catch { /* not started */ }
   try { agents?.close(); } catch { /* not listening */ }
   rasterHost.close();
   try { closeDatabase({ shutdown: true }); } catch { /* already closed */ }
