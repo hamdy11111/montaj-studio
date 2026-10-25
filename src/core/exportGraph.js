@@ -96,6 +96,9 @@ export function betweenWords(regions, srcFromUs, speed, durUs) {
   return `${FLOOR}+${1 - FLOOR}*min(1,${terms.join("+")})`;
 }
 
+/** How much a dub's background is lowered under the dubbed voice (dB). */
+export const DUB_DUCK_DB = 6;
+
 export function buildExport(tl, o) {
   const W = o.width, H = o.height, FPS = o.fps;
   const FRAME = US / FPS;
@@ -106,6 +109,23 @@ export function buildExport(tl, o) {
   const addInput = (args) => { inputs.push(args); return inputs.length - 1; };
 
   const tracks = [...tl.tracks].sort((a, b) => a.order - b.order);
+  // A dub's background (track "dub:<media>:bg") is lowered under the dub's voice where its clips are now (the voice
+  // tracks of that media that are heard), so a line moved by hand takes its ducking with it.
+  const trackOf = new Map(tracks.flatMap((t) => t.segments.map((x) => [x.id, t])));
+  const duckUnderDub = (seg, tVar) => {
+    const m = /^dub:(.+):bg$/.exec(trackOf.get(seg.id)?.role || "");
+    if (!m) return null;
+    const r = 0.15, ivs = [];
+    for (const t of tracks) {
+      if (t.muted || !(t.role || "").startsWith(`dub:${m[1]}:voice:`)) continue;
+      for (const v of t.segments) {
+        const a = (v.start - seg.start) / US, b = (v.start + v.duration - seg.start) / US;
+        if (!v.disabled && b > -r && a < seg.duration / US + r) ivs.push(`clip((${tVar}-${a.toFixed(3)}+${r})/${r},0,1)*clip((${b.toFixed(3)}+${r}-${tVar})/${r},0,1)`);
+      }
+    }
+    return ivs.length ? `volume='1-${(1 - 10 ** (-DUB_DUCK_DB / 20)).toFixed(4)}*min(1,${ivs.join("+")})':eval=frame` : null;
+  };
+
   const total = tracks.reduce((m, t) => Math.max(m, ...t.segments.map((x) => x.start + x.duration), 0), 0);
   if (total <= 0) throw new AppError("VALIDATION", "err.timelineEmpty");
   let rangeStart, rangeEnd;
@@ -687,6 +707,7 @@ export function buildExport(tl, o) {
     const tSeg = seg.speedMode === "curve" || !skip ? "if(isnan(t),0,t)" : `(if(isnan(t),0,t)+${s(skip)})`;
     fx.push(`aformat=sample_rates=48000:channel_layouts=stereo`);
     fx.push(`volume='${gainAt(EXPR, seg, tSeg)}':eval=frame`);
+    fx.push(duckUnderDub(seg, tSeg));
     fx.push(tail);
     const delay = Math.max(0, Math.round((a0 - rangeStart) / 1000));
     fx.push(`adelay=${delay}|${delay}`);

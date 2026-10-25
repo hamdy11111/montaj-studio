@@ -123,6 +123,7 @@ export function openDub(ed) {
       runJob("dub.revoice", { lang: r.lang, edits: [...edits.values()] }, r.lines.length * 2.5 + 20);
     };
     const remove = h("button", { class: "btn ghost" }, icon("undo"), t("dub.remove"));
+    const heard = h("div", { class: "row", style: { gap: "6px" } });
     remove.onclick = async () => {
       try { await call("dub.remove", ed.timelineId(), {}); await ed.reloadTimeline(); status.textContent = t("dub.removed"); } catch (e) { status.textContent = errorText(e); }
     };
@@ -133,11 +134,12 @@ export function openDub(ed) {
       const emo = h("select", { onchange: (e) => edit(l.n, "emotion", e.target.value) }, EMOTIONS.map((x) => h("option", { value: x, selected: x === l.emotion }, t(`dub.emo.${x}`))));
       const force = h("input", { type: "range", min: 0, max: 100, value: Math.round((l.intensity ?? 0.4) * 100), title: t("dub.intensity"), style: { width: "90px" }, oninput: (e) => edit(l.n, "intensity", Number(e.target.value) / 100) });
       const who = h("select", { onchange: (e) => edit(l.n, "speaker", Number(e.target.value)) }, r.speakers.map((s) => h("option", { value: s.id, selected: s.id === l.spk }, spkName(s.id))));
-      const flag = l.check !== null && l.check < 0.7;
+      const flag = l.check !== null && l.check < 0.7, thin = l.fill !== null && l.fill < 0.75;
       return h("div", { class: "col", style: { gap: "4px", padding: "6px 0", borderBottom: "1px solid var(--bg-hover)" } },
         h("div", { class: "row small", style: { gap: "8px", flexWrap: "wrap" } },
           h("span", { class: "muted", dir: "ltr" }, `${clock(l.start)}–${clock(l.end)}`), who, emo, h("span", { class: "muted" }, t("dub.intensity")), force,
-          flag ? h("span", { class: "field-error", title: t("dub.doubt") }, `⚠ ${t("dub.doubt")}`) : null),
+          flag ? h("span", { class: "field-error", title: t("dub.doubt") }, `⚠ ${t("dub.doubt")}`) : null,
+          thin ? h("span", { class: "muted", title: t("dub.thin", { p: Math.round(l.fill * 100) }) }, `◔ ${t("dub.thin", { p: Math.round(l.fill * 100) })}`) : null),
         h("div", { class: "muted small", dir: "rtl" }, l.ar), text);
     });
     result.replaceChildren(
@@ -147,7 +149,14 @@ export function openDub(ed) {
         doubt ? h("div", { class: "small", style: { color: "var(--danger)" } }, t("dub.doubtful", { n: doubt })) : null),
       h("div", { class: "muted small" }, t("dub.lines")),
       h("div", { style: { maxHeight: "320px", overflowY: "auto" } }, ...lines),
-      h("div", { class: "row", style: { gap: "8px" } }, again, remove));
+      h("div", { class: "row", style: { gap: "8px" } }, again, remove, heard));
+    // More than one language dubbed: which one is heard (and its subtitles shown).
+    call("dub.languages", ed.timelineId(), {}).then((d) => {
+      if (!d || d.langs.length < 2) return;
+      const sel = h("select", { onchange: async (e) => { try { await call("dub.setLanguage", ed.timelineId(), { lang: e.target.value }); await ed.reloadTimeline(); } catch (err) { status.textContent = errorText(err); } } },
+        d.langs.map((code) => h("option", { value: code, selected: code === d.active }, has(`dub.l.${code}`) ? t(`dub.l.${code}`) : code)));
+      heard.replaceChildren(h("span", { class: "muted small" }, t("dub.heard")), sel);
+    }).catch(() => {});
   }
 
   return modal({ title: t("dub.title"), width: 620, className: "pilot-modal",

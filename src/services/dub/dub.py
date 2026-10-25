@@ -291,7 +291,7 @@ Return only JSON: {"lines":[{"from": first_index, "to": last_index, "ar": "..."}
 
 SUMMARY_SYSTEM = """You read the automatic transcript (with recognition errors) of an Egyptian Arabic video. Misheard names are common: work out the REAL people, places, institutions and products that the sounds most likely refer to (use your knowledge of real-world names, e.g. a real city, university or company that sounds similar), and how they are spelled correctly in Arabic and in English. Return only JSON: {"summary": "3-5 sentences in English: what the video is about, who speaks, the setting", "names": ["each real name as: misheard form -> correct Arabic -> correct English"], "tone": "the overall tone"}"""
 
-TRANSLATE_SYSTEM = """You are a professional dubbing translator. Translate each Egyptian Arabic line into natural, spoken {lang} — what a native speaker would really say in that situation, keeping the meaning, the names, and the speaker's register (casual stays casual). Each line will be spoken by a voice actor in the given number of seconds, so it MUST fit: at most max_chars characters; if the full meaning does not fit, keep the essential meaning in fewer words. Lines continue each other (a sentence may run over two lines); keep the flow natural across lines, using the lines before and after for context.
+TRANSLATE_SYSTEM = """You are a professional dubbing translator. Translate each Egyptian Arabic line into natural, spoken {lang} — what a native speaker would really say in that situation, keeping the meaning, the names, and the speaker's register (casual stays casual). Each line will be spoken by a voice actor while the speaker's mouth moves for the given number of seconds, so it MUST fit that time: at most max_chars characters (if the full meaning does not fit, keep the essential meaning in fewer words) and at least min_chars (a line much shorter than the speaker talks leaves the mouth moving in silence: say the whole meaning, in the fuller natural wording). Lines continue each other (a sentence may run over two lines); keep the flow natural across lines, using the lines before and after for context.
 The transcript has no punctuation: questions are not marked — when a speaker (often the interviewer) asks something, translate it as a question. Use the names list as given; never invent a surname (a word after a name is usually a description, e.g. "أحمد مهندس" = "Ahmed, an engineer"). Keep who says what: "I" stays the speaker.
 Also give "emotion": one of neutral, happy, excited, sad, angry, surprised, serious, warm, curious — how the speaker sounds on this line; and "intensity": 0.0 to 1.0.
 Return only JSON: {{"lines":[{{"id": .., "text": "...", "emotion": "...", "intensity": ..}}]}}"""
@@ -426,12 +426,13 @@ def cmd_translate(a):
         nxt = lines[n + 1]["start"] if n + 1 < len(lines) else l["end"] + 1.5
         l["slot"] = round(max(l["end"] - l["start"], min(nxt - 0.12, l["end"] + 0.8) - l["start"]), 2)
         l["maxChars"] = max(12, int(l["slot"] * CPS.get(a.lang, 14.0)))
+        l["minChars"] = min(l["maxChars"] - 2, max(4, int(0.8 * (l["end"] - l["start"]) * CPS.get(a.lang, 14.0))))
     # 2. Translation with emotion, ~25 lines a call, the previous lines as context.
     for b in range(0, len(lines), 25):
         chunk = lines[b:b + 25]
         prev = [{"speaker": f"S{x['spk'] + 1}", "ar": x["ar"], "text": x.get("text", "")} for x in lines[max(0, b - 4):b]]
         after = [{"speaker": f"S{x['spk'] + 1}", "ar": x["ar"]} for x in lines[b + 25:b + 29]]
-        req = {"context": context, "previous_lines": prev, "following_lines": after, "lines": [{"id": x["id"], "speaker": f"S{x['spk'] + 1} ({spk_kind.get(x['spk'], 'adult')})", "ar": x["ar"], "seconds": x["slot"], "max_chars": x["maxChars"]} for x in chunk]}
+        req = {"context": context, "previous_lines": prev, "following_lines": after, "lines": [{"id": x["id"], "speaker": f"S{x['spk'] + 1} ({spk_kind.get(x['spk'], 'adult')})", "ar": x["ar"], "seconds": round(x["end"] - x["start"], 2), "min_chars": x["minChars"], "max_chars": x["maxChars"]} for x in chunk]}
         try:
             got = {g.get("id"): g for g in llm(a.server, TRANSLATE_SYSTEM.format(lang=lang), json.dumps(req, ensure_ascii=False), temperature=0.3, max_tokens=6000).get("lines", [])}
         except Exception as e:  # noqa: BLE001 — the lines go one at a time below
@@ -454,7 +455,7 @@ def cmd_translate(a):
         missing = [x for x in chunk if not x["text"]]
         for x in missing:  # one line at a time when the batch dropped it
             try:
-                g = llm(a.server, TRANSLATE_SYSTEM.format(lang=lang), json.dumps({"context": context, "lines": [{"id": x["id"], "ar": x["ar"], "seconds": x["slot"], "max_chars": x["maxChars"]}]}, ensure_ascii=False))
+                g = llm(a.server, TRANSLATE_SYSTEM.format(lang=lang), json.dumps({"context": context, "lines": [{"id": x["id"], "ar": x["ar"], "seconds": round(x["end"] - x["start"], 2), "min_chars": x["minChars"], "max_chars": x["maxChars"]}]}, ensure_ascii=False))
                 g = (g.get("lines") or [{}])[0]
                 x["text"] = str(g.get("text") or "").strip()
                 if g.get("emotion") in EMOTIONS:
@@ -531,12 +532,56 @@ def rms_db(x):
     return 20 * math.log10(float(np.sqrt(np.mean(np.square(x)))) + 1e-9) if len(x) else -120.0
 
 
+PAUSE = 0.5   # a pause inside an Arabic line this long is kept in the dub (the line is said in parts around it)
+FILL = 0.9    # a part shorter than this share of its Arabic time is slowed down to fill it…
+SLOWEST = 0.82  # …but never below 0.82× (slower sounds dragged)
+FASTEST = 1.35  # a part too long for its room is sped up to at most 1.35×
+
+
+def line_parts(l, words, text):
+    """[(text, start, end)] — the Arabic line's spoken stretches (split at its pauses of PAUSE s or more) with the
+    dub's words split to match them at punctuation, in proportion to the stretches' lengths. A line whose words have no
+    fitting break is one part over the whole line."""
+    ws = words[l["from"]:l["to"] + 1]
+    whole = [(text, l["start"], l["end"])]
+    if len(ws) < 2:
+        return whole
+    spans = [[ws[0]["start"], ws[0]["end"]]]
+    for w0, w1 in zip(ws, ws[1:]):
+        if w1["start"] - w0["end"] >= PAUSE:
+            spans.append([w1["start"], w1["end"]])
+        else:
+            spans[-1][1] = w1["end"]
+    if len(spans) == 1:
+        return whole
+    cuts = [m.end() for m in re.finditer(r"[,.;:!?…—]+\s+", text)]
+    total = sum(e - s for s, e in spans)
+    chosen, acc, merged = [], 0.0, [list(spans[0])]
+    for k in range(1, len(spans)):
+        acc += spans[k - 1][1] - spans[k - 1][0]
+        want = acc / total
+        last = chosen[-1] if chosen else 0
+        ok = [c for c in cuts if c > last and len(text[last:c].split()) >= 2 and len(text[c:].split()) >= 2]
+        best = min(ok, key=lambda c: abs(c / len(text) - want), default=None)
+        if best is not None and abs(best / len(text) - want) < 0.25:
+            chosen.append(best)
+            merged.append(list(spans[k]))
+        else:
+            merged[-1][1] = spans[k][1]  # no break in the dub here: the pause is spoken through
+    if len(merged) == 1:
+        return whole
+    bounds = [0] + chosen + [len(text)]
+    return [(text[bounds[i]:bounds[i + 1]].strip(), merged[i][0], merged[i][1]) for i in range(len(merged))]
+
+
 def cmd_synth(a):
     import numpy as np
     import soundfile as sf
     import torch
     data = jload(os.path.join(a.out, "lines.json"))
     lines, speakers = data["lines"], {s["id"]: s for s in data["speakers"]}
+    an = jload(os.path.join(a.out, "analysis.json"))
+    words = an["words"]
     lang = data.get("lang", a.lang)
     dev = "cuda" if torch.cuda.is_available() and a.device != "cpu" else "cpu"
     progress(0.01, "voices")
@@ -551,85 +596,112 @@ def cmd_synth(a):
     sr = model.sr
     listener = Listener(lang, dev)
 
-    def say(n, text, spk, ex, cfg):
-        """The line in the speaker's voice: up to 3 takes (fixed seeds, so a re-run is the same), the first one heard
-        back as meant (similarity >= 0.85) or else the closest."""
+    cache = os.path.join(a.out, "tts")
+    os.makedirs(cache, exist_ok=True)
+
+    def say(seed, text, spk, ex, cfg):
+        """Words in the speaker's voice: up to 3 takes (fixed seeds, so a re-run is the same), the first one heard back
+        as meant (similarity >= 0.85) or else the closest. Kept in tts/, so voicing again after a few lines changed
+        (fitting, the user's edits) only voices those."""
+        import hashlib
+        key = hashlib.sha1(f"{lang}|{spk['ref']}|{ex:.3f}|{cfg:.3f}|{seed}|{text}".encode("utf-8")).hexdigest()[:20]
+        wav, meta = os.path.join(cache, key + ".wav"), os.path.join(cache, key + ".json")
+        if os.path.exists(wav) and os.path.exists(meta):
+            m = jload(meta)
+            w, _ = sf.read(wav, dtype="float32")
+            return w, m["check"], m["heard"], m["take"]
         best = None
         for take in range(3):
-            torch.manual_seed(1000 * (take + 1) + n)
+            torch.manual_seed(1000 * (take + 1) + seed)
             w = trim_silence(gen(text, spk["ref"], ex, cfg).squeeze(0).cpu().numpy().astype(np.float32), sr)
             sc, heard = listener.score(w, sr, text)
             if best is None or sc > best[1]:
                 best = (w, sc, heard, take)
             if sc >= 0.85:
                 break
+        sf.write(wav, best[0], sr)
+        jsave({"check": best[1], "heard": best[2], "take": best[3]}, meta)
         return best
+
+    def stop(t):
+        """Every part ends with a stop (a part without one runs on: the voice may add words)."""
+        return t if re.search(r"[.!?…。！？]$", t) else re.sub(r"[,;:\-–—\s]+$", "", t) + "."
 
     vocals = load_mono(a.vocals, sr)
     bg_full = load_mono(a.background, sr) if a.background else None
     total = max(len(vocals), len(bg_full) if bg_full is not None else 0)
     voice = np.zeros(total + sr * 5, dtype=np.float32)
-    lang_name = LANG_NAMES.get(lang, lang)
     done, prev_end = 0, -1.0
     for n, l in enumerate(lines):
-        # A line already spoken keeps its fitted words (a re-run is the same and needs no translator); a line the user
-        # changed is spoken as written, never shortened.
+        for k in ("tooLong", "tooShort"):
+            l.pop(k, None)
+        # A line already spoken keeps its fitted words (a re-run is the same); a line the user changed is spoken as written.
         text = (l.get("spoken") or l.get("text") or "").strip()
         if not text:
             continue
-        # A line that ends without a stop runs on (the voice may add words): every line ends with one.
-        if not re.search(r"[.!?…。！？]$", text):
-            text = re.sub(r"[,;:\-–—\s]+$", "", text) + "."
         spk = speakers.get(l["spk"]) or next(iter(speakers.values()))
         ex0, cfg = EMOTION.get(l.get("emotion"), EMOTION["neutral"])
         ex = min(a.ex_cap, ex0 + 0.25 * (l.get("intensity", 0.4) - 0.4))
         if a.cfg is not None:
             cfg = a.cfg
-        slot = l["slot"]
-        tries, w = 0, None
-        while True:
-            w, check, heard, take = say(n, text, spk, ex, cfg)
-            dur = len(w) / sr
-            if dur <= slot * 1.2 or tries >= 3 or l.get("edited") or not a.server:
-                break
-            # Too long even sped up 1.2×: the LLM says it shorter (to the room the voice actually needs).
-            tries += 1
-            target = max(12, int(len(text) * slot / dur * 0.92))
-            try:
-                text = str(llm(a.server, SHORTEN_SYSTEM.format(lang=lang_name, max_chars=target), json.dumps({"line": text, "meaning_in_arabic": l["ar"]}, ensure_ascii=False), temperature=0.3, max_tokens=300).get("text") or text).strip()
-            except Exception as e:  # noqa: BLE001
-                print("shorten failed:", e, file=sys.stderr)
-                break
-        l.pop("tooLong", None)
-        if dur > slot * 1.2 and not l.get("edited") and not a.server:
-            l["tooLong"] = max(12, int(len(text) * slot / dur * 0.92))  # the characters it should have
-        speed = 1.0
-        if dur > slot:
-            # Sped up to the room it has; past 1.35× it may run into a following gap when that gap is free.
-            nxt = lines[n + 1]["start"] if n + 1 < len(lines) else l["start"] + dur + 1
-            room = max(slot, nxt - 0.08 - l["start"])
-            speed = min(1.35, max(1.0, dur / room))
-            w = atempo(w, sr, speed, a.ffmpeg)
-            dur = len(w) / sr
+        nxt = lines[n + 1]["start"] if n + 1 < len(lines) else l["end"] + 1.5
+        parts = line_parts(l, words, text)
+        audio, info, checks = [], [], []
+        natural = spoken = 0.0
+        over = False
+        for k, (ptext, p0, p1) in enumerate(parts):
+            w, check, heard, take = say(n * 10 + k, stop(ptext), spk, ex, cfg)
+            dur, target = len(w) / sr, max(0.3, p1 - p0)
+            room = max(target, (parts[k + 1][1] if k + 1 < len(parts) else nxt) - 0.08 - p0)
+            natural += dur
+            speed = 1.0
+            if dur > room:  # too long for its room: faster, up to FASTEST
+                speed = min(FASTEST, dur / room)
+            elif dur < FILL * target:  # much shorter than the Arabic: slower, so the voice runs while the mouth moves
+                speed = max(SLOWEST, dur / (0.97 * target))
+            if abs(speed - 1) > 0.01:
+                w = atempo(w, sr, speed, a.ffmpeg)
+            spoken += len(w) / sr
+            over = over or len(w) / sr > room * 1.02  # still too long at FASTEST
+            audio.append((p0, w))
+            checks.append(check)
+            info.append({"text": ptext, "start": round(p0, 3), "end": round(p1, 3), "duration": round(len(w) / sr, 3), "speed": round(speed, 3), "check": round(check, 3), "heard": heard, "take": take})
+        # One clip for the line: its parts at their own moments, the silence of the pauses between them.
+        t0 = parts[0][1]
+        span = max(p + len(w) / sr for p, w in audio) - t0
+        w = np.zeros(int(span * sr) + 1, dtype=np.float32)
+        for p, part in audio:
+            s0 = int((p - t0) * sr)
+            w[s0:s0 + len(part)] += part[: len(w) - s0]
+        dur = len(w) / sr
+        arabic = sum(p1 - p0 for _, p0, p1 in parts)
+        # Still far off after speeding/slowing: the translator says it shorter or fuller (refit), then it is voiced again.
+        if not l.get("edited"):
+            if over and natural > 0:
+                l["tooLong"] = max(12, int(len(text) * arabic / natural * 0.95))
+            elif spoken < 0.75 * arabic and arabic > 1.2:
+                l["tooShort"] = int(len(text) * min(1.6, 0.92 * arabic / max(0.2, natural)))
         # Loudness of the original line (its voice), within ±6 dB of a common level.
         i0, i1 = int(l["start"] * sr), int(l["end"] * sr)
         target_db = min(-14.0, max(-26.0, rms_db(vocals[i0:i1]) if i1 > i0 else -20.0))
         w = w * (10 ** ((target_db - rms_db(w)) / 20))
         # Never two voices at once: a line still running when this one would start delays it. A delay over 0.3 s is
         # won back by speaking this line faster (up to 1.5× in all), so the lateness does not carry on to the next.
-        at = max(l["start"], prev_end + 0.06)
-        late = at - l["start"]
+        at = max(t0, prev_end + 0.06)
+        late = at - t0
+        speed = max(x["speed"] for x in info)
         if late > 0.3 and speed < 1.5:
             f = min(1.5 / max(speed, 1.0), dur / max(0.3, dur - late))
-            w2 = atempo(w, sr, f, a.ffmpeg)
-            speed, w, dur = speed * len(w) / max(1, len(w2)), w2, len(w2) / sr
-        l["late"] = round(late, 3)
+            w = atempo(w, sr, f, a.ffmpeg)
+            dur = len(w) / sr
+            for x in info:
+                x["speed"] = round(x["speed"] * f, 3)
         prev_end = at + dur
-        l["placed"] = round(at, 3)
         s0 = int(at * sr)
         voice[s0:s0 + len(w)] += w[: max(0, len(voice) - s0)]
-        l.update({"spoken": text, "duration": round(dur, 2), "speed": round(speed, 3), "exaggeration": round(ex, 2), "cfg": cfg, "shortened": tries,
-                  "check": round(check, 3), "heard": heard, "take": take})
+        l.update({"spoken": text, "placed": round(at, 3), "late": round(late, 3), "duration": round(dur, 3), "parts": info,
+                  "speed": round(max(x["speed"] for x in info), 3), "fill": round(spoken / max(0.3, arabic), 3),
+                  "exaggeration": round(ex, 2), "cfg": cfg, "check": round(min(checks), 3), "heard": " ".join(x["heard"] for x in info), "take": max(x["take"] for x in info)})
         done += 1
         progress(0.02 + 0.9 * (n + 1) / len(lines), "voices")
     voice = voice[:total]
@@ -638,48 +710,54 @@ def cmd_synth(a):
         voice *= 0.98 / peak
     sf.write(os.path.join(a.out, "voice.wav"), voice, sr)
     if bg_full is not None:
-        # The background a little lower under the new voice (what is left of the old one disappears under it).
+        # The background as it is: the program lowers it under the dub's clips where they are on the timeline (at
+        # export), so moving a line moves its ducking too. mix.wav (to listen to the run) has it lowered here.
+        bg = bg_full[:total]
+        sf.write(os.path.join(a.out, "background.wav"), bg, sr)
         env = np.zeros(total, dtype=np.float32)
         for l in lines:
             if l.get("duration"):
-                t0 = l.get("placed", l["start"])
-                env[int(t0 * sr):int((t0 + l["duration"]) * sr)] = 1.0
+                env[int(l["placed"] * sr):int((l["placed"] + l["duration"]) * sr)] = 1.0
         k = int(0.12 * sr)
         env = np.convolve(env, np.ones(k) / k, mode="same")
-        duck = 10 ** (-a.duck_db * env / 20)
-        bg = bg_full[:total] * duck[: len(bg_full[:total])]
-        sf.write(os.path.join(a.out, "background.wav"), bg, sr)
-        mix = bg + voice[: len(bg)]
+        mix = bg * 10 ** (-a.duck_db * env[: len(bg)] / 20) + voice[: len(bg)]
         pk = float(np.max(np.abs(mix))) or 1.0
         if pk > 0.98:
             mix *= 0.98 / pk
         sf.write(os.path.join(a.out, "mix.wav"), mix, sr)
     jsave(data, os.path.join(a.out, "lines.json"))
     progress(1, "voices")
-    print(json.dumps({"lines": done, "sped": sum(1 for l in lines if l.get("speed", 1) > 1.01), "shortened": sum(1 for l in lines if l.get("shortened")),
-                      "tooLong": sum(1 for l in lines if l.get("tooLong")),
-                      "doubtful": [n for n, l in enumerate(lines) if l.get("check", 1) < 0.7]}))
+    print(json.dumps({"lines": done, "sped": sum(1 for l in lines if l.get("speed", 1) > 1.01), "tooLong": sum(1 for l in lines if l.get("tooLong")),
+                      "tooShort": sum(1 for l in lines if l.get("tooShort")), "doubtful": [n for n, l in enumerate(lines) if l.get("check", 1) < 0.7]}))
 
 
-def cmd_shorten(a):
-    """Lines the voices found too long for their time (synth marked them) said shorter by the translator."""
+LENGTHEN_SYSTEM = """You make one line of a {lang} dub a little fuller so it fills the time the speaker talks: about {chars} characters. Keep exactly the meaning — no new facts, no filler sounds; use the fuller wording a native speaker would naturally use, or details the Arabic meaning has that the line left out. Natural spoken {lang}, complete words only. Return only JSON: {{"text": "..."}}"""
+
+
+def cmd_refit(a):
+    """Lines the voices found too long or too short for their time (synth marked them), said again by the translator:
+    shorter, or fuller."""
     data = jload(os.path.join(a.out, "lines.json"))
     lang = LANG_NAMES.get(data.get("lang", a.lang), a.lang)
-    todo = [l for l in data["lines"] if l.get("tooLong")]
+    todo = [l for l in data["lines"] if l.get("tooLong") or l.get("tooShort")]
     for k, l in enumerate(todo):
         text = l.get("spoken") or l.get("text") or ""
+        longer = bool(l.get("tooShort"))
+        system = LENGTHEN_SYSTEM.format(lang=lang, chars=l["tooShort"]) if longer else SHORTEN_SYSTEM.format(lang=lang, max_chars=l["tooLong"])
         try:
-            new = str(llm(a.server, SHORTEN_SYSTEM.format(lang=lang, max_chars=l["tooLong"]), json.dumps({"line": text, "meaning_in_arabic": l["ar"]}, ensure_ascii=False), temperature=0.3, max_tokens=300).get("text") or "").strip()
+            new = str(llm(a.server, system, json.dumps({"line": text, "meaning_in_arabic": l["ar"]}, ensure_ascii=False), temperature=0.3, max_tokens=300).get("text") or "").strip()
         except Exception as e:  # noqa: BLE001
-            print("shorten failed:", e, file=sys.stderr)
+            print("refit failed:", e, file=sys.stderr)
             new = ""
-        if new and len(new) < len(text):
-            l["text"], l["shortened"] = new, (l.get("shortened") or 0) + 1
+        if new and (len(new) > len(text) if longer else len(new) < len(text)):
+            l["text"] = new
+            l["refit"] = (l.get("refit") or 0) + 1
             l.pop("spoken", None)
         l.pop("tooLong", None)
-        progress((k + 1) / len(todo), "shorten")
+        l.pop("tooShort", None)
+        progress((k + 1) / len(todo), "refit")
     jsave(data, os.path.join(a.out, "lines.json"))
-    print(json.dumps({"shortened": len(todo)}))
+    print(json.dumps({"refit": len(todo)}))
 
 
 def cmd_prefetch(a):
@@ -719,7 +797,7 @@ def cmd_langid(a):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("stage", choices=["prefetch", "langid", "analyze", "translate", "synth", "shorten"])
+    ap.add_argument("stage", choices=["prefetch", "langid", "analyze", "translate", "synth", "refit"])
     ap.add_argument("--out", required=True)
     ap.add_argument("--vocals")
     ap.add_argument("--background")
@@ -736,7 +814,7 @@ def main():
     a = ap.parse_args()
     sys.stdout.reconfigure(encoding="utf-8")
     os.makedirs(a.out, exist_ok=True)
-    {"prefetch": cmd_prefetch, "langid": cmd_langid, "analyze": cmd_analyze, "translate": cmd_translate, "synth": cmd_synth, "shorten": cmd_shorten}[a.stage](a)
+    {"prefetch": cmd_prefetch, "langid": cmd_langid, "analyze": cmd_analyze, "translate": cmd_translate, "synth": cmd_synth, "refit": cmd_refit}[a.stage](a)
 
 
 if __name__ == "__main__":

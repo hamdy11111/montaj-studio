@@ -15,7 +15,7 @@ import net from "node:net";
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { run, binaries } from "./ffmpeg.js";
-import { nemoPython, nemoModel } from "./captionService.js";
+import { nemoPython, nemoModel, refineWordTimes, wavEnvelope } from "./captionService.js";
 import { AppError } from "../core/validation.js";
 import { US } from "../core/util.js";
 
@@ -57,6 +57,15 @@ export function dubParts(userData) {
     asrPython: nemoPython(userData),
     asrModel: nemoModel(userData),
   };
+}
+
+/** The speech model's JSON (seconds) with each word's start and end snapped to the sound (core of the captions). */
+export function snapWords(j, envelope) {
+  const flat = j.segments.flatMap((sg) => sg.words);
+  const { words } = refineWordTimes(flat.map((w) => ({ startUs: Math.round(w.start * US), endUs: Math.round(w.end * US) })), envelope);
+  flat.forEach((w, i) => { w.start = words[i].startUs / US; w.end = words[i].endUs / US; });
+  for (const sg of j.segments) if (sg.words.length) { sg.start = sg.words[0].start; sg.end = sg.words[sg.words.length - 1].end; }
+  return { ...j, snapped: true };
 }
 
 /** Spawn a process; lines "PROGRESS <p> <stage>" on stderr (or, with tqdm, its "45%|" bars) are reported; resolves stdout. */
@@ -110,17 +119,17 @@ export class DubService {
 
   /**
    * Expected seconds per stage for a media of `durationS`, from real runs on the development machine (RTX 4090; a
-   * 150 s two-speaker video into English took 18 + 16 + 34 + 136 + 152 s): separation 10 s + 0.06 × duration; the
-   * clean speech's words 8 s + 0.05 ×; speakers 10 s + 0.15 ×; translation 30 s + 0.75 ×; voices (each line spoken,
-   * heard back and re-taken when needed) 20 s + 0.9 ×. Cached stages cost ~1 s.
+   * 150 s two-speaker video into English took 21 + 42 + 61 + 123 + 200 s): separation 10 s + 0.06 × duration; the
+   * clean speech's words 10 s + 0.2 ×; speakers 15 s + 0.3 ×; translation 30 s + 0.65 ×; voices (each line spoken,
+   * heard back, re-taken when needed, fitted to its time) 20 s + 1.2 ×. Cached stages cost ~1 s.
    */
   estimate(durationS, cached = {}) {
     const stages = [
       { key: "separate", sec: cached.separate ? 1 : 10 + 0.06 * durationS },
-      { key: "words", sec: cached.words ? 1 : 8 + 0.05 * durationS },
-      { key: "speakers", sec: cached.speakers ? 1 : 10 + 0.15 * durationS },
-      { key: "translate", sec: 30 + 0.75 * durationS },
-      { key: "voices", sec: 20 + 0.9 * durationS },
+      { key: "words", sec: cached.words ? 1 : 10 + 0.2 * durationS },
+      { key: "speakers", sec: cached.speakers ? 1 : 15 + 0.3 * durationS },
+      { key: "translate", sec: 30 + 0.65 * durationS },
+      { key: "voices", sec: 20 + 1.2 * durationS },
       { key: "timeline", sec: 3 },
     ];
     return { stages, totalSec: Math.round(stages.reduce((n, s) => n + s.sec, 0)) };
@@ -243,12 +252,17 @@ export class DubService {
     // 2. Words of the clean speech (the Egyptian model).
     const wr = stage("words");
     const wordsFile = path.join(work, "words.json");
-    if (!fs.existsSync(wordsFile)) {
+    let cachedWords = null;
+    try { cachedWords = JSON.parse(fs.readFileSync(wordsFile, "utf8")); } catch { /* none yet */ }
+    if (!cachedWords?.snapped) {
       const v16 = path.join(work, "vocals16.wav");
       await run(ffmpeg, ["-hide_banner", "-y", "-i", vocals, "-ac", "1", "-ar", "16000", "-c:a", "pcm_s16le", v16], { timeoutMs: 30 * 60_000, signal });
-      const out = await proc(p.asrPython, ["-X", "utf8", NEMO_SCRIPT, "--audio", v16, "--model", p.asrModel], { onProgress: wr, signal });
-      fs.writeFileSync(wordsFile, out);
+      const raw = cachedWords || JSON.parse(await proc(p.asrPython, ["-X", "utf8", NEMO_SCRIPT, "--audio", v16, "--model", p.asrModel], { onProgress: wr, signal }));
+      // Word times snapped to the sound, as the captions do (the model starts a word after a pause too early). The
+      // speakers' analysis is built on them, so an older one goes too.
+      fs.writeFileSync(wordsFile, JSON.stringify(snapWords(raw, wavEnvelope(v16))));
       fs.rmSync(v16, { force: true });
+      fs.rmSync(path.join(work, "analysis.json"), { force: true });
     }
     // 3. Speakers.
     const sp = stage("speakers");
@@ -266,19 +280,22 @@ export class DubService {
     }
     const vo = stage("voices");
     await this.py(p, "synth", out, this.synthArgs(lang, "", work, opts), (x) => vo(0.85 * x), signal);
-    await this.shortenLong(p, out, lang, work, opts, signal, (x) => vo(0.85 + 0.15 * x));
+    await this.refit(p, out, lang, work, opts, signal, (x) => vo(0.85 + 0.15 * x));
     stage("timeline");
     fs.writeFileSync(path.join(out, "timing.json"), JSON.stringify({ durationS: m.durationUs / US, estimate: est, timing }));
     return this.result(out, lang);
   }
 
-  /** Lines the voices found too long for their time: the translator says them shorter, then they are voiced again. */
-  async shortenLong(p, out, lang, work, opts, signal, report) {
+  /**
+   * Lines the voices found too long or too short for their time (after speeding up or slowing down): the translator
+   * says them shorter or fuller, then they are voiced again.
+   */
+  async refit(p, out, lang, work, opts, signal, report) {
     const file = path.join(out, "lines.json");
-    if (!JSON.parse(fs.readFileSync(file, "utf8")).lines.some((l) => l.tooLong)) return report(1);
+    if (!JSON.parse(fs.readFileSync(file, "utf8")).lines.some((l) => l.tooLong || l.tooShort)) return report(1);
     const server = await this.startTranslator(p, signal);
     try {
-      await this.py(p, "shorten", out, ["--lang", lang, "--server", server.url], (x) => report(0.4 * x), signal);
+      await this.py(p, "refit", out, ["--lang", lang, "--server", server.url], (x) => report(0.4 * x), signal);
     } finally {
       server.stop();
     }

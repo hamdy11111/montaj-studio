@@ -1,7 +1,7 @@
 {
   "name": "montaj-studio",
   "productName": "Montaj Studio",
-  "version": "1.10.0",
+  "version": "1.11.0",
   "description": "Offline desktop video editor built from the CapCut 9.6 reconstruction blueprint (Electron + Realm, no UI framework).",
   "type": "module",
   "main": "src/main/main.js",

@@ -6,6 +6,7 @@ import path from "node:path";
 import { AppError } from "../core/validation.js";
 import { mainPieces } from "../core/editPlan.js";
 import { US } from "../core/util.js";
+import { dubLanguages } from "../core/timelineOps.js";
 
 /** The video the dub is for: the given media, or the one video (with sound) on the main track. */
 function theMedia(S, timelineId, mediaId) {
@@ -33,7 +34,7 @@ function brief(r) {
   return {
     lang: r.lang, summary: r.summary,
     speakers: r.speakers.map((s) => ({ id: s.id, kind: s.kind, gender: s.gender, child: !!s.child, speech: s.speech })),
-    lines: r.lines.map((l, n) => ({ n, spk: l.spk, start: l.start, end: l.end, ar: l.ar, text: l.spoken || l.text, emotion: l.emotion, intensity: l.intensity, speed: l.speed, edited: !!l.edited, check: l.check ?? null })),
+    lines: r.lines.map((l, n) => ({ n, spk: l.spk, start: l.start, end: l.end, ar: l.ar, text: l.spoken || l.text, emotion: l.emotion, intensity: l.intensity, speed: l.speed, fill: l.fill ?? null, edited: !!l.edited, check: l.check ?? null })),
   };
 }
 
@@ -50,12 +51,12 @@ async function placeDub(ctx, timelineId, m, r) {
   const { imported, errors } = await S.media.importFiles(tl.projectId, files, { origin: "dub", derivedFromId: m.id });
   if (imported.length !== 2) throw new AppError("IO", "err.dubFailed", { message: errors?.[0]?.message || "import" });
   const [voice, background] = imported;
-  const name = (k) => `${k === "voice" ? "Dub" : "Background"} (${r.lang.toUpperCase()})`;
-  const res = await S.timelines.execAs(ctx.source, timelineId, "applyDub", {
-    mediaId: m.id,
-    layers: [{ mediaId: voice.id, name: name("voice"), volumeDb: 0 }, { mediaId: background.id, name: name("background"), volumeDb: 0 }],
-  });
-  return { revision: res.revision, media: { voice: voice.id, background: background.id } };
+  // Each line: where its voice is in voice.wav (= the source's time), how long, and the Arabic line it dubs.
+  const order = r.speakers.map((sp) => sp.id);
+  const lines = r.lines.map((l, n) => ({ n, label: `S${order.indexOf(l.spk) + 1}`, text: l.spoken || l.text || "", ar: l.ar || "",
+    arStart: l.start * US, arEnd: l.end * US, at: (l.placed ?? l.start) * US, duration: (l.duration || 0) * US })).filter((l) => l.duration > 0);
+  const res = await S.timelines.execAs(ctx.source, timelineId, "applyDub", { mediaId: m.id, lang: r.lang, voiceMediaId: voice.id, backgroundMediaId: background.id, lines });
+  return { revision: res.revision, placed: res.result?.placed ?? lines.length, media: { voice: voice.id, background: background.id } };
 }
 
 /** A cancel signal for a job: its own, or one raised when an agent job is cancelled (job.cancelled). */
@@ -100,9 +101,23 @@ export async function dubDetect(ctx, timelineId, opts = {}) {
   return { mediaId: m.id, ...(await S.dubber.detect(m.id)) };
 }
 
-/** Back to the video's own sound. */
+/** Remove one dubbed language (opts.lang) or all of them; with none left, the video's own sound comes back. */
 export async function removeDubbing(ctx, timelineId, opts = {}) {
   const S = ctx.services;
   const { m } = theMedia(S, timelineId, opts.mediaId);
-  return S.timelines.execAs(ctx.source, timelineId, "removeDub", { mediaId: m.id });
+  return S.timelines.execAs(ctx.source, timelineId, "removeDub", { mediaId: m.id, lang: opts.lang || null });
+}
+
+/** The dubbed language that is heard (its voice on, its subtitles shown); the others are muted. */
+export async function dubSetLanguage(ctx, timelineId, opts = {}) {
+  const S = ctx.services;
+  const { m } = theMedia(S, timelineId, opts.mediaId);
+  return S.timelines.execAs(ctx.source, timelineId, "setDubLanguage", { mediaId: m.id, lang: String(opts.lang || "") });
+}
+
+/** The languages this timeline's video is dubbed into, and the one heard. */
+export function dubOnTimeline(ctx, timelineId, opts = {}) {
+  const S = ctx.services;
+  const { tl, m } = theMedia(S, timelineId, opts.mediaId);
+  return dubLanguages(tl, m.id);
 }

@@ -62,6 +62,10 @@ test("the Dub dialog finds the Arabic speech and can dub the video", { timeout: 
   assert.ok(rows >= 3, `${rows} lines listed`);
   assert.doesNotMatch(await win.locator(".modal").textContent(), /null|undefined|NaN/);
   const tl = (await api("timeline.get", tid)).timeline;
-  assert.equal(tl.tracks.filter((x) => (x.role || "").startsWith("dub:")).length, 2);
+  assert.equal(tl.tracks.filter((x) => (x.role || "").startsWith("dub:")).length, 5, "subtitles, Arabic, original, voice, background");
+  // The timeline itself, with the dialog closed.
+  await win.locator(".modal .modal-head .icon-btn").click();
+  await win.waitForTimeout(800);
+  await shot("dub-timeline");
   assert.deepEqual(errors, []);
 });

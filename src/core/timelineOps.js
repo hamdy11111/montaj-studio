@@ -1,7 +1,7 @@
 // Pure timeline operations (FEAT-019..035). Every function takes a timeline object, mutates it in place and
 // returns a result; callers clone first (the timeline service does) so history snapshots stay intact.
 import { uid, US, clamp, deepClone } from "./util.js";
-import { newSegment, newTrack, TRACK_ACCEPTS, KIND_TO_TRACK, findSegment, mainTrack, sortSegments, timelineDuration } from "./model.js";
+import { newSegment, newTrack, TRACK_ACCEPTS, KIND_TO_TRACK, findSegment, mainTrack, sortSegments, timelineDuration, DEFAULT_TEXT } from "./model.js";
 import { timelineDurationFor } from "./speed.js";
 import { AppError } from "./validation.js";
 import { BEHIND, isBehindTrack, canGoBehind } from "./cutout.js";
@@ -146,40 +146,124 @@ export function addMediaSegment(tl, media, { atUs = null, toMain = true, setting
  * track, under every other track; the cutout of the person is drawn over them at render time (core/cutout.js).
  * Returns the ids moved.
  */
-/** The role of a dub track: "dub:<the dubbed media id>" (the track names which media it dubs; no schema change). */
-export const dubRole = (mediaId) => `dub:${mediaId}`;
-
 /**
- * Put a dub on the timeline: every clip of `sourceMediaId` keeps its picture but its own sound is turned off
- * (audioDetached), and each layer (the dubbed voice, the background without the original speech — media of the same
- * length and timing) gets its own audio track whose clips mirror those clips exactly (start, length, source span,
- * speed), so cuts already made stay in sync. A previous dub of that media is replaced. Returns the new track ids.
+ * Roles of a dub's tracks (no schema change): "dub:<the dubbed media id>:<part>", part = "orig" (the clip's own sound,
+ * muted), "bg" (the background without the speech), "voice:<lang>" (one clip per line), "cap:<lang>" (the line's
+ * words as text), "cap:ar" (the Arabic lines, hidden).
  */
-export function applyDub(tl, sourceMediaId, layers) {
-  const clips = tl.tracks.flatMap((t) => t.segments.filter((s) => s.mediaId === sourceMediaId && (s.kind === "video" || s.kind === "compound")));
-  if (!clips.length) throw new AppError("VALIDATION", "err.dubNoClip");
-  tl.tracks = tl.tracks.filter((t) => t.role !== dubRole(sourceMediaId));
-  for (const c of clips) c.audioDetached = true;
-  const ids = [];
-  for (const [k, layer] of layers.entries()) {
-    const track = newTrack("audio", { order: tl.tracks.length + k, name: layer.name || "", role: dubRole(sourceMediaId) });
-    for (const c of clips) {
-      track.segments.push(newSegment("audio", {
-        mediaId: layer.media.id, name: layer.name || layer.media.name, start: c.start, duration: c.duration, sourceStart: c.sourceStart,
-        sourceDuration: layer.media.durationUs, speed: c.speed, speedMode: c.speedMode, curve: deepClone(c.curve), changePitch: c.changePitch,
-        volumeDb: layer.volumeDb ?? 0,
-      }));
-    }
-    tl.tracks.push(track);
-    ids.push(track.id);
-  }
-  return ids;
+export const dubRole = (mediaId, part = "") => (part ? `dub:${mediaId}:${part}` : `dub:${mediaId}`);
+const isDubTrackOf = (t, mediaId) => t.role === `dub:${mediaId}` || (t.role || "").startsWith(`dub:${mediaId}:`);
+/** The languages a media is dubbed into on this timeline, and the one heard. */
+export function dubLanguages(tl, mediaId) {
+  const voice = tl.tracks.filter((t) => (t.role || "").startsWith(`dub:${mediaId}:voice:`));
+  return { langs: voice.map((t) => t.role.split(":").pop()), active: voice.find((t) => !t.muted)?.role.split(":").pop() || null };
 }
 
-/** Undo a dub of `sourceMediaId`: its tracks go, the clips' own sound comes back. */
-export function removeDub(tl, sourceMediaId) {
-  tl.tracks = tl.tracks.filter((t) => t.role !== dubRole(sourceMediaId));
-  for (const t of tl.tracks) for (const s of t.segments) if (s.mediaId === sourceMediaId && s.kind !== "audio") s.audioDetached = false;
+/** Timeline time of a source time of the clips (constant speed), or null when that moment was cut out. */
+function onTimeline(clips, srcUs) {
+  for (const c of clips) {
+    const speed = c.speedMode === "curve" ? 1 : c.speed || 1;
+    if (srcUs >= c.sourceStart && srcUs < c.sourceStart + c.duration * speed) return { at: c.start + (srcUs - c.sourceStart) / speed, end: c.start + c.duration };
+  }
+  return null;
+}
+
+const SUBTITLE = { font: "IBM Plex Sans Arabic", size: 6.5, color: "#FFFFFF", bgColor: "#000000", bgOpacity: 60, bold: false, align: "center" };
+
+/**
+ * Put a dub of `sourceMediaId` into language `dub.lang` on the timeline, so every line can be seen, heard and moved:
+ *   text   "cap:<lang>"  the dubbed lines as subtitles (shown while it is the language heard)
+ *   text   "cap:ar"      the Arabic lines (hidden — to check each one has its dubbed line)
+ *   audio  "orig"        the clips' own sound, muted (the clips' sound is turned off: audioDetached)
+ *   audio  "voice:<lang>" one clip per line, at its line's moment, grouped with its subtitle (they move together)
+ *   audio  "bg"          the background without the speech, following the clips
+ * dub = { lang, voice: media, background: media, lines: [{ n, label, text, ar, arStart, arEnd, at, duration }] (µs, at =
+ * where the line's voice starts in the source's time = in voice.wav), canvas }. Lines in a part of the video that was
+ * cut are left out. Other languages stay (muted, their subtitles hidden). A line moved by hand keeps its shift when
+ * the same language is dubbed again. Returns { voiceTrackId, lines placed }.
+ */
+export function applyDub(tl, sourceMediaId, dub) {
+  const clips = tl.tracks.flatMap((t) => t.segments.filter((s) => s.mediaId === sourceMediaId && (s.kind === "video" || s.kind === "compound"))).sort((a, b) => a.start - b.start);
+  if (!clips.length) throw new AppError("VALIDATION", "err.dubNoClip");
+  const lang = dub.lang;
+  const role = (part) => dubRole(sourceMediaId, part);
+  // Shifts the user gave lines of this language (where each clip is now − where the dub put it).
+  const shift = new Map();
+  for (const s of tl.tracks.find((t) => t.role === role(`voice:${lang}`))?.segments || []) {
+    const m = /^#(\d+)/.exec(s.name || ""), l = m && dub.lines.find((x) => x.n === Number(m[1]) - 1);
+    const p = l && onTimeline(clips, l.at);
+    if (p) shift.set(l.n, s.start - Math.round(p.at));
+  }
+  const keep = (t) => !isDubTrackOf(t, sourceMediaId) || ((/:voice:|:cap:/.test(t.role)) && !t.role.endsWith(`:${lang}`) && !t.role.endsWith(":cap:ar"));
+  tl.tracks = tl.tracks.filter(keep);
+  for (const t of tl.tracks) if (isDubTrackOf(t, sourceMediaId)) t[t.type === "audio" ? "muted" : "hidden"] = true; // other languages: off
+  for (const c of clips) c.audioDetached = true;
+  const add = (type, part, name, flags = {}) => { const t = newTrack(type, { order: tl.tracks.length, name, role: role(part) }); Object.assign(t, flags); tl.tracks.push(t); return t; };
+  const mirror = (track, media, name, volumeDb = 0) => {
+    for (const c of clips) {
+      track.segments.push(newSegment("audio", { mediaId: media.id, name, start: c.start, duration: c.duration, sourceStart: c.sourceStart, sourceDuration: media.durationUs,
+        speed: c.speed, speedMode: c.speedMode, curve: deepClone(c.curve), changePitch: c.changePitch, volumeDb }));
+    }
+  };
+  const wide = !(dub.canvas && dub.canvas.height > dub.canvas.width);
+  const capAr = add("text", "cap:ar", "AR", { hidden: true });
+  const capLang = add("text", `cap:${lang}`, lang.toUpperCase());
+  const orig = add("audio", "orig", "Original", { muted: true });
+  mirror(orig, dub.source, "Original");
+  const voice = add("audio", `voice:${lang}`, `Dub (${lang.toUpperCase()})`);
+  const text = (content, rtl) => ({ ...DEFAULT_TEXT, ...SUBTITLE, content, direction: rtl ? "rtl" : "auto" });
+  let placed = 0;
+  for (const l of dub.lines) {
+    const a = onTimeline(clips, l.arStart);
+    if (a) {
+      capAr.segments.push(newSegment("text", { name: (l.ar || "").slice(0, 40), start: Math.round(a.at), duration: Math.max(MIN_DUR, Math.min(l.arEnd - l.arStart, a.end - a.at)),
+        text: text(l.ar || "", true), transform: { y: wide ? 0.24 : 0.18 } }));
+    }
+    const p = onTimeline(clips, l.at);
+    if (!p || !l.duration) continue;
+    const start = Math.max(0, Math.round(p.at) + (shift.get(l.n) || 0)), gid = uid();
+    voice.segments.push(newSegment("audio", { mediaId: dub.voice.id, name: `#${l.n + 1} · ${l.label || ""}`.trim(), start, duration: Math.round(l.duration),
+      sourceStart: Math.round(l.at), sourceDuration: dub.voice.durationUs, groupId: gid }));
+    capLang.segments.push(newSegment("text", { name: (l.text || "").slice(0, 40), start, duration: Math.round(l.duration), groupId: gid,
+      text: text(l.text || "", false), transform: { y: wide ? 0.38 : 0.3 } }));
+    placed++;
+  }
+  mirror(add("audio", "bg", "Background"), dub.background, "Background");
+  for (const t of [capAr, capLang, voice]) sortSegments(t);
+  // Two lines never share a moment on the voice track (a hand-moved line may have drifted onto the next): the later
+  // one goes to start where the earlier ends.
+  for (let i = 1; i < voice.segments.length; i++) {
+    const prev = voice.segments[i - 1], cur = voice.segments[i];
+    if (cur.start < prev.start + prev.duration) {
+      const to = prev.start + prev.duration;
+      for (const s of [...voice.segments, ...capLang.segments]) if (s.groupId === cur.groupId) s.start = to;
+    }
+  }
+  cleanupTracks(tl);
+  return { voiceTrackId: voice.id, placed };
+}
+
+/** Which dubbed language is heard (its voice on, its subtitles shown); the others are muted and hidden. */
+export function setDubLanguage(tl, sourceMediaId, lang) {
+  const { langs } = dubLanguages(tl, sourceMediaId);
+  if (!langs.includes(lang)) throw new AppError("VALIDATION", "err.dubNone");
+  for (const t of tl.tracks) {
+    const m = new RegExp(`^dub:${sourceMediaId}:(voice|cap):(.+)$`).exec(t.role || "");
+    if (!m || m[2] === "ar") continue;
+    t[m[1] === "voice" ? "muted" : "hidden"] = m[2] !== lang;
+  }
+  return lang;
+}
+
+/** Undo a dub of `sourceMediaId` (one language, or all): its tracks go; with none left, the clips' own sound comes back. */
+export function removeDub(tl, sourceMediaId, lang = null) {
+  if (lang) tl.tracks = tl.tracks.filter((t) => t.role !== dubRole(sourceMediaId, `voice:${lang}`) && t.role !== dubRole(sourceMediaId, `cap:${lang}`));
+  const left = dubLanguages(tl, sourceMediaId).langs;
+  if (!lang || !left.length) {
+    tl.tracks = tl.tracks.filter((t) => !isDubTrackOf(t, sourceMediaId));
+    for (const t of tl.tracks) for (const s of t.segments) if (s.mediaId === sourceMediaId && s.kind !== "audio") s.audioDetached = false;
+  } else if (!dubLanguages(tl, sourceMediaId).active) setDubLanguage(tl, sourceMediaId, left[0]);
+  cleanupTracks(tl);
 }
 
 export function setBehindPerson(tl, ids, behind = true) {

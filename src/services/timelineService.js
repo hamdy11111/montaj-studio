@@ -222,10 +222,17 @@ export class TimelineService {
       case "pasteSegments": return this.commit(timelineId, "paste", (tl) => ops.pasteSegments(tl, a.clips, a.atUs, o));
       case "pasteAttributes": return this.commit(timelineId, "pasteAttributes", (tl) => ops.pasteAttributes(tl, a.ids, a.attrs));
       case "applyDub": {
-        const layers = (a.layers || []).map((l) => ({ media: this.repos.media.get(l.mediaId), name: String(l.name || "").slice(0, 60), volumeDb: l.volumeDb === undefined ? 0 : validateNumber(l.volumeDb, { field: "volumeDb", min: -60, max: 20 }) }));
-        return this.commit(timelineId, "dub", (tl) => ops.applyDub(tl, a.mediaId, layers));
+        const M = (id) => this.repos.media.get(id);
+        const us = (v) => Math.max(0, Math.round(Number(v) || 0));
+        const dub = {
+          lang: String(a.lang || "en").slice(0, 8), source: M(a.mediaId), voice: M(a.voiceMediaId), background: M(a.backgroundMediaId),
+          lines: (a.lines || []).map((l) => ({ n: Number(l.n) || 0, label: String(l.label || "").slice(0, 40), text: String(l.text || "").slice(0, 500), ar: String(l.ar || "").slice(0, 500),
+            arStart: us(l.arStart), arEnd: us(l.arEnd), at: us(l.at), duration: us(l.duration) })),
+        };
+        return this.commit(timelineId, "dub", (tl) => ops.applyDub(tl, a.mediaId, { ...dub, canvas: tl.canvas }));
       }
-      case "removeDub": return this.commit(timelineId, "dub", (tl) => ops.removeDub(tl, a.mediaId));
+      case "setDubLanguage": return this.commit(timelineId, "dub", (tl) => ops.setDubLanguage(tl, a.mediaId, String(a.lang || "")));
+      case "removeDub": return this.commit(timelineId, "dub", (tl) => ops.removeDub(tl, a.mediaId, a.lang ? String(a.lang) : null));
       case "setBehindPerson": return this.commit(timelineId, a.value === false ? "frontOfPerson" : "behindPerson", (tl) => ops.setBehindPerson(tl, a.ids || [], a.value !== false));
       case "group": return this.commit(timelineId, "group", (tl) => ops.group(tl, a.ids));
       case "ungroup": return this.commit(timelineId, "ungroup", (tl) => ops.ungroup(tl, a.ids));

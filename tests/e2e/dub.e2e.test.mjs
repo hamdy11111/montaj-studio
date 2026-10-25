@@ -60,23 +60,37 @@ test("an Arabic video is dubbed: speakers, timed lines heard back as meant, dub 
   assert.ok(late <= Math.ceil(0.1 * full.length), `${late}/${full.length} lines start more than 0.6 s late`);
   const heard = full.filter((l) => (l.check ?? 1) >= 0.7).length;
   assert.ok(heard >= 0.9 * full.length, `${heard}/${full.length} lines heard back as meant`);
-  // The timeline: two dub tracks that follow the clip, the clip's own sound off.
+  // The dub fills the time the speakers talk (each line slowed or said fuller when it was much shorter).
+  const fill = full.reduce((n, l) => n + l.duration, 0) / full.reduce((n, l) => n + (l.end - l.start), 0);
+  assert.ok(fill >= 0.85, `the dub fills ${Math.round(fill * 100)}% of the Arabic speaking time`);
+  // The timeline: one clip per line on the voice track, each with its subtitle (same place, grouped), the Arabic lines
+  // hidden, the clip's own sound on a muted track, the background following the clip.
   const tl = S.timelines.get(tid).timeline;
-  const dubTracks = tl.tracks.filter((x) => x.role === dubRole(mid));
-  assert.equal(dubTracks.length, 2);
+  const track = (part) => tl.tracks.find((x) => x.role === dubRole(mid, part));
+  const voice = track(`voice:${LANG}`), cap = track(`cap:${LANG}`), ar = track("cap:ar"), orig = track("orig"), bg = track("bg");
+  assert.ok(voice && cap && ar && orig && bg, tl.tracks.map((x) => x.role).join(","));
+  assert.equal(voice.segments.length, full.length, "one voice clip per line");
+  assert.equal(cap.segments.length, full.length, "one subtitle per line");
+  for (const v of voice.segments) {
+    const sub = cap.segments.find((c) => c.groupId === v.groupId);
+    assert.ok(sub && sub.start === v.start && sub.duration === v.duration, "the subtitle is where its voice is");
+  }
+  assert.equal(ar.hidden, true);
+  assert.ok(ar.segments.length >= full.length);
+  assert.equal(orig.muted, true);
   const clip = tl.tracks.find((x) => x.isMain).segments[0];
   assert.equal(clip.audioDetached, true);
-  for (const tr of dubTracks) {
+  for (const tr of [orig, bg]) {
     assert.equal(tr.segments.length, 1);
     assert.equal(tr.segments[0].start, clip.start);
     assert.equal(tr.segments[0].duration, clip.duration);
-    const m = S.repos.media.get(tr.segments[0].mediaId);
-    assert.equal(m.origin, "dub");
-    assert.ok(Math.abs(Number((await ffprobe(m.path)).format.duration) - durS) < 1.5, "the dub runs the whole video");
   }
+  const m = S.repos.media.get(bg.segments[0].mediaId);
+  assert.equal(m.origin, "dub");
+  assert.ok(Math.abs(Number((await ffprobe(m.path)).format.duration) - durS) < 1.5, "the background runs the whole video");
   // Back to the original sound in one step.
   await removeDubbing(ctx, tid);
   const back = S.timelines.get(tid).timeline;
-  assert.equal(back.tracks.filter((x) => x.role === dubRole(mid)).length, 0);
+  assert.equal(back.tracks.filter((x) => (x.role || "").startsWith(dubRole(mid))).length, 0);
   assert.equal(back.tracks.find((x) => x.isMain).segments[0].audioDetached, false);
 });
