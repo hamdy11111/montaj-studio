@@ -12,7 +12,7 @@ import { planFromText } from "../core/assistant.js";
 import { uid } from "../core/util.js";
 import { CAPTION_TEMPLATES } from "../core/captionTemplates.js";
 import { OPERATION_INDEX } from "../agent/operations.js";
-import { autoEdit } from "../agent/director.js";
+import { autoEdit, directorEstimate } from "../agent/director.js";
 import { applyCaptions, restyleCaptions, transact } from "../agent/captions.js";
 
 const str = (v, field) => { if (typeof v !== "string") throw new AppError("VALIDATION", "err.string", { field }); return v; };
@@ -172,6 +172,7 @@ export function registerIpc({ getServices, getAgents = () => null, getWindow, ap
     // Animated word-timed captions for the open timeline (same code path as agents; one undo step).
     "captions.generatePro": async (tid, o) => { const ctx = A().userContext(); const q = obj(o); return transact(ctx, id(tid), `captions:${q.template || "karaoke-yellow"}`, undefined, () => applyCaptions(ctx, id(tid), { template: q.template ? str(q.template, "template") : undefined, language: q.language ? str(q.language, "language") : "auto", keywords: q.keywords ? arr(q.keywords, "keywords").map(String) : [], reveal: !!q.reveal, corrections: q.corrections ? arr(q.corrections, "corrections").map((c) => ({ from: String(c?.from ?? ""), to: String(c?.to ?? "") })) : undefined })); },
     // Smart edit: the director plans and applies a whole edit (progress: "director:progress").
+    "director.estimate": (tid, o) => directorEstimate(A().userContext(), id(tid), obj(o)),
     "director.run": async (tid, o) => { const q = obj(o); return autoEdit(A().userContext(), id(tid), { ...q, apply: true }, { progress: (p, label) => notifyAll("director:progress", { progress: p, label }) }); },
     // A motion graphic through the same operation as agents (person-aware templates get the head's track).
     "graphics.add": async (tid, o) => { const q = obj(o); return OPERATION_INDEX.get("timeline_add_graphic").run(A().userContext(), { timelineId: id(tid), template: str(q.template, "template"), params: q.params ? obj(q.params) : {}, atUs: Math.max(0, Number(q.atUs) || 0), durationUs: q.durationUs ? Number(q.durationUs) : undefined, inline: true }); },

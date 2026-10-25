@@ -211,6 +211,31 @@ test("an edit plan is validated, then applied as one undo step; captions persist
   assert.equal(S.timelines.get(tid).timeline.tracks.flatMap((t) => t.segments).filter((s) => s.text?.caption).length, 0);
 });
 
+test("a batch of hundreds of edits (a long video's plan) is one undo step, saved once; a failure puts everything back", async () => {
+  const T = S.timelines;
+  const seg = () => T.get(tid).timeline.tracks.find((t) => t.isMain).segments[0];
+  const before = JSON.stringify(T.get(tid).timeline);
+  const depth = T.get(tid).history.depth;
+  let changes = 0;
+  const onChange = T.onChange;
+  T.onChange = (e) => { changes++; onChange(e); };
+  // 250 edits: more than the history's 200-step limit, which used to break the plan's single undo step.
+  await T.batch(tid, "plan:batch test", async () => {
+    for (let i = 0; i < 250; i++) T.exec(tid, "updateSegment", { segId: seg().id, patch: { transform: { scale: 1 + (i % 7) / 100 } } });
+  });
+  T.onChange = onChange;
+  assert.equal(changes, 1, "the window is told once");
+  assert.equal(T.get(tid).history.depth, depth + 1, "one undo step");
+  assert.equal(T.get(tid).history.undoLabel, "plan:batch test");
+  T.exec(tid, "undo", {});
+  assert.equal(JSON.stringify(T.get(tid).timeline), before, "undo returns to before the batch");
+  await assert.rejects(T.batch(tid, "plan:fails", async () => {
+    T.exec(tid, "updateSegment", { segId: seg().id, patch: { transform: { scale: 1.5 } } });
+    throw new Error("a step failed");
+  }));
+  assert.equal(JSON.stringify(T.get(tid).timeline), before, "a failure puts everything back");
+});
+
 test("a failing plan step restores the timeline; stale revisions and invalid plans are refused", async () => {
   const snap = JSON.stringify(S.timelines.get(tid).timeline);
   const depth = S.timelines.get(tid).history.depth;

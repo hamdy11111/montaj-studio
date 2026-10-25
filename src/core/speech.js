@@ -257,9 +257,10 @@ export function speechRemovals(words, P = { stutterGap: 0.9, retake: { within: 2
  * pace: POLICY.pace; moments: [{ s, e, punch, reaction }] (µs); keep: protected [[a, b]] (never cut).
  * Returns { cuts: [{ fromUs, toUs, reason }], removed: Map }.
  */
-export function smartCuts(words, { pace, rhythm = "mrbeast", durationUs = null, moments = [], keep = [] } = {}) {
+export function smartCuts(words, { pace, rhythm = "mrbeast", durationUs = null, moments = [], keep = [], drop = null } = {}) {
   const S = (s) => Math.round(s * 1e6);
   const removed = speechRemovals(words, pace);
+  for (const [i, r] of drop || []) if (!removed.has(i)) removed.set(i, r); // e.g. the sentences a reel leaves out
   const kept = words.map((w, i) => ({ w, i })).filter((x) => !removed.has(x.i));
   const ranges = [];
   if (!kept.length) return { cuts: durationUs ? [{ fromUs: 0, toUs: durationUs, reason: "no speech" }] : [], removed };

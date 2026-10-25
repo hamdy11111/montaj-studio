@@ -9,7 +9,8 @@ import { POLICY } from "../../src/core/policy.js";
 import { findNumbers } from "../../src/core/numbers.js";
 import { detectMoments } from "../../src/core/moments.js";
 import { qaPlan, fitHead, headInside, reasonsToWatch, deadSpans } from "../../src/core/qa.js";
-import { directPlan, wordScore, conceptOf, visualBeats, videoFit } from "../../src/core/director.js";
+import { directPlan, wordScore, conceptOf, visualBeats, videoFit, estimateWork } from "../../src/core/director.js";
+import { reelSelect } from "../../src/core/reel.js";
 import { EDIT_PLAN_SCHEMA } from "../../src/core/editPlan.js";
 import { betweenWords, buildExport } from "../../src/core/exportGraph.js";
 import * as ops from "../../src/core/timelineOps.js";
@@ -182,4 +183,39 @@ test("a selfie close-up (the head fills the frame, the model's face class runs d
   assert.ok(plan.zooms.every((z) => z.scale >= 1.02));
   assert.ok(plan.zooms.length > 0, "the chin is estimated from the head's width: zooms are possible");
   assert.ok(qa.passed.includes("face.cropped"));
+});
+
+test("a reel from a long talk: the strongest whole sentences within the target, in order; the opening always stays", () => {
+  // 40 sentences of ~2.4 s each (~110 s of speech): plain ones, a stakes line, a result, a laugh.
+  const words = [];
+  let t = 0.5;
+  const line = (txt) => { for (const w of txt.split(" ")) { words.push(W(w, t, t + 0.35)); t += 0.4; } t += 0.9; };
+  line("النهارده هنجرب حاجة جديدة خالص.");
+  for (let i = 0; i < 36; i++) line(i === 12 ? "لو نجحنا هنكسب مليون جنيه." : i === 25 ? "في الآخر نجحنا وعملناها!" : i === 30 ? "يا نهار ابيض ده حصل بجد." : "وبعدين رحنا هناك وشفنا الدنيا.");
+  line("تابعوني عشان الجاي.");
+  const moments = detectMoments(words);
+  const sel = reelSelect(words, { targetUs: 20 * US, moments });
+  const kept = sel.units.filter((u) => u.kept);
+  assert.ok(kept[0].must && kept[0].text.startsWith("النهارده"), "the opening stays");
+  assert.ok(kept.some((u) => u.role === "stakes") && kept.some((u) => u.role === "result") && kept.some((u) => /يا نهار/.test(u.text)), "stakes, result and the reaction are chosen first");
+  assert.ok(sel.estUs <= 20 * US, `${sel.estUs}`);
+  for (let i = 1; i < kept.length; i++) assert.ok(kept[i].w0 > kept[i - 1].w1, "the video's order is kept");
+  // In the director: a 20 s reel, paced, within 2 s of the target, no word cut inside a kept sentence.
+  const { plan, qa, notes } = directPlan({ mediaId: "m1", words, durationUs: Math.round((t + 1) * US), track: [], targetUs: 20 * US });
+  assert.ok(qa.stats.editUs <= 22 * US, `${qa.stats.editUs}`);
+  assert.ok(qa.passed.includes("speech.cutInsideWord") && qa.passed.includes("speech.lostWord"));
+  assert.ok(notes.some((n) => n.startsWith("reel of 20 s")));
+  assert.ok(plan.cuts.some((c) => /reel/.test(c.reason)));
+});
+
+test("the work estimate: stages weighted by measured speeds; cached stages are nearly free; a fast run drops the slow steps", () => {
+  const full = estimateWork({ durationS: 1163, width: 1280, height: 720 }); // the 19-minute 720p video
+  assert.deepEqual(full.stages.map((s) => s.key), ["words", "stabilize", "person", "plan", "apply"]);
+  assert.ok(full.totalSec > 18 * 60 && full.totalSec < 26 * 60, `${full.totalSec}`); // measured there: ~10.5 min stabilizing + ~8 min mask
+  const hd = estimateWork({ durationS: 76 });
+  assert.ok(Math.abs(hd.totalSec - 186) < 40, `${hd.totalSec}`); // 1080p30, 76 s: measured 186 s
+  const fast = estimateWork({ durationS: 1163, width: 1280, height: 720, stabilize: false, person: false });
+  assert.ok(fast.totalSec < 4 * 60, `${fast.totalSec}`);
+  const again = estimateWork({ durationS: 1163, cached: { words: true, stabilize: true, person: true } });
+  assert.ok(again.totalSec < 3 * 60, `${again.totalSec}`);
 });

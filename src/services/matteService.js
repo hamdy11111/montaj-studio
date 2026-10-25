@@ -129,7 +129,7 @@ export class MatteService {
     const cache = `${file}.track3.json`;
     if (fs.existsSync(cache)) { try { return JSON.parse(fs.readFileSync(cache, "utf8")); } catch { /* remake */ } }
     const W = 160, H = 90;
-    const { stdout } = await run(binaries().ffmpeg, ["-hide_banner", "-loglevel", "error", "-i", file, "-vf", `fps=10,scale=${W}:${H}:flags=area,format=gray`, "-f", "rawvideo", "-"], { timeoutMs: 10 * 60_000 });
+    const { stdout } = await run(binaries().ffmpeg, ["-hide_banner", "-loglevel", "error", "-i", file, "-vf", `fps=10,scale=${W}:${H}:flags=area,format=gray`, "-f", "rawvideo", "-"], { timeoutMs: 60 * 60_000 }); // a long video's mask takes minutes to read
     const n = Math.floor(stdout.length / (W * H));
     let faces = null;
     try { faces = JSON.parse(fs.readFileSync(`${file}.boxes.json`, "utf8")); } catch { /* an older matte: silhouette only */ }

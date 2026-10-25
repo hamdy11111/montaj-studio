@@ -101,10 +101,14 @@ def main() -> int:
         for device in devices:
             try:
                 model = ASRModel.restore_from(args.model, map_location=device).eval()
+                print("PROGRESS 0.05", file=sys.stderr, flush=True)  # the model is loaded
+                hyps = []
                 with torch.inference_mode():
-                    hyps = model.transcribe(files, batch_size=4, timestamps=True, verbose=False)
-                if isinstance(hyps, tuple):
-                    hyps = hyps[0]
+                    # In groups of 8 pieces, so the app can show how far it is (one line per group on stderr).
+                    for g in range(0, len(files), 8):
+                        part = model.transcribe(files[g:g + 8], batch_size=4, timestamps=True, verbose=False)
+                        hyps.extend(part[0] if isinstance(part, tuple) else part)
+                        print(f"PROGRESS {0.05 + 0.95 * min(len(files), g + 8) / len(files):.3f}", file=sys.stderr, flush=True)
                 words = []
                 for (a, _), h in zip(spans, hyps):
                     off = a / rate

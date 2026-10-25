@@ -1,8 +1,10 @@
 // Applying an edit plan (montaj.editplan/1, see src/core/editPlan.js) through the Editing API as ONE transaction:
-// the revision is checked first, every edit goes through the normal timeline commands, the whole plan becomes a
-// single undo step "plan:<title>", and any failure restores the timeline as it was.
+// the revision is checked first, every edit goes through the normal timeline commands inside one timeline batch (no
+// copy/save/window update per edit — a long video's plan makes hundreds), the whole plan becomes a single undo step
+// "plan:<title>", and any failure restores the timeline as it was. Every 20 edits it lets the app breathe, so the
+// window never freezes.
 import { AppError } from "../core/validation.js";
-import { deepClone, US } from "../core/util.js";
+import { US } from "../core/util.js";
 import { DEFAULT_TEXT } from "../core/model.js";
 import { TEXT_PRESETS } from "../core/presets.js";
 import { GRAPHIC_TEMPLATES } from "../core/graphics.js";
@@ -34,13 +36,15 @@ export async function applyPlan(ctx, timelineId, plan, { expectedRevision, job }
   const T = ctx.services.timelines;
   T.checkRevision(timelineId, expectedRevision);
   const start = T.get(timelineId);
-  const depth = start.history.depth, snapshot = deepClone(start.timeline);
   const pieces = () => mainPieces(T.get(timelineId).timeline);
-  const exec = (cmd, args) => T.execAs(ctx.source, timelineId, cmd, args);
-  const op = (name, args) => OPERATION_INDEX.get(name).run(ctx, { timelineId, ...args });
+  let edits = 0;
+  const breathe = async () => { if (++edits % 20 === 0) await new Promise((r) => setImmediate(r)); };
+  const exec = async (cmd, args) => { await breathe(); return T.execAs(ctx.source, timelineId, cmd, args); };
+  const op = async (name, args) => { await breathe(); return OPERATION_INDEX.get(name).run(ctx, { timelineId, ...args }); };
   const done = [], skipped = [];
   const step = (p, label) => job?.progress?.(p, label);
   try {
+    return await T.batch(timelineId, `plan:${(plan.title || "edit").slice(0, 40)}`, async () => {
     if (plan.canvas) { step(0.05, "canvas"); await op("timeline_set_canvas", plan.canvas); done.push("canvas"); }
 
     // Cuts: per original main-track clip of each media, every cut that overlaps its source span.
@@ -141,14 +145,11 @@ export async function applyPlan(ctx, timelineId, plan, { expectedRevision, job }
     if (plan.audio?.normalizeLufs) { await op("audio_normalize", { targetLufs: plan.audio.normalizeLufs }); done.push(`loudness ${plan.audio.normalizeLufs} LUFS`); }
     if (plan.captions) { step(0.85, "captions"); const c = await applyCaptions(ctx, timelineId, plan.captions); done.push(`captions (${c.pages} pages, ${c.words} words)`); }
 
-    T.squash(timelineId, depth, `plan:${(plan.title || "edit").slice(0, 40)}`);
-    const now = T.get(timelineId);
     const end = pieces();
-    step(1, "done");
-    return { applied: done, skipped, warnings: check.warnings, before: { durationUs: check.summary.beforeUs }, after: { durationUs: end.length ? end[end.length - 1].end : 0 }, revision: now.revision, undoLabel: now.history.undoLabel };
+    return { applied: done, skipped, warnings: check.warnings, before: { durationUs: check.summary.beforeUs }, after: { durationUs: end.length ? end[end.length - 1].end : 0 } };
+    }, ctx.source).then((r) => { const now = T.get(timelineId); step(1, "done"); return { ...r, revision: now.revision, undoLabel: now.history.undoLabel }; });
   } catch (err) {
-    T.restore(timelineId, snapshot, depth, ctx.source);
-    err.details = { ...(err.details || {}), rolledBack: true };
+    err.details = { ...(err.details || {}), rolledBack: true }; // the batch put the timeline back
     throw err;
   }
 }

@@ -58,6 +58,37 @@ export class TimelineService {
     try { this.onChange({ timelineId, revision: entry.revision, label, source }); } catch { /* listener errors never break an edit */ }
   }
 
+  /**
+   * Many edits as one (an edit plan on a long video makes hundreds): no copy, check, save, undo entry or window update
+   * per edit — the timeline is checked and saved once, becomes one undo step `label`, and the window is told once.
+   * Any error puts the timeline back as it was. `fn` is async; it may await between edits so the window stays alive.
+   */
+  async batch(timelineId, label, fn, source = currentSource()) {
+    const entry = this.load(timelineId);
+    if (entry.batch) return fn();
+    const before = deepClone(entry.state);
+    entry.batch = { edits: 0 };
+    let result;
+    try {
+      result = await fn();
+      const problems = ops.validateTimeline(entry.state);
+      if (problems.length) throw new AppError("VALIDATION", "err.timelineInvalid", { problems: problems.slice(0, 5) });
+    } catch (err) {
+      entry.state = before;
+      entry.batch = null;
+      this.changed(timelineId, entry, "rollback", source);
+      throw err;
+    }
+    const edits = entry.batch.edits;
+    entry.batch = null;
+    if (edits) {
+      this.repos.timelines.saveState(entry.state);
+      entry.history.push(before, label);
+      this.changed(timelineId, entry, label, source);
+    }
+    return result;
+  }
+
   /** Merge the history entries made since `depth` into one undo step (a skill run). */
   squash(timelineId, depth, label) { return this.load(timelineId).history.squashSince(depth, label); }
 
@@ -82,6 +113,11 @@ export class TimelineService {
   /** Apply a synchronous mutation with history + persistence. */
   commit(timelineId, label, mutate, { coalesceKey = null, source = currentSource() } = {}) {
     const entry = this.load(timelineId);
+    if (entry.batch) { // inside batch(): edit in place; checked, saved, recorded and shown once at the end
+      const result = mutate(entry.state);
+      entry.batch.edits++;
+      return { timeline: entry.state, history: entry.history.info(), result, revision: entry.revision };
+    }
     const before = deepClone(entry.state);
     const work = deepClone(entry.state);
     const result = mutate(work);

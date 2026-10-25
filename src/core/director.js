@@ -19,7 +19,8 @@ import { US } from "./util.js";
 import { POLICY } from "./policy.js";
 import { MOMENT_TYPES } from "./momentsLexicon.js";
 import { detectMoments, isPunch, isReaction } from "./moments.js";
-import { findNumbers } from "./numbers.js";
+import { findNumbers, fmtNumber } from "./numbers.js";
+import { reelSelect } from "./reel.js";
 import { qaPlan, editTime, editAt, srcAfter, fitHead, headBox, reasonsToWatch, deadSpans, soundEvents } from "./qa.js";
 
 // ------------------------------------------------------------------ meaning → visuals
@@ -172,12 +173,14 @@ const SYNC_US = Math.round(POLICY.sync.tol * US);
  * decision, qa is the quality guards' verdict on the plan (core/qa.js).
  */
 export function directPlan(input) {
-  const { mediaId, durationUs, track = [], keywords = [], style = "energetic", cta = "", captionTemplate = "clean-pro", title = "Auto edit", corrections = [] } = input;
+  const { mediaId, durationUs, track = [], keywords = [], style = "energetic", cta = "", captionTemplate = "clean-pro", title = "Auto edit", corrections = [], targetUs = null, stabilize = true } = input;
   // Recognition fixes first, so graphics show the right words (the same fixes go to the captions).
   const words = correctWords((input.words || []).map((w) => ({ t: w.text, s: w.startUs, e: w.endUs })), corrections).map((w) => ({ text: w.t, startUs: w.s, endUs: w.e }));
   const st = DIRECTOR_STYLES[style] || DIRECTOR_STYLES.energetic;
-  const notes = [];
-  if (!words.length) return { plan: { schema: "montaj.editplan/1", title, audio: { denoise: true, enhanceVoice: true, normalizeLufs: -14 }, stabilize: true }, notes: ["no speech: clean-up and stabilization only"], qa: null };
+  // notes: the reasons in English (for agents); decisions: the same, structured (the app shows them in its language).
+  const notes = [], decisions = [];
+  const r1 = (v) => Math.round(v * 10) / 10;
+  if (!words.length) return { plan: { schema: "montaj.editplan/1", title, audio: { denoise: true, enhanceVoice: true, normalizeLufs: -14 }, stabilize: true }, notes: ["no speech: clean-up and stabilization only"], decisions: [{ k: "noSpeech" }], qa: null };
   const Z = POLICY.zoom, A = POLICY.angles, E = POLICY.emoji;
   const S = (s) => Math.round(s * US);
 
@@ -185,15 +188,33 @@ export function directPlan(input) {
   // recogniser's hallucinations go; the silence left between words depends on the moment.
   const moments = detectMoments(words, { keywords });
   const keep = visualBeats(words, track);
-  for (const [a, b] of keep) notes.push(`kept a wordless moment ${(a / US).toFixed(1)}–${(b / US).toFixed(1)} s (something is shown)`);
-  const { cuts: rawCuts, removed } = smartCuts(words, {
-    pace: POLICY.pace, rhythm: st.rhythm, durationUs, keep,
+  for (const [a, b] of keep) { notes.push(`kept a wordless moment ${(a / US).toFixed(1)}–${(b / US).toFixed(1)} s (something is shown)`); decisions.push({ k: "kept", from: r1(a / US), to: r1(b / US) }); }
+  const pace = (drop) => smartCuts(words, {
+    pace: POLICY.pace, rhythm: st.rhythm, durationUs, keep, drop,
     moments: moments.map((m) => ({ s: m.s, e: m.e, punch: isPunch(m) && m.score >= Z.minScore, reaction: isReaction(m) })),
   });
+  let { cuts: rawCuts, removed } = pace(null);
+  // A reel: the strongest whole sentences within the target, then paced again; when the result runs over by more than
+  // 2 s, the budget shrinks by the overshoot (the skill's loop, at most 3 rounds).
+  if (targetUs && editAt(rawCuts.sort((x, y) => x.fromUs - y.fromUs), durationUs) > targetUs + 2 * US) {
+    const base = removed;
+    let budget = null, sel = null;
+    for (let round = 0; round < 3; round++) {
+      sel = reelSelect(words, { targetUs, moments, keywords, removed: base, budgetUs: budget });
+      ({ cuts: rawCuts, removed } = pace(sel.drop));
+      const got = editAt(rawCuts.sort((x, y) => x.fromUs - y.fromUs), durationUs);
+      if (got <= targetUs + 2 * US) break;
+      budget = Math.max(0, (budget ?? targetUs - sel.units.filter((u) => u.must).reduce((n, u) => n + u.estUs, 0)) - (got - targetUs) - 500_000);
+    }
+    const kept = sel.units.filter((u) => u.kept);
+    notes.push(`reel of ${(targetUs / US).toFixed(0)} s: ${kept.length} of ${sel.units.length} sentences kept (by their role in the story and their moments)${sel.warning ? ` — ${sel.warning}` : ""}`);
+    decisions.push({ k: "reel", target: Math.round(targetUs / US), kept: kept.length, total: sel.units.length, short: !!sel.warning });
+  }
   const cuts = rawCuts.sort((x, y) => x.fromUs - y.fromUs);
   const total = editAt(cuts, durationUs);
   const why = {};
   for (const r of removed.values()) why[r] = (why[r] || 0) + 1;
+  decisions.push({ k: "pacing", rhythm: st.rhythm, cuts: cuts.length, before: r1(durationUs / US), after: r1(total / US), removed: why });
   notes.push(`pacing «${st.rhythm}»: ${cuts.length} cuts, ${(durationUs / US).toFixed(1)} → ${(total / US).toFixed(1)} s${Object.keys(why).length ? ` (removed: ${Object.entries(why).map(([k, n]) => `${n} ${k}`).join(", ")})` : ""}`);
   const kept = words.filter((w, i) => !removed.has(i) && editTime(cuts, w.startUs) !== null);
   const momentsKept = moments.filter((m) => editTime(cuts, m.s) !== null);
@@ -257,22 +278,37 @@ export function directPlan(input) {
   const TEXTS = new Set(["emerge-side", "rise-behind", "word-stack", "counter", "list-item", "pass-behind", "big-word", "title-reveal"]);
   const span = (g) => [editAt(cuts, g.fromUs), editAt(cuts, Math.min(durationUs, g.toUs))];
   const collides = (g, list) => TEXTS.has(g.template) && list.some((o) => TEXTS.has(o.template) && span(g)[0] < span(o)[1] && span(g)[1] > span(o)[0]);
+  // What a graphic shows, for the decisions list.
+  const shown = (g) => {
+    const p = g.params || {};
+    if (g.template === "counter") return { text: `${p.prefix || ""}${fmtNumber(p.to)}${p.suffix || ""}` };
+    if (g.template === "head-emoji" || g.template === "emoji") return { emoji: p.emoji };
+    if (g.template === "list-item") return { text: p.text, n: p.number };
+    return { text: p.text || (p.words || []).join(" / ") };
+  };
   const addGraphic = (g, whyText) => {
     graphics.push({ mediaId, ...g, fromUs: Math.max(0, Math.round(g.fromUs)), toUs: Math.round(Math.min(durationUs, g.toUs)), reason: whyText.slice(0, 200), sfx: g.sfx !== false });
     taken.push({ t: editAt(cuts, g.fromUs), kind: g.template, light: g.template === "head-emoji" });
     notes.push(`${g.template} at ${(g.fromUs / US).toFixed(1)} s: ${whyText}`);
+    decisions.push({ k: "graphic", template: g.template, at: r1(editAt(cuts, g.fromUs) / US), ...shown(g) });
   };
   const inList = new Set(nums.lists.flat());
-  for (const L of nums.lists) L.forEach((idx, k) => {
-    const x = nums.numbers[idx], next = nums.numbers[L[k + 1]];
-    addGraphic({ template: "list-item", fromUs: x.at - SYNC_US, toUs: next ? next.at - SYNC_US : srcAfter(cuts, x.at, 1_500_000, durationUs), params: { number: String(k + 1), text: x.label.slice(0, 60), position: "top" } }, `list point ${k + 1}: «${x.label}»`);
-  });
+  for (const L of nums.lists) {
+    const items = L.map((idx, k) => {
+      const x = nums.numbers[idx], next = nums.numbers[L[k + 1]];
+      return [{ template: "list-item", fromUs: x.at - SYNC_US, toUs: next ? next.at - SYNC_US : srcAfter(cuts, x.at, 1_500_000, durationUs), params: { number: String(k + 1), text: x.label.slice(0, 60), position: "top" } }, `list point ${k + 1}: «${x.label}»`];
+    });
+    if (items.some(([g]) => collides(g, graphics))) continue; // never on top of another text
+    for (const [g, why] of items) addGraphic(g, why);
+  }
   for (const [i, x] of nums.numbers.entries()) {
     if (inList.has(i) || (x.kind === "info" && !x.unit)) continue;
     const t = editAt(cuts, x.at);
     if (taken.some((o) => Math.abs(o.t - t) < 1_500_000)) continue;
     const accent = x.sign === "-" ? "#FF4D6D" : x.sign === "+" ? "#3EE07B" : "#FFD84D";
-    addGraphic({ template: "counter", fromUs: x.at - SYNC_US, toUs: srcAfter(cuts, x.at, 2_400_000, durationUs), params: { from: 0, to: x.value, decimals: Number.isInteger(x.value) ? 0 : 1, prefix: x.sign === "-" ? "−" : x.sign, suffix: x.unit ? ` ${x.unit}` : "", label: "", accent, position: "top" } }, `the number «${x.label}» (${x.kind})`);
+    const g = { template: "counter", fromUs: x.at - SYNC_US, toUs: srcAfter(cuts, x.at, 2_400_000, durationUs), params: { from: 0, to: x.value, decimals: Number.isInteger(x.value) ? 0 : 1, prefix: x.sign === "-" ? "−" : x.sign, suffix: x.unit ? ` ${x.unit}` : "", label: "", accent, position: "top" } };
+    if (collides(g, graphics)) continue; // a counter still counting: the next number waits
+    addGraphic(g, `the number «${x.label}» (${x.kind})`);
   }
   const numberSents = new Set(nums.numbers.map((x) => x.seg));
 
@@ -373,6 +409,7 @@ export function directPlan(input) {
   if (cta) {
     graphics.push({ mediaId, template: "follow-cta", fromUs: Math.max(0, Math.round(lastWord.endUs - 2_600_000)), toUs: Math.round(Math.min(durationUs, lastWord.endUs + 400_000)), params: { text: cta, position: "top" }, sfx: true });
     notes.push(`a call to action at the end: «${cta}»`);
+    decisions.push({ k: "cta", text: cta });
   }
   graphics.push({ mediaId, template: "progress-bar", fromUs: kept[0].startUs, toUs: lastWord.endUs, params: { position: "top", thickness: 0.006 } });
 
@@ -387,9 +424,11 @@ export function directPlan(input) {
     cuts: cuts.map((c) => ({ mediaId, fromUs: Math.round(c.fromUs), toUs: Math.round(c.toUs), reason: c.reason })),
     zooms: [...framing, ...meaningZooms].map((z) => ({ ...z, fromUs: Math.round(z.fromUs), toUs: Math.round(z.toUs) })).sort((a, b) => a.fromUs - b.fromUs),
     transitions, graphics, sfx: [],
-    stabilize: true,
+    stabilize: !!stabilize,
     audio: { denoise: true, enhanceVoice: true, normalizeLufs: -14 },
   };
+
+  const punchRoom = (t) => plan.zooms.filter((x) => /^punch/.test(x.reason)).every((x) => Math.abs(editAt(cuts, x.fromUs) - t) >= S(Z.punchGap));
 
   // 7. Retention: a reason to keep watching at least every 6 s — a dead stretch gets its strongest word on screen
   // (or a punch-in when there is no person to place it by).
@@ -408,19 +447,48 @@ export function directPlan(input) {
         const made = wordGraphic(kindAt(best.w), best.w, [best.w], [{ w: best.w, score: 1 }]);
         plan.graphics.push({ mediaId, ...made[0], fromUs: Math.round(made[0].fromUs), toUs: Math.round(Math.min(durationUs, made[0].toUs)), reason: `retention: ${made[1]}`.slice(0, 200), sfx: true });
         notes.push(`${made[0].template} at ${(made[0].fromUs / US).toFixed(1)} s: nothing new for ${((b - a) / US).toFixed(1)} s — «${pick(best.w)}»`);
+        decisions.push({ k: "retention", template: made[0].template, at: r1(editAt(cuts, made[0].fromUs) / US), gap: r1((b - a) / US), text: pick(best.w) });
+      } else if (!track.length && !collides({ template: "big-word", fromUs: startAt(best.w), toUs: srcAfter(cuts, best.w.startUs, 1_600_000, durationUs) }, plan.graphics)) {
+        // Where the person is is not known: the word, large, at the top of the frame (away from a face).
+        emphasis.add(pick(best.w));
+        plan.graphics.push({ mediaId, template: "big-word", fromUs: Math.round(startAt(best.w)), toUs: Math.round(srcAfter(cuts, best.w.startUs, 1_600_000, durationUs)), params: { text: pick(best.w), position: "top", size: 0.8 }, reason: `retention: the word «${pick(best.w)}» on screen`.slice(0, 200), sfx: true });
+        notes.push(`big-word at ${(best.w.startUs / US).toFixed(1)} s: nothing new for ${((b - a) / US).toFixed(1)} s — «${pick(best.w)}»`);
+        decisions.push({ k: "retention", template: "big-word", at: r1(editAt(cuts, best.w.startUs) / US), gap: r1((b - a) / US), text: pick(best.w) });
       } else {
         const z = Z.punch, from = Math.max(0, best.w.startUs - S(z.before)), to = srcAfter(cuts, best.w.startUs, S(z.after), durationUs);
         if (plan.zooms.some((x) => x.fromUs < to && x.toUs > from && /^(punch|push)/.test(x.reason))) continue;
+        if (!punchRoom(editAt(cuts, from))) continue; // punch-ins at least 4 s apart
         const fr = fitHead(Math.min(angleAt(best.w.startUs) * z.factor, C * z.factor), headBox(track, from, to, fit.aspect), fit);
         if (fr.scale < 1.02) continue; // the head fills the frame: no room for a punch-in
         plan.zooms = plan.zooms.flatMap((x) => (x.toUs <= from || x.fromUs >= to ? [x] : [{ ...x, toUs: from }, { ...x, fromUs: to }].filter((y) => y.toUs - y.fromUs > 300_000)));
         plan.zooms.push({ mediaId, fromUs: Math.round(from), toUs: Math.round(to), ...fr, reason: `punch-in: retention «${pick(best.w)}»` });
         plan.zooms.sort((p, q) => p.fromUs - q.fromUs);
         notes.push(`punch-in at ${(from / US).toFixed(1)} s: nothing new for ${((b - a) / US).toFixed(1)} s — «${pick(best.w)}»`);
+        decisions.push({ k: "retention", template: "punch", at: r1(editAt(cuts, from) / US), gap: r1((b - a) / US), text: pick(best.w) });
       }
       fixed = true;
     }
     if (!fixed) break;
+  }
+
+  // The ending strikes (the skill's ending rule): when the last 2 s have no element, sound, punch-in or question, the
+  // strongest word there gets a punch-in.
+  const endFrom = total - S(POLICY.ending.strike);
+  const struck = plan.graphics.some((g) => g.template !== "progress-bar" && editAt(cuts, g.toUs) >= endFrom) || sfxWanted.some((x) => editAt(cuts, x.atUs) >= endFrom)
+    || plan.zooms.some((z) => /^punch/.test(z.reason) && editAt(cuts, z.toUs) >= endFrom) || kept.some((w) => /[?؟]/.test(w.text) && (editTime(cuts, w.startUs) ?? -1) >= total - S(POLICY.ending.question));
+  if (!struck) {
+    const last = kept.filter((w) => (editTime(cuts, w.startUs) ?? -1) >= endFrom - S(1) && !isStop(w.text)).sort((a, b) => wordScore(b.text, kw) - wordScore(a.text, kw))[0];
+    if (last && punchRoom(editTime(cuts, last.startUs))) {
+      const z = Z.punch, from = Math.max(0, last.startUs - S(z.before)), to = Math.min(durationUs, srcAfter(cuts, last.startUs, S(z.after), durationUs));
+      const fr = fitHead(Math.min(angleAt(last.startUs) * z.factor, C * z.factor), headBox(track, from, to, fit.aspect), fit);
+      if (fr.scale >= 1.02) {
+        plan.zooms = plan.zooms.flatMap((x) => (x.toUs <= from || x.fromUs >= to ? [x] : [{ ...x, toUs: from }, { ...x, fromUs: to }].filter((y) => y.toUs - y.fromUs > 300_000)));
+        plan.zooms.push({ mediaId, fromUs: Math.round(from), toUs: Math.round(to), ...fr, reason: `punch-in: the ending «${pick(last)}»` });
+        plan.zooms.sort((p, q) => p.fromUs - q.fromUs);
+        notes.push(`punch-in on the last words «${pick(last)}» (the video ends on a strike)`);
+        decisions.push({ k: "ending", text: pick(last) });
+      }
+    }
   }
 
   // 8. Sound, governed (the skill's sfx rules): at least 1 s between sound events (sounds 0.08 s apart are one), at
@@ -440,13 +508,34 @@ export function directPlan(input) {
     const t = editAt(cuts, x.atUs);
     if (fits([t]) && ev.length < capSfx) { ev.push(t); plan.sfx.push({ mediaId, atUs: x.atUs, sound: x.sound }); }
   }
-  if (silenced) notes.push(`${silenced} graphic(s) play without their sound effect (sounds kept at least ${POLICY.sfx.minGap} s apart)`);
+  if (silenced) { notes.push(`${silenced} graphic(s) play without their sound effect (sounds kept at least ${POLICY.sfx.minGap} s apart)`); decisions.push({ k: "silenced", n: silenced }); }
 
   plan.captions = { template: captionTemplate, reveal: true, keywords: [...emphasis].slice(0, 60), ...(corrections.length ? { corrections } : {}) };
   const qa = qaPlan(plan, { words, removed, durationUs, track, style, numbers: nums.numbers, fit });
   const fails = qa.checks.filter((c) => c.level === "fail");
   notes.push(qa.ok ? `quality guards: all ${qa.passed.length} passed` : `quality guards: ${fails.length} problem(s) — ${fails.slice(0, 3).map((c) => c.message).join("; ")}`);
-  return { plan, notes, qa };
+  return { plan, notes, qa, decisions };
+}
+
+/**
+ * How long the smart edit's stages take, in seconds, for a video of `durationS` and its size — measured on the
+ * development machine (RTX 4090, the Egyptian model on the CPU): speech 20 s + 0.03 × duration (19.4 min → 33–59 s);
+ * stabilization ≈ 0.6 × duration per 720p of output (≤ 1080p): 720p50, 19.4 min → 10.5 min; 1080p30, 76 s → 103 s;
+ * the person mask ≈ 0.41 × duration at 720p (19.4 min → 8 min), × √(pixels / 720p), plus reading it 0.05 ×; the plan
+ * and applying it ~10 s + 0.01 ×. A stage already done (cached) costs ~1 s. Returns { stages: [{ key, sec }],
+ * totalSec } — also the weights of the progress bar.
+ */
+export function estimateWork({ durationS, width = 1920, height = 1080, cached = {}, stabilize = true, person = true }) {
+  const P720 = 1280 * 720, px = Math.max(1, (width || 1920) * (height || 1080));
+  const stabK = 0.6 * Math.min(px, 1920 * 1080) / P720, matteK = 0.41 * Math.sqrt(px / P720);
+  const stages = [
+    { key: "words", sec: cached.words ? 1 : 20 + 0.03 * durationS },
+    ...(stabilize ? [{ key: "stabilize", sec: cached.stabilize ? 1 : stabK * durationS }] : []),
+    ...(person ? [{ key: "person", sec: cached.person ? 1 + 0.05 * durationS : (matteK + 0.05) * durationS }] : []),
+    { key: "plan", sec: 2 },
+    { key: "apply", sec: 10 + 0.01 * durationS },
+  ];
+  return { stages, totalSec: Math.round(stages.reduce((n, x) => n + x.sec, 0)) };
 }
 
 export { pauseKind };

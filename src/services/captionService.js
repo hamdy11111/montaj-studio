@@ -113,12 +113,17 @@ export function refineWordTimes(words, { env, frameUs }) {
 }
 
 /** Run a process, collect stdout/stderr; rejects with PROVIDER err on failure. */
-function exec(cmd, args, { timeoutMs = 60_000, signal } = {}) {
+function exec(cmd, args, { timeoutMs = 60_000, signal, onStderrLine } = {}) {
   return new Promise((resolve, reject) => {
     const child = spawn(cmd, args, { windowsHide: true });
     let out = "", err = "";
     child.stdout.on("data", (d) => { out += d.toString("utf8"); });
-    child.stderr.on("data", (d) => { err += d.toString("utf8"); if (err.length > 20000) err = err.slice(-10000); });
+    let line = "";
+    child.stderr.on("data", (d) => {
+      const s = d.toString("utf8");
+      err += s; if (err.length > 20000) err = err.slice(-10000);
+      if (onStderrLine) { line += s; const parts = line.split(/\r?\n/); line = parts.pop(); for (const l of parts) onStderrLine(l); }
+    });
     const timer = setTimeout(() => child.kill(), timeoutMs);
     signal?.addEventListener("abort", () => child.kill(), { once: true });
     child.on("error", (e) => { clearTimeout(timer); reject(new AppError("PROVIDER", "err.whisperFailed", { message: e.message })); });
@@ -241,7 +246,7 @@ export class CaptionService {
    * words: [{ text, startUs, endUs, p }], segments: [{ text, startUs, endUs, w0, w1 }] } (w0..w1 = word indices).
    * Cached in cache/transcripts; `fresh` ignores the cache.
    */
-  async transcribeWords({ mediaId, language = "auto", fresh = false, signal } = {}) {
+  async transcribeWords({ mediaId, language = "auto", fresh = false, signal, onProgress } = {}) {
     const lang = /^[a-z]{2}$|^auto$/.test(language) ? language : "auto";
     await this.detectEngines(false, lang);
     const engine = this.engine(lang);
@@ -259,7 +264,7 @@ export class CaptionService {
     fs.mkdirSync(work, { recursive: true });
     try {
       const wav = await this.extractWav(m, work, { signal });
-      const result = engine === "nemo" ? await this.runNemo(wav, signal)
+      const result = engine === "nemo" ? await this.runNemo(wav, signal, onProgress)
         : engine === "fasterwhisper" ? await this.runFasterWhisper(wav, lang, signal) : await this.runWhisperCppWords(wav, work, lang, signal);
       const snapped = refineWordTimes(result.data.words, wavEnvelope(wav));
       for (const sg of result.data.segments) { const a = snapped.words[sg.w0], b = snapped.words[sg.w1]; if (a && b) { sg.startUs = a.startUs; sg.endUs = b.endUs; } }
@@ -289,10 +294,11 @@ export class CaptionService {
   }
 
   /** The Egyptian model through the program's runtime; same JSON as faster-whisper. */
-  async runNemo(wav, signal) {
+  async runNemo(wav, signal, onProgress) {
     const py = nemoPython(this.paths.root), model = nemoModel(this.paths.root);
     if (!py || !model) throw new AppError("PROVIDER", "err.whisperNotConfigured");
-    return this.parseWordJson(await exec(py, ["-X", "utf8", NEMO_SCRIPT, "--audio", wav, "--model", model], { timeoutMs: 60 * 60_000, signal }));
+    const onStderrLine = (l) => { const m = /^PROGRESS ([\d.]+)/.exec(l); if (m) onProgress?.(Number(m[1])); };
+    return this.parseWordJson(await exec(py, ["-X", "utf8", NEMO_SCRIPT, "--audio", wav, "--model", model], { timeoutMs: 6 * 60 * 60_000, signal, onStderrLine }));
   }
 
   parseWordJson(out) {

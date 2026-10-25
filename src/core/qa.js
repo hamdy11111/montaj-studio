@@ -146,7 +146,9 @@ const sameWord = (a, b) => { const x = stripPrefix(a), y = stripPrefix(b); retur
  */
 export function qaPlan(plan, { words = [], removed = new Map(), durationUs, track = [], style = "energetic", numbers = [], fit = {} } = {}) {
   const P = POLICY, checks = [], passed = [];
-  const add = (id, level, message, atUs) => checks.push({ id, level, message, ...(atUs !== undefined ? { atUs: Math.round(atUs) } : {}) });
+  // message: English (agents); args: the values, for the app to say it in its own language (qa.<id>).
+  const sec = (us) => Math.round(us / 1e5) / 10;
+  const add = (id, level, message, atUs, args = {}) => checks.push({ id, level, message, args, ...(atUs !== undefined ? { atUs: Math.round(atUs) } : {}) });
   const cuts = [...(plan.cuts || [])].sort((a, b) => a.fromUs - b.fromUs);
   const total = editAt(cuts, durationUs);
   const fmt = (us) => `${(us / US).toFixed(1)} s`;
@@ -155,41 +157,41 @@ export function qaPlan(plan, { words = [], removed = new Map(), durationUs, trac
   // 1. Speech intact.
   const kept = words.map((w, i) => ({ w, i })).filter((x) => !removed.has(x.i));
   const inside = kept.filter(({ w }) => cuts.some((c) => c.fromUs < w.endUs - S(0.03) && c.toUs > w.startUs + S(0.03) && !(c.fromUs <= (w.startUs + w.endUs) / 2 && c.toUs >= (w.startUs + w.endUs) / 2)));
-  for (const { w } of inside) add("speech.cutInsideWord", "fail", `a cut inside the word «${w.text}»`, w.startUs);
+  for (const { w } of inside) add("speech.cutInsideWord", "fail", `a cut inside the word «${w.text}»`, w.startUs, { word: w.text, at: sec(w.startUs) });
   pass("speech.cutInsideWord", !inside.length);
   const lost = kept.filter(({ w }) => cuts.some((c) => c.fromUs <= (w.startUs + w.endUs) / 2 && c.toUs >= (w.startUs + w.endUs) / 2));
-  for (const { w } of lost) add("speech.lostWord", "fail", `the word «${w.text}» is cut out with no reason`, w.startUs);
+  for (const { w } of lost) add("speech.lostWord", "fail", `the word «${w.text}» is cut out with no reason`, w.startUs, { word: w.text, at: sec(w.startUs) });
   pass("speech.lostWord", !lost.length);
 
   // 2. A reason to keep watching at least every 6 s.
   const dead = deadSpans(reasonsToWatch(plan, { words: kept.map((x) => x.w), cuts, numbers }), total);
-  for (const [a, b] of dead) add("retention.dead", "fail", `${fmt(b - a)} with nothing new on screen (${fmt(a)}–${fmt(b)} of the edit)`);
+  for (const [a, b] of dead) add("retention.dead", "fail", `${fmt(b - a)} with nothing new on screen (${fmt(a)}–${fmt(b)} of the edit)`, undefined, { len: sec(b - a), from: sec(a), to: sec(b) });
   pass("retention.dead", !dead.length);
 
   // 3. Hook and ending.
   const firstWord = kept.map((x) => editTime(cuts, x.w.startUs)).filter((t) => t !== null)[0];
-  if (firstWord === undefined || firstWord > S(P.hook.firstCaption)) add("hook.firstWords", "warn", `the first words start at ${fmt(firstWord ?? total)} (they should start within ${P.hook.firstCaption} s)`);
+  if (firstWord === undefined || firstWord > S(P.hook.firstCaption)) add("hook.firstWords", "warn", `the first words start at ${fmt(firstWord ?? total)} (they should start within ${P.hook.firstCaption} s)`, undefined, { at: sec(firstWord ?? total), max: P.hook.firstCaption });
   else passed.push("hook.firstWords");
   const endFrom = total - S(P.ending.strike);
   const strike = (plan.graphics || []).some((g) => g.template !== "progress-bar" && editAt(cuts, g.toUs) >= endFrom)
     || (plan.sfx || []).some((x) => editAt(cuts, x.atUs) >= endFrom) || (plan.zooms || []).some((z) => editAt(cuts, z.toUs) >= endFrom && /^punch/.test(z.reason || ""))
     || kept.some(({ w }) => /[?؟]/.test(w.text) && (editTime(cuts, w.startUs) ?? -1) >= total - S(P.ending.question));
-  if (!strike) add("ending.strike", "warn", "the last 2 s have no strike (an element, a sound, a punch-in or a question): the video may just stop");
+  if (!strike) add("ending.strike", "warn", "the last 2 s have no strike (an element, a sound, a punch-in or a question): the video may just stop", undefined, { sec: P.ending.strike });
   else passed.push("ending.strike");
 
   // 4. Zooms: no overlap, punches spaced, the head never cropped.
   const zs = [...(plan.zooms || [])].sort((a, b) => a.fromUs - b.fromUs);
   let zoomOk = true;
-  for (let i = 1; i < zs.length; i++) if (zs[i].fromUs < zs[i - 1].toUs - 1000) { zoomOk = false; add("zoom.overlap", "fail", `two zooms overlap at ${fmt(zs[i].fromUs)}`, zs[i].fromUs); }
+  for (let i = 1; i < zs.length; i++) if (zs[i].fromUs < zs[i - 1].toUs - 1000) { zoomOk = false; add("zoom.overlap", "fail", `two zooms overlap at ${fmt(zs[i].fromUs)}`, zs[i].fromUs, { at: sec(editAt(cuts, zs[i].fromUs)) }); }
   pass("zoom.overlap", zoomOk);
   const punches = zs.filter((z) => /^punch/.test(z.reason || "")).map((z) => editAt(cuts, z.fromUs));
   const close = punches.filter((t, i) => i && t - punches[i - 1] < S(P.zoom.punchGap));
-  for (const t of close) add("zoom.punchGap", "warn", `two punch-ins within ${P.zoom.punchGap} s (at ${fmt(t)} of the edit)`);
+  for (const t of close) add("zoom.punchGap", "warn", `two punch-ins within ${P.zoom.punchGap} s (at ${fmt(t)} of the edit)`, undefined, { gap: P.zoom.punchGap, at: sec(t) });
   pass("zoom.punchGap", !close.length);
   let headOk = true;
   for (const z of zs) {
     const box = headBox(track, z.fromUs, z.toUs, fit.aspect || 1);
-    if (box && !headInside(z, box, fit)) { headOk = false; add("face.cropped", "fail", `a ×${z.scale} zoom at ${fmt(z.fromUs)} cuts into the head's margins`, z.fromUs); }
+    if (box && !headInside(z, box, fit)) { headOk = false; add("face.cropped", "fail", `a ×${z.scale} zoom at ${fmt(z.fromUs)} cuts into the head's margins`, z.fromUs, { scale: z.scale, at: sec(editAt(cuts, z.fromUs)) }); }
   }
   pass("face.cropped", headOk);
 
@@ -197,10 +199,10 @@ export function qaPlan(plan, { words = [], removed = new Map(), durationUs, trac
   const emo = (plan.graphics || []).filter((g) => g.template === "head-emoji" || g.template === "emoji").map((g) => ({ t: editAt(cuts, g.fromUs), e: g.params?.emoji })).sort((a, b) => a.t - b.t);
   const cap = Math.max(1, Math.floor((P.emoji.perMin * total) / (60 * US)));
   let emoOk = true;
-  if (total > S(20) && emo.length > cap) { emoOk = false; add("emoji.count", "fail", `${emo.length} emoji for ${fmt(total)} (at most ${cap})`); }
+  if (total > S(20) && emo.length > cap) { emoOk = false; add("emoji.count", "fail", `${emo.length} emoji for ${fmt(total)} (at most ${cap})`, undefined, { n: emo.length, total: sec(total), cap }); }
   emo.forEach((x, i) => {
-    if (i && x.t - emo[i - 1].t < S(P.emoji.minGap)) { emoOk = false; add("emoji.gap", "fail", `two emoji within ${P.emoji.minGap} s (at ${fmt(x.t)})`); }
-    if (emo.some((y, j) => j < i && y.e === x.e && x.t - y.t < S(P.emoji.sameWindow))) { emoOk = false; add("emoji.repeat", "fail", `the same emoji twice within ${P.emoji.sameWindow} s (${x.e} at ${fmt(x.t)})`); }
+    if (i && x.t - emo[i - 1].t < S(P.emoji.minGap)) { emoOk = false; add("emoji.gap", "fail", `two emoji within ${P.emoji.minGap} s (at ${fmt(x.t)})`, undefined, { gap: P.emoji.minGap, at: sec(x.t) }); }
+    if (emo.some((y, j) => j < i && y.e === x.e && x.t - y.t < S(P.emoji.sameWindow))) { emoOk = false; add("emoji.repeat", "fail", `the same emoji twice within ${P.emoji.sameWindow} s (${x.e} at ${fmt(x.t)})`, undefined, { win: P.emoji.sameWindow, emoji: x.e, at: sec(x.t) }); }
   });
   pass("emoji", emoOk);
 
@@ -209,9 +211,9 @@ export function qaPlan(plan, { words = [], removed = new Map(), durationUs, trac
   const events = [];
   for (const e of ev) { const last = events[events.length - 1]; if (last && e.t - last.t <= S(P.sfx.layered)) last.what += ` + ${e.what}`; else events.push({ ...e }); }
   let sfxOk = true;
-  events.forEach((e, i) => { if (i && e.t - events[i - 1].t < S(P.sfx.minGap)) { sfxOk = false; add("sfx.gap", "fail", `two sound effects ${fmt(e.t - events[i - 1].t)} apart at ${fmt(e.t)} (${events[i - 1].what} / ${e.what})`); } });
+  events.forEach((e, i) => { if (i && e.t - events[i - 1].t < S(P.sfx.minGap)) { sfxOk = false; add("sfx.gap", "fail", `two sound effects ${fmt(e.t - events[i - 1].t)} apart at ${fmt(e.t)} (${events[i - 1].what} / ${e.what})`, undefined, { gap: sec(e.t - events[i - 1].t), at: sec(e.t) }); } });
   const perMin = events.length / Math.max(1, total / (60 * US));
-  if (perMin > P.sfx.perMin) { sfxOk = false; add("sfx.count", "fail", `${perMin.toFixed(1)} sound effects per minute (at most ${P.sfx.perMin})`); }
+  if (perMin > P.sfx.perMin) { sfxOk = false; add("sfx.count", "fail", `${perMin.toFixed(1)} sound effects per minute (at most ${P.sfx.perMin})`, undefined, { perMin: Math.round(perMin * 10) / 10, max: P.sfx.perMin }); }
   pass("sfx", sfxOk);
 
   // 7. Sync: no written word appears before it is said (and is then said within 6 s).
@@ -222,7 +224,7 @@ export function qaPlan(plan, { words = [], removed = new Map(), durationUs, trac
     const at = editAt(cuts, g.fromUs);
     for (const word of shown) {
       const said = spoken.find((x) => x.t >= at - S(P.sync.spoil) && sameWord(x.text, word) && x.t <= at + S(P.sync.spoil));
-      if (said && said.t > at + S(P.sync.tol) && g.template !== "word-stack") { syncOk = false; add("sync.early", "fail", `«${word}» appears ${fmt(said.t - at)} before it is said (${g.template})`, g.fromUs); }
+      if (said && said.t > at + S(P.sync.tol) && g.template !== "word-stack") { syncOk = false; add("sync.early", "fail", `«${word}» appears ${fmt(said.t - at)} before it is said (${g.template})`, g.fromUs, { word, early: sec(said.t - at), template: g.template, at: sec(at) }); }
     }
   }
   pass("sync.early", syncOk);
@@ -231,7 +233,7 @@ export function qaPlan(plan, { words = [], removed = new Map(), durationUs, trac
   const TEXTS = new Set(["emerge-side", "rise-behind", "word-stack", "counter", "list-item", "pass-behind", "big-word", "title-reveal"]);
   const texts = (plan.graphics || []).filter((g) => TEXTS.has(g.template)).map((g) => ({ g, a: editAt(cuts, g.fromUs), b: editAt(cuts, Math.min(durationUs, g.toUs)) })).sort((x, y) => x.a - y.a);
   let textOk = true;
-  texts.forEach((x, i) => { const prev = texts.slice(0, i).find((y) => x.a < y.b - 20_000); if (prev) { textOk = false; add("text.overlap", "fail", `${x.g.template} at ${fmt(x.a)} appears while ${prev.g.template} is still on screen`, x.g.fromUs); } });
+  texts.forEach((x, i) => { const prev = texts.slice(0, i).find((y) => x.a < y.b - 20_000); if (prev) { textOk = false; add("text.overlap", "fail", `${x.g.template} at ${fmt(x.a)} appears while ${prev.g.template} is still on screen`, x.g.fromUs, { template: x.g.template, other: prev.g.template, at: sec(x.a) }); } });
   pass("text.overlap", textOk);
 
   // Stats.
@@ -248,7 +250,7 @@ export function qaPlan(plan, { words = [], removed = new Map(), durationUs, trac
     sfxPerMin: Math.round(perMin * 10) / 10, emoji: emo.length,
   };
   const ref = P.cutsPerMin[style];
-  if (ref && (stats.cutsPerMin < ref[0] * 0.7 || stats.cutsPerMin > ref[1] * 1.3)) add("pace.cutsPerMin", "warn", `${stats.cutsPerMin} cuts per minute (the style's reference: ${ref[0]}–${ref[1]})`);
+  if (ref && (stats.cutsPerMin < ref[0] * 0.7 || stats.cutsPerMin > ref[1] * 1.3)) add("pace.cutsPerMin", "warn", `${stats.cutsPerMin} cuts per minute (the style's reference: ${ref[0]}–${ref[1]})`, undefined, { cpm: stats.cutsPerMin, lo: ref[0], hi: ref[1] });
   else passed.push("pace.cutsPerMin");
   return { checks, passed, stats, ok: !checks.some((c) => c.level === "fail") };
 }
