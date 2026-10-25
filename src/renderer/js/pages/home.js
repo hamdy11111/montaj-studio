@@ -82,7 +82,27 @@ export function renderHome(root, params = {}) {
   offs.push(app.events.on("notifications", () => { if (view === "notifications") draw(); }));
   // Projects created, filled or trashed by an agent (MCP) appear without reopening the page.
   offs.push(on("agents:activity", debounce((e) => { if ((view === "projects" || view === "space") && /^(project_|media_import|timeline_add_clip|skills_execute)/.test(e.op)) draw(); }, 400)));
+  askSpeechModel();
   return () => { offs.forEach((f) => f()); return true; };
+}
+
+/**
+ * Once per launch (and at most once a week after «Later»): if the Egyptian speech model is not prepared, offer to
+ * prepare it — a regular user would not know that captions and cutting need it.
+ */
+let speechAsked = false;
+const ASR_LATER_KEY = "montaj.asr.later";
+async function askSpeechModel() {
+  if (speechAsked) return;
+  speechAsked = true;
+  if (Date.now() - store.get(ASR_LATER_KEY, 0) < 7 * 86_400_000) return;
+  const st = await call("captions.status").catch(() => null);
+  if (!st || st.nemo?.ready) return;
+  const setup = await call("asr.setupStatus").catch(() => ({}));
+  const ok = await confirmDialog({ title: t("asr.title"), message: t("asr.prompt", { size: formatBytes(setup.downloadBytes || 1.7e9) }), okLabel: t("asr.setupNow"), cancelLabel: t("asr.later") });
+  if (!ok) { store.set(ASR_LATER_KEY, Date.now()); return; }
+  const { openAsrSetup } = await import("../dialogs/asrSetup.js");
+  openAsrSetup();
 }
 
 // ---------------------------------------------------------------- projects

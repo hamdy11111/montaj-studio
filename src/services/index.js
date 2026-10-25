@@ -10,6 +10,7 @@ import { ProjectService } from "./projectService.js";
 import { AnalysisService } from "./analysisService.js";
 import { TtsService } from "./ttsService.js";
 import { CaptionService } from "./captionService.js";
+import { AsrSetupService } from "./asrSetupService.js";
 import { MatteService } from "./matteService.js";
 import { StabilizeService } from "./stabilizeService.js";
 import { BackupService } from "./backupService.js";
@@ -36,6 +37,7 @@ export async function createServices({ root, appVersion = "1.0.0", notify = () =
   const projects = new ProjectService({ repos, paths, media, settings, timelines });
   const tts = new TtsService({ paths, media });
   const captions = new CaptionService({ repos, paths, settings });
+  const asrSetup = new AsrSetupService({ paths, notify, log });
   const mattes = new MatteService({ repos, paths, settings, log, notify });
   const stabilizer = new StabilizeService({ repos, paths, log, notify });
   exporter.mattes = mattes;
@@ -48,5 +50,5 @@ export async function createServices({ root, appVersion = "1.0.0", notify = () =
   const packages = new PackageService({ repos, paths, media });
   const purged = projects.purgeExpired();
   if (settings.get("draft").autoBackup) { try { backup.autoBackup(); } catch (e) { log("auto backup failed", e.message); } }
-  return { paths, repos, settings, media, analysis, timelines, exporter, projects, tts, captions, mattes, stabilizer, backup, packages, startup: { purged } };
+  return { paths, repos, settings, media, analysis, timelines, exporter, projects, tts, captions, asrSetup, mattes, stabilizer, backup, packages, startup: { purged } };
 }

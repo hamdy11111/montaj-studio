@@ -91,8 +91,13 @@ export function openSettings(initialTab = "draft") {
     } else if (tab === "providers") {
       const st = app.caps?.captions;
       const fwStatus = h("span", { class: "muted" }, "…"), nemoStatus = h("span", { class: "muted" }, "…");
+      const nemoBtn = h("button", { class: "btn small primary", style: { display: "none" }, onclick: async () => {
+        const { openAsrSetup } = await import("./asrSetup.js");
+        openAsrSetup({ onReady: (c) => showFw(c) });
+      } }, icon("download"), t("asr.go"));
       const showFw = (c) => {
         const nm = c?.nemo;
+        nemoBtn.style.display = nm?.ready ? "none" : "";
         nemoStatus.textContent = nm?.ready ? t("set.nemoReady", { version: nm.version, device: "CPU" })
           : !nm?.modelFile ? t("set.nemoNoModel") : !nm?.python ? t("set.nemoNoRuntime") : t("set.nemoBroken");
         nemoStatus.className = nm?.ready ? "badge local" : "muted";
@@ -107,7 +112,7 @@ export function openSettings(initialTab = "draft") {
       modelIn.addEventListener("change", () => set("providers", "fwModel", modelIn.value.trim()));
       mount(pane,
         row(t("set.asrEngine"), sel("providers", "asrEngine", [{ value: "auto", label: t("set.asrAuto") }, { value: "nemo", label: t("set.nemo") }, { value: "fasterwhisper", label: "faster-whisper (Python)" }, { value: "whispercpp", label: "whisper.cpp" }])),
-        row(t("set.nemo"), nemoStatus),
+        row(t("set.nemo"), h("div", { class: "row" }, nemoStatus, nemoBtn)),
         fileRow(t("set.pythonPath"), "providers", "pythonPath", "exe"),
         row(t("set.fwModel"), modelIn),
         row(t("set.asrStatus"), h("div", { class: "row" }, fwStatus, h("button", { class: "btn small", onclick: async () => { for (const [k, v] of Object.entries(pending.providers || {})) await guard(() => call("settings.set", "providers", { [k]: v })); fwStatus.textContent = "…"; showFw(await guard(() => call("captions.status", true))); } }, t("set.check")))),

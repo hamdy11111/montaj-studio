@@ -31,7 +31,10 @@ export function openDirector(ed) {
       await ed.reloadTimeline();
       status.textContent = t("dir.done", { before: (r.before.durationUs / 1e6).toFixed(1), after: (r.after.durationUs / 1e6).toFixed(1) });
       for (const n of r.notes || []) log.append(h("div", { class: "pilot-msg bot" }, n));
-    } catch (err) { status.textContent = errorText(err); } finally { off(); go.disabled = false; }
+    } catch (err) {
+      status.textContent = errorText(err);
+      if (err?.messageKey === "err.whisperNotConfigured") import("../dialogs/asrSetup.js").then((m) => m.openAsrSetup());
+    } finally { off(); go.disabled = false; }
   };
   return modal({ title: t("dir.title"), width: 520, className: "pilot-modal",
     body: h("div", { class: "col" }, h("p", { class: "muted small" }, t("dir.hint")),

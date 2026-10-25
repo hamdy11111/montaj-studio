@@ -165,6 +165,9 @@ export function registerIpc({ getServices, getAgents = () => null, getWindow, ap
 
     // ---------------------------------------------------------------- captions, tts, analysis, assistant
     "captions.status": (force) => S().captions.status(!!force),
+    "asr.setupStatus": () => S().asrSetup.status(),
+    "asr.setupStart": async () => { await S().asrSetup.start(); return S().captions.status(true); },
+    "asr.setupCancel": () => S().asrSetup.cancel(),
     "captions.templates": () => Object.entries(CAPTION_TEMPLATES).map(([tid, t]) => ({ id: tid, name: t.name, use: t.use })),
     // Animated word-timed captions for the open timeline (same code path as agents; one undo step).
     "captions.generatePro": async (tid, o) => { const ctx = A().userContext(); const q = obj(o); return transact(ctx, id(tid), `captions:${q.template || "karaoke-yellow"}`, undefined, () => applyCaptions(ctx, id(tid), { template: q.template ? str(q.template, "template") : undefined, language: q.language ? str(q.language, "language") : "auto", keywords: q.keywords ? arr(q.keywords, "keywords").map(String) : [], reveal: !!q.reveal, corrections: q.corrections ? arr(q.corrections, "corrections").map((c) => ({ from: String(c?.from ?? ""), to: String(c?.to ?? "") })) : undefined })); },

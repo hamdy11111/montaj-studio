@@ -31,14 +31,18 @@ will be provided.
 
 You can use a different FFmpeg build (for example an LGPL build) in Settings › Performance › FFmpeg program.
 
-## Speech engine (in the source, not in the public repository)
+## Speech engine (downloaded on request, not in the installer)
 
-- **Egyptian Arabic ASR model** `src/services/asr/models/asr-egyptian-nemo-v2.0.nemo` — a NeMo FastConformer
-  hybrid RNNT-CTC model. Its origin and licence are not recorded; it is kept out of git (`.gitignore`) and must not
-  be published or bundled in a public installer until they are (the installer build excludes it; an installed copy
-  reads it from `models` in the app's data folder).
-- Its runtime (`runtime/asr`, made by `npm run setup:asr`, also outside git): NVIDIA NeMo (Apache 2.0) and PyTorch
-  (BSD-3-Clause) with their dependencies, pinned in `src/services/asr/requirements-nemo.txt`.
+Settings › Providers › «Download and prepare» (or the prompt on first launch) downloads into the app's data folder:
+
+- **Egyptian Arabic ASR model** `asr-egyptian-nemo-v2.0.nemo` — a NeMo FastConformer hybrid RNNT-CTC model from
+  [Janaymn/asr-egyptian-nemo-v2.0](https://huggingface.co/Janaymn/asr-egyptian-nemo-v2.0), **Apache 2.0**
+  (pinned revision, SHA-256 checked). It is too large for git; the source tree keeps a copy in
+  `src/services/asr/models` (ignored by git) for development.
+- **Python 3.11** from [astral-sh/python-build-standalone](https://github.com/astral-sh/python-build-standalone)
+  (PSF License; the build's bundled libraries keep their own licences), SHA-256 checked.
+- NVIDIA NeMo (Apache 2.0), PyTorch (BSD-3-Clause) and their dependencies, pinned in
+  `src/services/asr/requirements-nemo.txt`, installed from PyPI by pip.
 
 ## Installed by the user, not bundled
 

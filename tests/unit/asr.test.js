@@ -59,3 +59,14 @@ test("the engine's JSON becomes words and segments with word indices", () => {
   assert.deepEqual(r.data.words.map((w) => [w.text, w.startUs, w.endUs]), [["فلو", 160_000, 400_000], ["عملنا", 480_000, 800_000], ["تجربة", 1_600_000, 2_100_000]]);
   assert.deepEqual(r.data.segments.map((s) => [s.w0, s.w1]), [[0, 1], [2, 2]]);
 });
+
+test("one-click set-up: CPU builds of torch, pinned sources with checksums", async () => {
+  const { cpuRequirements, PYTHON, MODEL } = await import("../../src/services/asrSetupService.js");
+  const req = cpuRequirements("numpy==2.4.6\r\ntorch==2.6.0+cu124\ntorchaudio==2.6.0+cu124\nnemo-toolkit==2.7.2");
+  assert.equal(req, "numpy==2.4.6\ntorch==2.6.0\ntorchaudio==2.6.0\nnemo-toolkit==2.7.2");
+  const pinned = fs.readFileSync(path.resolve("src/services/asr/requirements-nemo.txt"), "utf8");
+  assert.doesNotMatch(cpuRequirements(pinned), /\+cu\d/, "no CUDA build left");
+  for (const src of [PYTHON, MODEL]) assert.match(src.sha256, /^[0-9a-f]{64}$/);
+  assert.match(MODEL.url, /^https:\/\/huggingface\.co\/Janaymn\/asr-egyptian-nemo-v2\.0\/resolve\/[0-9a-f]{40}\//, "a pinned revision of the model's source");
+  assert.match(PYTHON.url, /^https:\/\/github\.com\/astral-sh\/python-build-standalone\/releases\/download\/\d{8}\//);
+});
