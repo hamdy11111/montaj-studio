@@ -52,7 +52,7 @@ The Dub dialog's «Download and prepare» (`src/services/dubSetupService.js`) do
 
 | Component | License | Source |
 |---|---|---|
-| Chatterbox TTS 0.1.7 and Chatterbox Multilingual (voice cloning, emotion control); its output carries Resemble AI's imperceptible Perth watermark | MIT | [resemble-ai/chatterbox](https://github.com/resemble-ai/chatterbox), weights [ResembleAI/chatterbox](https://huggingface.co/ResembleAI/chatterbox) |
+| Chatterbox Multilingual V3 (`t3_mtl23ls_v3`, every dub language; voice cloning, emotion control) and the earlier Chatterbox models; its output carries Resemble AI's imperceptible Perth watermark. The package is pinned to resemble-ai/chatterbox@5de7a54 (the PyPI release has no V3) | MIT | [resemble-ai/chatterbox](https://github.com/resemble-ai/chatterbox), weights [ResembleAI/chatterbox](https://huggingface.co/ResembleAI/chatterbox) |
 | Mel-Band RoFormer vocals model `vocals_mel_band_roformer.ckpt` (Kimberley Jensen) | MIT | [KimberleyJensen/Mel-Band-Roformer-Vocal-Model](https://github.com/KimberleyJensen/Mel-Band-Roformer-Vocal-Model), fetched by audio-separator |
 | audio-separator 0.39.1 | MIT | [nomadkaraoke/python-audio-separator](https://github.com/nomadkaraoke/python-audio-separator) |
 | sherpa-onnx 2.0.0 (speaker diarization) | Apache 2.0 | [k2-fsa/sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx) |
