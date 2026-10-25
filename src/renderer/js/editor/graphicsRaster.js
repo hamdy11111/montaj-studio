@@ -383,7 +383,8 @@ const DRAW = {
     const final = inFrame(side === "right" ? R + gap : L - gap - bw), start = side === "right" ? Math.min(final, R - bw * 0.9) : Math.max(final, L - bw * 0.1);
     const kIn = prog(t, 0, tpl.inUs / US), kOut = prog(t, D - tpl.outUs / US, D, EASE.in);
     const xAt = (tt) => { const a = prog(tt, 0, tpl.inUs / US, EASE.back), b = prog(tt, D - tpl.outUs / US, D, EASE.in); return start + (final - start) * a + (start - final) * b; };
-    const x = xAt(t), y = Math.max(bh / 2 + 0.03 * H, Math.min(H - bh / 2 - 0.03 * H, (s.hy - s.hh * 0.08) * H));
+    // The overshoot of the entry (EASE.back) must not carry the word past the frame edge: clamp every position drawn.
+    const x = inFrame(xAt(t)), y = Math.max(bh / 2 + 0.03 * H, Math.min(H - bh / 2 - 0.03 * H, (s.hy - s.hh * 0.08) * H));
     const v = Math.abs(xAt(t) - xAt(t - 1 / 30)); // pixels per frame: a light motion trail while moving
     const alpha = clamp01(t / 0.06) * (1 - kOut * 0.25);
     const drawAt = (bx, a) => {
@@ -398,7 +399,7 @@ const DRAW = {
       }
       g.restore();
     };
-    if (v > 4 && kIn < 1) for (let k = 3; k >= 1; k--) drawAt(x + (side === "right" ? -1 : 1) * v * k * 0.6, alpha * 0.12 * (4 - k));
+    if (v > 4 && kIn < 1) for (let k = 3; k >= 1; k--) drawAt(inFrame(x + (side === "right" ? -1 : 1) * v * k * 0.6), alpha * 0.12 * (4 - k));
     drawAt(x, alpha);
   },
 
@@ -460,7 +461,7 @@ const DRAW = {
       const final = Math.max(0.02 * W, Math.min(W - tw - 0.02 * W, side === "right" ? R + gap : L - gap - tw));
       const start = side === "right" ? Math.min(final, R - tw * 0.9) : Math.max(final, L - tw * 0.1);
       const k = prog(t, at[i], at[i] + inS, EASE.back);
-      const x = start + (final - start) * k + (start - final) * kOut;
+      const x = Math.max(0.02 * W, Math.min(W - tw - 0.02 * W, start + (final - start) * k + (start - final) * kOut)); // never past the frame edge
       const cy = y + lineH[i] / 2;
       y += lineH[i];
       if (t < at[i]) return;

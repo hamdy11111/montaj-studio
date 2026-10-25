@@ -24,12 +24,13 @@ export async function autoEdit(ctx, timelineId, opts = {}, job = null) {
   let track = [];
   try { track = await S.mattes.track(mediaId); } catch (e) { if (e.messageKey !== "err.matteUnavailable") throw e; } // no person model: plan without it
   job?.progress?.(0.6, "plan");
-  const { plan, notes } = directPlan({
+  const { plan, notes, qa } = directPlan({
     mediaId, words: tr.words, durationUs: m.durationUs, track, style: opts.style || "energetic", keywords: opts.keywords || [],
+    media: { width: m.width, height: m.height }, canvas: { width: tl.canvas?.width, height: tl.canvas?.height },
     cta: opts.cta || "", captionTemplate: opts.captionTemplate, corrections: opts.corrections || [], title: opts.title || "Auto edit",
   });
   if (!track.length) notes.push("the person model is not installed: no graphics behind the person (Settings › Providers)");
-  if (!opts.apply) return { plan, notes };
+  if (!opts.apply) return { plan, notes, qa };
   const r = await applyPlan(ctx, timelineId, plan, { expectedRevision: opts.expectedRevision, job: { progress: (p, label) => job?.progress?.(0.6 + p * 0.4, label) } });
-  return { ...r, notes, plan };
+  return { ...r, notes, plan, qa };
 }

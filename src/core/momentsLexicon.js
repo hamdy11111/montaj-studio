@@ -1,0 +1,45 @@
+// Words that reveal a moment (Egyptian, Gulf, Levantine, MSA), from the edit-hamdy skill's moments_lexicon.json. The
+// type sets the moment's strength (hook), its zoom (punch / push / none) and the emoji suggested for it — mapped
+// here to the 3D emoji bundled with the app (assets/emoji); types with no fitting emoji have none.
+export const MOMENT_TYPES = {
+  laugh: { hook: 3.0, zoom: "punch", emoji: ["face-with-tears-of-joy", "grinning-face-with-sweat"] },
+  shock: { hook: 3.2, zoom: "punch", emoji: ["face-screaming-in-fear", "exploding-head", "face-with-open-mouth"] },
+  question: { hook: 1.6, zoom: "push", emoji: ["thinking-face", "face-with-monocle"] },
+  tasty: { hook: 2.2, zoom: "push", emoji: ["smiling-face-with-hearts"] },
+  love: { hook: 1.2, zoom: "push", emoji: ["red-heart", "smiling-face-with-hearts"] },
+  fire: { hook: 2.0, zoom: "punch", emoji: ["fire"] },
+  win: { hook: 2.6, zoom: "punch", emoji: ["clapping-hands", "party-popper", "partying-face", "hundred-points"] },
+  effort: { hook: 1.4, zoom: "push", emoji: ["flexed-biceps"] },
+  tired: { hook: 0.8, zoom: "none", emoji: [] },
+  oops: { hook: 2.8, zoom: "punch", emoji: ["grinning-face-with-sweat", "man-facepalming"] },
+  time: { hook: 0.8, zoom: "none", emoji: ["alarm-clock", "hourglass-done"] },
+  money: { hook: 1.4, zoom: "push", emoji: ["money-bag"] },
+  idea: { hook: 1.2, zoom: "push", emoji: ["light-bulb", "brain"] },
+  look: { hook: 1.6, zoom: "push", emoji: ["eyes", "camera"] },
+  cool: { hook: 1.4, zoom: "push", emoji: ["smiling-face-with-sunglasses", "sparkles"] },
+  no: { hook: 1.6, zoom: "punch", emoji: ["cross-mark"] },
+  yes: { hook: 0.6, zoom: "none", emoji: ["check-mark-button", "thumbs-up"] },
+  pray: { hook: 0.6, zoom: "none", emoji: ["folded-hands"] },
+  alert: { hook: 2.4, zoom: "punch", emoji: ["collision", "warning"] },
+};
+
+export const MOMENT_WORDS = {
+  shock: ["ايه ده", "ايش هذا", "وش هذا", "شو هاد", "معقول", "مش معقول", "يا نهار", "يانهار", "يا لهوي", "يالهوي", "يا ساتر", "ياساتر", "يا ربي", "يمه", "يما", "واو", "يا خبر", "ياخبر", "صدمه", "مصدوم", "انصدمت", "اتصدمت", "مستحيل", "كل ده", "كل هذا", "اتاري", "اتريه", "فجأه", "فجاه"],
+  question: ["ليه", "ليش", "ليش؟", "ازاي", "كيف", "شلون", "وين", "فين", "امتى", "متى", "عارفين", "تعرفوا", "تعرفون", "تخيلوا", "تخيل", "ايه ده؟", "ليه كده", "عملت ايه", "تعمل ايه"],
+  tasty: ["طعم", "طعمه", "طعمها", "لذيذ", "لذيذه", "حلو", "حلوه", "تحفه", "تحفة", "يجنن", "عسل", "سكر", "ممم", "شهي", "روعه", "خطير", "دوقوا", "دقناش", "ذوقوا"],
+  love: ["بحب", "احب", "حبيبي", "حبيبتي", "حبايبي", "اعشق", "بموت في", "اموت على", "قلبي", "عيلتي", "العيله", "الله يحفظ", "ربنا يحفظ"],
+  fire: ["نار", "الفرن", "سخن", "حار", "ولع", "ولّع", "جامد", "جامده", "فاير"],
+  win: ["خلصنا", "خلصت", "تم", "نجحنا", "نجحت", "يس", "اخيرا", "وأخيرا", "واخيرا", "انجزنا", "انجزينا", "برافو", "شاطر", "شاطره", "مبروك", "الحمد لله", "عملناها", "سويناها", "فزنا"],
+  effort: ["تعبت", "تعب", "شغل", "مجهود", "صعب", "ثقيل", "عشرين كيلو", "كيلو"],
+  tired: ["نعسان", "نايم", "نايمين", "ننام", "تعبانه", "تعبان", "هلكان", "هلكت"],
+  oops: ["مقلب", "نسيت", "نسينا", "غلطه", "غلط", "اوبس", "ورطتنا", "ورطه", "ورطني", "فضيحه", "حرق", "اتحرق", "انحرق", "باظ", "خربت", "خرب", "طاح"],
+  time: ["الساعه", "ساعه", "ساعتين", "دقيقه", "دقايق", "ثواني", "بسرعه", "استنى", "استنوا", "انتظر", "انتظروا", "لسه"],
+  money: ["سعر", "السعر", "فلوس", "غالي", "رخيص", "ارخص", "جنيه", "ريال", "دينار", "ليره", "دولار", "خصم", "بكام", "بكم"],
+  idea: ["فكره", "فكرة", "سر", "السر", "نصيحه", "طريقه", "خطه", "خطة", "اكتشفت", "عرفت"],
+  look: ["بص", "بصوا", "شوف", "شوفوا", "طالع", "طالعوا", "شايفين", "انظر", "اتفرجوا"],
+  cool: ["رهيب", "رهيبه", "خرافي", "فخم", "روعه", "مزبوط", "مضبوط", "عظيم"],
+  no: ["لا لا", "لأ", "مستحيل", "ابدا", "ابداً", "ما ينفعش", "ماينفع", "مش هينفع"],
+  yes: ["ايوه", "أيوه", "ايوا", "اكيد", "طبعا", "مظبوط"],
+  pray: ["يا رب", "يارب", "ان شاء الله", "إن شاء الله", "ربنا يستر", "الله يستر"],
+  alert: ["الحقوا", "الحق", "خلي بالك", "انتبه", "انتبهوا", "حذاري", "خطر"],
+};

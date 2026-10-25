@@ -1,11 +1,15 @@
-// The director and the pieces under it: creator pacing (beats kept), speech regions and the between-words gain,
+// The director and the pieces under it (the edit-hamdy skill's rules — core/policy.js): creator pacing (beats kept), speech regions and the between-words gain,
 // the static master gain (no per-clip loudness that lifted pauses), word scores and concepts, and a whole plan from a
 // synthetic talk + person track that must validate as an edit plan.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import Ajv from "ajv";
-import { suggestCuts, speechRegions, correctWords } from "../../src/core/speech.js";
-import { directPlan, wordScore, conceptOf, visualBeats } from "../../src/core/director.js";
+import { suggestCuts, speechRegions, correctWords, smartCuts, speechRemovals } from "../../src/core/speech.js";
+import { POLICY } from "../../src/core/policy.js";
+import { findNumbers } from "../../src/core/numbers.js";
+import { detectMoments } from "../../src/core/moments.js";
+import { qaPlan, fitHead, headInside, reasonsToWatch, deadSpans } from "../../src/core/qa.js";
+import { directPlan, wordScore, conceptOf, visualBeats, videoFit } from "../../src/core/director.js";
 import { EDIT_PLAN_SCHEMA } from "../../src/core/editPlan.js";
 import { betweenWords, buildExport } from "../../src/core/exportGraph.js";
 import * as ops from "../../src/core/timelineOps.js";
@@ -70,27 +74,112 @@ test("word scores prefer named concepts and nouns over verbs and participles; co
   assert.deepEqual(correctWords([{ t: "شاكله", s: 0, e: 1 }], [{ from: "شاكله", to: "شكله" }]).map((w) => w.t), ["شكله"]);
 });
 
-test("the director's plan: pacing, alternate framing, chosen graphics with sounds, punch on the question; it validates", () => {
+test("the director's plan (the skill's rules): angles never repeat, the head is never cropped, graphics never early; it validates and passes its guards", () => {
   const beats = visualBeats(TALK, TRACK);
   assert.equal(beats.length, 1, "the close-up inside the pause is a beat");
-  const { plan, notes } = directPlan({ mediaId: "m1", words: TALK, durationUs: 15 * US, track: TRACK, cta: "تابعني", captionTemplate: "clean-pro", corrections: [{ from: "منكوش", to: "منكوش!" }] });
+  const { plan, notes, qa } = directPlan({ mediaId: "m1", words: TALK, durationUs: 15 * US, track: TRACK, cta: "تابعني", captionTemplate: "clean-pro", corrections: [{ from: "منكوش", to: "منكوش!" }], media: { width: 1080, height: 1920 }, canvas: { width: 1080, height: 1920 } });
   const ajv = new Ajv({ allErrors: true, strict: false });
   assert.ok(ajv.validate(EDIT_PLAN_SCHEMA, plan), JSON.stringify(ajv.errors));
-  assert.ok(plan.cuts.some((c) => c.reason.includes("beat")));
   assert.ok(plan.cuts.every((c) => c.toUs <= beats[0][0] || c.fromUs >= beats[0][1]), "the beat is not cut");
-  const framing = plan.zooms.filter((z) => z.reason.startsWith("alternate"));
-  assert.ok(framing.length >= 2 && framing.every((z) => z.scale === 1.14 && z.x > 0), "closer shots keep the head (left of centre) in place: the picture moves right");
+  // Angles: medium and close alternate; within a 1080p source's sharpness the close shot is ×1.25.
+  const angles = plan.zooms.filter((z) => z.reason.startsWith("angle"));
+  assert.ok(angles.length >= 3);
+  for (let i = 1; i < angles.length; i++) assert.notEqual(angles[i].scale, angles[i - 1].scale, "two shots in a row never share an angle");
+  assert.ok(angles.every((z) => z.scale <= 1.25 + 1e-9), "no zoom past the source's sharpness (with the skill's ×1.25 floor)");
+  assert.ok(angles.every((z) => z.x > 0), "the head is left of centre: the picture moves right");
+  // Graphics: the opening's key word, «شعري» → 💈, never entering before their word.
   const t = (name) => plan.graphics.filter((g) => g.template === name);
-  assert.ok(t("rise-behind").concat(t("emerge-side")).some((g) => g.params.text === "تجربة"), "the opening's key word");
-  assert.ok(t("head-emoji").some((g) => g.params.emoji === "barber-pole"), "«شعري» → 💈");
-  assert.ok(plan.graphics.filter((g) => !["progress-bar"].includes(g.template)).every((g) => g.sfx === true), "every motion has its sound");
-  assert.ok(plan.zooms.some((z) => z.reason.startsWith("punch")) && plan.sfx.some((s) => s.sound === "impact"), "punch-in + impact on the question");
+  assert.ok(t("rise-behind").concat(t("emerge-side")).some((g) => g.params.text === "تجربة"));
+  assert.ok(t("head-emoji").some((g) => g.params.emoji === "barber-pole"));
+  const start = (w) => TALK.find((x) => x.text.startsWith(w)).startUs;
+  assert.ok(t("rise-behind").every((g) => g.fromUs >= start(g.params.text) - 40_000), "an element never enters before its word");
   assert.equal(t("follow-cta")[0].params.text, "تابعني");
   assert.equal(plan.captions.template, "clean-pro");
   assert.ok(plan.stabilize && plan.audio.denoise && plan.audio.normalizeLufs === -14);
-  assert.ok(notes.length >= 5);
-  // Graphics never crowd: at least the style's gap between their starts in the edit (cuts removed).
-  const starts = plan.graphics.filter((g) => !["progress-bar", "follow-cta"].includes(g.template)).map((g) => g.fromUs).sort((a, b) => a - b);
-  const edit = (s) => s - plan.cuts.filter((c) => c.toUs <= s).reduce((n, c) => n + c.toUs - c.fromUs, 0);
-  for (let i = 1; i < starts.length; i++) assert.ok(edit(starts[i]) - edit(starts[i - 1]) >= 2_600_000 * 0.55 - 200_000, `graphics ${i - 1}/${i} too close`);
+  assert.ok(qa.ok, JSON.stringify(qa.checks));
+  assert.ok(qa.passed.includes("face.cropped") && qa.passed.includes("retention.dead") && qa.passed.includes("speech.lostWord"));
+  assert.ok(notes.some((n) => n.startsWith("quality guards")));
+});
+
+test("the skill's pacing: question glued, more air after a sentence, never above 0.6 s; hesitations, stutters, restarts and hallucinations go — «اه» stays", () => {
+  const P = POLICY.pace;
+  const words = [W("انت", 0, 0.3), W("جاهز؟", 0.3, 0.8), W("اه", 2.0, 2.2), W("خلاص.", 2.2, 2.7), W("امممم", 4.0, 4.6), W("انا", 5.0, 5.2), W("انا", 5.4, 5.6), W("رحت", 5.6, 6.0), W("السوق", 6.0, 6.5)];
+  const { cuts, removed } = smartCuts(words, { pace: P, rhythm: "mrbeast", durationUs: 7 * US });
+  assert.equal(removed.get(4), "filler", "a stretched hesitation goes");
+  assert.equal(removed.get(5), "stutter", "«انا انا»: the first goes");
+  assert.ok(!removed.has(2), "«اه» means yes: it stays");
+  const after = (i) => cuts.find((c) => c.fromUs >= words[i].endUs && c.fromUs < words[i].endUs + US);
+  // After «جاهز؟» the kept silence is capped by the question gap (0.16 s), half on each side of the cut.
+  assert.equal(Math.round(after(1).fromUs - words[1].endUs - P.wordPad.after * US), Math.round((Math.min(P.baseGap * P.rhythm.mrbeast, P.questionGap) * US) / 2));
+  const calm = smartCuts(words, { pace: P, rhythm: "calm", durationUs: 7 * US }).cuts.find((x) => x.fromUs >= words[1].endUs && x.fromUs < words[1].endUs + US);
+  assert.equal(Math.round(calm.fromUs - words[1].endUs - P.wordPad.after * US), Math.round((P.questionGap * US) / 2), "calm: the question is still glued to its answer");
+  // After «خلاص.» the kept gap is base × rhythm = 0.15 s; the hesitation and the stutter are inside the cut.
+  const c = after(3);
+  assert.equal(Math.round(c.fromUs - words[3].endUs - P.wordPad.after * US), Math.round((P.baseGap * P.rhythm.mrbeast * US) / 2));
+  assert.match(c.reason, /filler/);
+  const r = speechRemovals([W("انا", 0, 0.2), W("كنت", 0.2, 0.5), W("انا", 0.9, 1.1), W("كنت", 1.1, 1.4), W("هناك", 1.45, 1.8), W("امبارح", 1.85, 2.3)]);
+  assert.deepEqual([...r.keys()], [0, 1], "a restarted sentence: the first attempt goes");
+  const deliberate = speechRemovals([W("عايز", 0, 0.3), W("اربعة.", 0.3, 0.8), W("عايز", 1.2, 1.5), W("اربعة.", 1.5, 2.0)]);
+  assert.equal(deliberate.size, 0, "a deliberate repetition stays");
+  assert.equal(speechRemovals([W("اشتركوا", 0, 0.4), W("في", 0.4, 0.5), W("القناة", 0.5, 1.0)]).get(0), "hallucination");
+});
+
+test("numbers said in Egyptian Arabic become graphics; lists become montages; moments are found", () => {
+  const say = (txt, t0 = 0) => txt.split(" ").map((w, i) => W(w, t0 + i * 0.35, t0 + i * 0.35 + 0.3));
+  const list = findNumbers(say("اشترينا ١٠٥ رغيف و٣٤ علبة و٩٦ عصير."));
+  assert.deepEqual(list.numbers.map((x) => [x.label, x.kind]), [["١٠٥ رغيف", "list"], ["٣٤ علبة", "list"], ["٩٦ عصير", "list"]]);
+  assert.equal(findNumbers(say("خسرنا ٨٠ جنيه")).numbers[0].label, "-٨٠ جنيه");
+  assert.equal(findNumbers(say("خمسة وعشرين كيلو؟!")).numbers[0].kind, "impact");
+  assert.equal(findNumbers(say("عشرتلاف جنيه")).numbers[0].value, 10000);
+  assert.equal(findNumbers(say("مية وخمسين مرة")).numbers[0].value, 150);
+  assert.equal(findNumbers(say("عندي واحد صاحبي")).numbers.length, 0, "«واحد» alone is a person");
+  const m = detectMoments(say("يا نهار ابيض نجحت!"));
+  assert.ok(m.some((x) => x.type === "shock" && x.score >= 3) && m.some((x) => x.type === "win"));
+  const { plan, qa } = directPlan({ mediaId: "m1", words: [...say("النهارده اشترينا ١٠٥ رغيف و٣٤ علبة و٩٦ عصير.", 0.2), ...say("وبعدها خسرنا ٨٠ جنيه كمان.", 5)], durationUs: 8 * US, track: [] });
+  assert.equal(plan.graphics.filter((g) => g.template === "list-item").length, 3);
+  const loss = plan.graphics.find((g) => g.template === "counter");
+  assert.ok(loss && loss.params.to === 80 && loss.params.prefix === "−" && loss.params.suffix === " جنيه");
+  assert.ok(qa.passed.includes("sync.early"), "each point enters on its item's word");
+});
+
+test("the face guard keeps the head inside its margins, or lowers the zoom; a letterboxed axis is never cropped", () => {
+  const box = { top: 0.2, bottom: 0.45, left: 0.35, right: 0.55, cx: 0.45, cy: 0.32 };
+  for (const z of [1.18, 1.42, 1.8]) { const f = fitHead(z, box); assert.ok(headInside(f, box), `×${z}`); }
+  const tall = { top: 0.02, bottom: 0.9, left: 0.3, right: 0.7, cx: 0.5, cy: 0.46 };
+  assert.ok(fitHead(1.42, tall).scale < 1.42, "a head filling the frame: the zoom is reduced");
+  assert.ok(!headInside({ scale: 1.6, x: 0, y: -0.3 }, box), "a window that cuts the hair is caught");
+  const lb = videoFit({ width: 1920, height: 1080 }, { width: 1080, height: 1920 });
+  assert.ok(lb.dx === 1 && lb.dy < 0.4 && lb.sharpZoom > 1.7);
+  assert.equal(fitHead(1.42, box, lb).y, 0, "the letterboxed axis is not moved");
+});
+
+test("quality guards catch a cut inside a word, a lost word, a dead stretch, crowded sounds and emoji, an early word", () => {
+  const words = [W("كلمة", 0, 1), W("تانية", 1.2, 2), W("بعدين", 9, 10)];
+  const bad = {
+    cuts: [{ mediaId: "m", fromUs: 700_000, toUs: 1_100_000 }, { mediaId: "m", fromUs: 1_300_000, toUs: 1_900_000 }],
+    graphics: [
+      { mediaId: "m", template: "head-emoji", fromUs: 2_000_000, toUs: 3_000_000, params: { emoji: "fire" }, sfx: true },
+      { mediaId: "m", template: "head-emoji", fromUs: 2_500_000, toUs: 3_500_000, params: { emoji: "fire" }, sfx: true },
+      { mediaId: "m", template: "emerge-side", fromUs: 6_000_000, toUs: 7_000_000, params: { text: "بعدين" }, sfx: false },
+      { mediaId: "m", template: "word-stack", fromUs: 6_500_000, toUs: 8_000_000, params: { words: ["كلمة"] }, sfx: false },
+    ],
+    zooms: [], sfx: [],
+  };
+  const qa = qaPlan(bad, { words, durationUs: 10 * US });
+  const ids = new Set(qa.checks.map((c) => c.id));
+  for (const id of ["speech.cutInsideWord", "speech.lostWord", "emoji.gap", "emoji.repeat", "sfx.gap", "sync.early", "text.overlap"]) assert.ok(ids.has(id), id);
+  assert.equal(qa.ok, false);
+  const dead = deadSpans(reasonsToWatch({ graphics: [], zooms: [] }, { words: [W("كلام", 0, 1)], cuts: [] }), 14 * US);
+  assert.equal(dead.length, 1, "14 s with nothing new");
+});
+
+test("a selfie close-up (the head fills the frame, the model's face class runs down the neck): only zooms that fit, never below ×1.02", () => {
+  // Hair at the top edge, the "head" box reaching the bottom of a 16:9 frame; the person moves a little.
+  const big = Array.from({ length: 150 }, (_, i) => [i * 100_000, 0.2, 0, 0.75, 1, 0.45 + 0.05 * Math.sin(i / 9), 0.5, 0.33 + 0.08 * (i % 30 > 20), 1.0, 0.5]);
+  const { plan, qa } = directPlan({ mediaId: "m1", words: TALK, durationUs: 15 * US, track: big, media: { width: 1920, height: 1080 }, canvas: { width: 1920, height: 1080 } });
+  const ajv = new Ajv({ allErrors: true, strict: false });
+  assert.ok(ajv.validate(EDIT_PLAN_SCHEMA, plan), JSON.stringify(ajv.errors));
+  assert.ok(plan.zooms.every((z) => z.scale >= 1.02));
+  assert.ok(plan.zooms.length > 0, "the chin is estimated from the head's width: zooms are possible");
+  assert.ok(qa.passed.includes("face.cropped"));
 });

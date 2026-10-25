@@ -9,7 +9,7 @@ import { modal } from "../ui/modal.js";
 import { CAPTION_TEMPLATES } from "../../core/captionTemplates.js";
 
 export function openDirector(ed) {
-  const style = h("select", {}, [["energetic", t("dir.energetic")], ["calm", t("dir.calm")]].map(([v, l]) => h("option", { value: v }, l)));
+  const style = h("select", {}, [["energetic", t("dir.energetic")], ["explain", t("dir.explain")], ["calm", t("dir.calm")]].map(([v, l]) => h("option", { value: v }, l)));
   const tplSel = h("select", {}, Object.entries(CAPTION_TEMPLATES).map(([id, tp]) => h("option", { value: id, selected: id === "clean-pro" }, t(`cap.${id}`) || tp.name)));
   const cta = h("input", { type: "text", maxlength: 80, placeholder: t("dir.ctaPh") });
   const keywords = h("input", { type: "text", maxlength: 300, placeholder: t("lib.keywordsPh") });
@@ -30,6 +30,13 @@ export function openDirector(ed) {
       });
       await ed.reloadTimeline();
       status.textContent = t("dir.done", { before: (r.before.durationUs / 1e6).toFixed(1), after: (r.after.durationUs / 1e6).toFixed(1) });
+      if (r.qa) {
+        const fails = r.qa.checks.filter((c) => c.level === "fail"), warns = r.qa.checks.filter((c) => c.level === "warn");
+        log.append(h("div", { class: ["pilot-msg", "bot", fails.length ? "field-error" : null] },
+          fails.length ? t("dir.qaFail", { n: fails.length }) : t("dir.qaOk", { n: r.qa.passed.length }),
+          h("div", { class: "muted small" }, t("dir.qaStats", { cpm: r.qa.stats.cutsPerMin, median: r.qa.stats.medianShot, epm: r.qa.stats.elementsPerMin })),
+          ...[...fails, ...warns].map((c) => h("div", { class: "small" }, `${c.level === "fail" ? "✗" : "!"} ${c.message}`))));
+      }
       for (const n of r.notes || []) log.append(h("div", { class: "pilot-msg bot" }, n));
     } catch (err) {
       status.textContent = errorText(err);

@@ -215,3 +215,85 @@ export function speechRegions(words, { padUs = 120_000, joinUs = 350_000 } = {})
   return out;
 }
 
+
+// ------------------------------------------------------------------ the edit-hamdy pacing (its 26_pace "smart")
+// What is taken out of the speech, each with its reason: only stretched hesitations (in Egyptian «اه/أيوه» means yes
+// and «يعني/بس» are speech — never removed), a stutter on a function word, a restarted sentence (the first attempt
+// broke off and the second one goes on — a deliberate repetition is kept), and the recogniser's known hallucinations.
+export const STRETCHED_FILLER = /^[\s.,،…]*(آ{2,}|ا{3,}|إ{2,}|ا?مم+|م{3,}|ه+م{2,}|أ?ه{3,}|uh+|um+|hmm+)[\s.,،…؟?!]*$/i;
+const FUNCTION_WORDS = new Set("انا احنا انت انتي هو هي هم في اللي ده دي بس و ف عشان لما يعني كان كنت اه لا ما مش".split(" ").map(normWord));
+export const HALLUCINATION = /(ترجمة\s*نانسي|نانسي\s*قنقر|اشتركوا\s*في\s*القناة|اشترك\s*في\s*القناة|لا\s*تنس[وى]ا?\s*الاشتراك|شكرا\s*(لكم\s*)?(على\s*المشاهدة|للمشاهده|للمشاهدة)|تابعونا\s*على|مرحبا\s*بكم\s*في\s*(هذا\s*)?ال?فيديو|[اأ]تمنى\s*[اأ]ن\s*تكون\s*ممتاز|ترجمة\s*و?تدقيق|هل\s*تريد\s*[اأ]ن\s*ترسل|subscribe|thanks\s*for\s*watching)/i;
+
+/** Words removed from the speech: Map(word index → reason). */
+export function speechRemovals(words, P = { stutterGap: 0.9, retake: { within: 2.5, pauseBefore: 0.2, flowAfter: 0.4 } }) {
+  const out = new Map();
+  const n = (i) => normWord(words[i]?.text);
+  const S = (s) => s * 1e6;
+  words.forEach((w, k) => { if (STRETCHED_FILLER.test(w.text)) out.set(k, "filler"); });
+  for (let k = 0; k + 1 < words.length; k++) {
+    if (n(k) && n(k) === n(k + 1) && FUNCTION_WORDS.has(n(k)) && words[k + 1].startUs - words[k].endUs < S(P.stutterGap)) out.set(k, "stutter");
+  }
+  for (let k = 0; k + 3 < words.length; k++) {
+    const g1 = [n(k), n(k + 1)];
+    if (!g1[0] || !g1[1]) continue;
+    for (const j of [k + 2, k + 3]) {
+      if (j + 2 >= words.length) continue;
+      if (n(j) !== g1[0] || n(j + 1) !== g1[1]) continue;
+      if (words[j].startUs - words[k].startUs >= S(P.retake.within)) continue;
+      if (endsSentence(words[j - 1].text) || words[j].startUs - words[j - 1].endUs < S(P.retake.pauseBefore)) continue;
+      if (!n(j + 2) || words[j + 2].startUs - words[j + 1].endUs >= S(P.retake.flowAfter) || n(j + 2) === n(k + 2)) continue;
+      for (let m = k; m < j; m++) if (!out.has(m)) out.set(m, "retake");
+      break;
+    }
+  }
+  for (const sn of sentences(words)) if (HALLUCINATION.test(sn.text)) for (let i = sn.w0; i <= sn.w1; i++) out.set(i, "hallucination");
+  return out;
+}
+
+/**
+ * Cuts for the creator rhythm, as the skill paces: the silence kept between two words is baseGap × rhythm, glued after a
+ * question (≤ 0.16 s), faster in the 8 s before a punchline/reveal (× 0.7), a breath after a reaction (≥ 0.32 s),
+ * never above maxGap; +0.12 s after a sentence end. A longer gap is cut down to that, half kept on each side.
+ * pace: POLICY.pace; moments: [{ s, e, punch, reaction }] (µs); keep: protected [[a, b]] (never cut).
+ * Returns { cuts: [{ fromUs, toUs, reason }], removed: Map }.
+ */
+export function smartCuts(words, { pace, rhythm = "mrbeast", durationUs = null, moments = [], keep = [] } = {}) {
+  const S = (s) => Math.round(s * 1e6);
+  const removed = speechRemovals(words, pace);
+  const kept = words.map((w, i) => ({ w, i })).filter((x) => !removed.has(x.i));
+  const ranges = [];
+  if (!kept.length) return { cuts: durationUs ? [{ fromUs: 0, toUs: durationUs, reason: "no speech" }] : [], removed };
+  const punches = moments.filter((m) => m.punch).map((m) => m.s);
+  const after = moments.filter((m) => m.reaction).map((m) => m.e);
+  const rhy = pace.rhythm[rhythm] ?? 1;
+  const span = (x) => [Math.max(0, x.w.startUs - S(pace.wordPad.before)), x.w.endUs + S(pace.wordPad.after)];
+  const reasonOf = (a, b) => [...new Set(words.map((w, i) => (removed.has(i) && w.startUs < b && w.endUs > a ? removed.get(i) : null)).filter(Boolean))].join("+") || "pause";
+  let [, prevEnd] = span(kept[0]);
+  const first = span(kept[0])[0];
+  if (first > 80_000) ranges.push({ fromUs: 0, toUs: first, reason: reasonOf(0, first) === "pause" ? "pause" : reasonOf(0, first) });
+  for (let k = 1; k < kept.length; k++) {
+    const [a, b] = span(kept[k]);
+    const prevWord = kept[k - 1].w;
+    let g = S(pace.baseGap) * rhy;
+    if (/[?؟]/.test(prevWord.text)) g = Math.min(g, S(pace.questionGap));
+    if (punches.some((p) => p - a > 0 && p - a < S(pace.beforePunch.window))) g *= pace.beforePunch.factor;
+    if (after.some((e) => prevEnd - e >= 0 && prevEnd - e < S(pace.afterReaction.window))) g = Math.max(g, S(pace.afterReaction.gap));
+    g = Math.min(g, S(pace.maxGap));
+    const limit = g + (endsSentence(prevWord.text) ? S(pace.sentenceExtra) : 0);
+    const gap = a - prevEnd;
+    if (gap > limit) {
+      const half = Math.round(g / 2);
+      ranges.push({ fromUs: prevEnd + half, toUs: a - half, reason: reasonOf(prevEnd, a) });
+    }
+    prevEnd = Math.max(prevEnd, b);
+  }
+  if (durationUs && durationUs - prevEnd > 80_000) ranges.push({ fromUs: prevEnd, toUs: durationUs, reason: reasonOf(prevEnd, durationUs) });
+  // Protected moments (something shown without words) are never cut.
+  const cuts = [];
+  for (const r of ranges.filter((x) => x.toUs - x.fromUs > 80_000)) {
+    let parts = [r];
+    for (const [a, b] of keep) parts = parts.flatMap((x) => (b <= x.fromUs || a >= x.toUs ? [x] : [{ ...x, toUs: a }, { ...x, fromUs: b }].filter((y) => y.toUs - y.fromUs > 80_000)));
+    cuts.push(...parts);
+  }
+  return { cuts, removed };
+}
