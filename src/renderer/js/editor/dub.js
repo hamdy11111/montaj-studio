@@ -122,7 +122,11 @@ export function openDub(ed) {
       play.onclick = async () => {
         try {
           playing?.pause();
-          playing = new Audio(await call("dub.speakerSample", ed.timelineId(), { lang: r.lang, speaker: s.id }));
+          // The page's media policy allows blob: (not data:) sources: the sample becomes a blob.
+          const data = await call("dub.speakerSample", ed.timelineId(), { lang: r.lang, speaker: s.id });
+          const bytes = Uint8Array.from(atob(data.slice(data.indexOf(",") + 1)), (c) => c.charCodeAt(0));
+          if (playing?.src) URL.revokeObjectURL(playing.src);
+          playing = new Audio(URL.createObjectURL(new Blob([bytes], { type: "audio/wav" })));
           await playing.play();
         } catch (e) { status.textContent = errorText(e); }
       };
