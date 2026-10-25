@@ -22,7 +22,7 @@ import { MODEL_SETS } from "./video/catalog.js";
 import { SCENES, STYLES, PRIORITIES, composeDescription } from "./video/presets.js";
 import {
   FPS, MAX_FRAMES, MIN_FRAMES, FRAME_OPTIONS, QUALITY_OPTIONS, STEP_OPTIONS, TURBO_STEPS, MAX_REFS, GENERATE_DEFAULTS, ENHANCE_DEFAULTS,
-  generateSettings, enhanceSettings, resolveFrames, outputDimensions, enhanceDimensions, buildGenerateGraph, buildEnhanceGraph, GENERATE_STAGES, ENHANCE_STAGES, GENERATE_ORDER, ENHANCE_ORDER, snapFrames,
+  generateSettings, enhanceSettings, extractPromptTemplate, resolveFrames, outputDimensions, enhanceDimensions, buildGenerateGraph, buildEnhanceGraph, GENERATE_STAGES, ENHANCE_STAGES, GENERATE_ORDER, ENHANCE_ORDER, snapFrames,
 } from "./video/graphs.js";
 
 const ACTIVE = ["queued", "waiting", "starting", "running"];
@@ -82,11 +82,25 @@ export class VideoService {
       scenes: SCENES.map(({ id, ar, help }) => ({ id, ar, help })), styles: STYLES.map(({ id, ar, help }) => ({ id, ar, help })),
       priorities: PRIORITIES.map(({ id, ar, help }) => ({ id, ar, help })),
       fps: FPS, minFrames: MIN_FRAMES, maxFrames: MAX_FRAMES, frameOptions: FRAME_OPTIONS, quality: QUALITY_OPTIONS, steps: STEP_OPTIONS, turboSteps: TURBO_STEPS, maxRefs: MAX_REFS,
-      generate: { ...GENERATE_DEFAULTS, ...this.defaults().generate }, enhance: { ...ENHANCE_DEFAULTS, ...this.defaults().enhance },
+      generate: { ...GENERATE_DEFAULTS, ...this.defaults().generate }, enhance: { ...ENHANCE_DEFAULTS, ...this.defaults().enhance }, template: this.templateInfo(),
       enhanceOptions: { shortEdge: [1080, 1440, 2160], chunkFrames: [0, 9, 17, 33], tileSize: [512, 768, 1024], crf: [16, 18, 20], color: ["lab", "wavelet", "adain", "none"] },
     };
   }
   describe(selection) { return composeDescription(selection); }
+
+  // The user's own prompt template (from a workflow of theirs): kept in the app's data folder for this user only.
+  get templateFile() { return path.join(this.dir, "prompt-template.json"); }
+  template() { try { return JSON.parse(fs.readFileSync(this.templateFile, "utf8")); } catch { return null; } }
+  templateInfo() { const t = this.template(); return t ? { from: t.from, importedAt: t.importedAt, chars: t.text.length, steps: t.steps.length, text: t.text } : null; }
+  importTemplate(file) {
+    if (!file || !fs.existsSync(file)) throw new AppError("NOT_FOUND", "err.fileNotFound", { file });
+    let json;
+    try { json = JSON.parse(fs.readFileSync(file, "utf8")); } catch { throw new AppError("VALIDATION", "err.videoTemplateFormat"); }
+    const t = extractPromptTemplate(json);
+    fs.writeFileSync(this.templateFile, JSON.stringify({ ...t, from: path.basename(file), importedAt: new Date().toISOString() }, null, 1));
+    return this.templateInfo();
+  }
+  removeTemplate() { fs.rmSync(this.templateFile, { force: true }); return null; }
 
   /** The user's start-up settings ("save as my defaults"); the texts are never kept. */
   defaults() { try { return JSON.parse(fs.readFileSync(path.join(this.dir, "defaults.json"), "utf8")); } catch { return {}; } }
@@ -154,6 +168,7 @@ export class VideoService {
     const refs = (req.refs || []).map((r) => this.source(r));
     if (!refs.length || refs.length > MAX_REFS || refs.some((r) => r.kind !== "image") || new Set(req.refs).size !== refs.length) throw new AppError("VALIDATION", "err.videoRefs");
     if (s.sound && !src.hasAudio) throw new AppError("VALIDATION", "err.videoNoSound");
+    if (s.promptStyle === "original" && !this.template()) throw new AppError("VALIDATION", "err.videoNoTemplate");
     const duration = src.durationUs / US;
     const end = s.durationMode === "range" && Number.isFinite(req.end) ? req.end : null;
     const { frames, leftOut } = resolveFrames(s, duration, end);
@@ -266,7 +281,8 @@ export class VideoService {
       return name;
     });
     const prefix = `montaj/${j.id}`;
-    const built = buildGenerateGraph({ video: cutName, images, frames, width: cutInfo.width, height: cutInfo.height, hasAudio: !!cutInfo.hasAudio, settings: s, prefix });
+    const built = buildGenerateGraph({ video: cutName, images, frames, width: cutInfo.width, height: cutInfo.height, hasAudio: !!cutInfo.hasAudio, settings: s, prefix,
+      template: s.promptStyle === "original" ? this.template() : null });
     this.update(j, { stage: "engine" });
     await this.engine.start();
     if (j.state === "cancelled") return;

@@ -48,7 +48,7 @@ export function generateSettings(raw = {}) {
   if (typeof s.sound !== "boolean" || typeof s.turbo !== "boolean") throw bad("sound");
   if (!TURBO_STEPS.includes(s.turboSteps)) throw bad("turboSteps");
   if (typeof s.turboStrength !== "number" || s.turboStrength < 0.5 || s.turboStrength > 1) throw bad("turboStrength");
-  if (!STYLES.some((x) => x.id === s.promptStyle)) throw bad("promptStyle");
+  if (s.promptStyle !== "original" && !STYLES.some((x) => x.id === s.promptStyle)) throw bad("promptStyle");
   if (typeof s.start !== "number" || !Number.isFinite(s.start) || s.start < 0 || s.start > 86400) throw bad("start");
   s.start = Math.floor(s.start * FPS + 0.5) / FPS;
   for (const k of ["characterNotes", "instructions"]) {
@@ -117,11 +117,60 @@ export function buildPrompt({ promptStyle, characterNotes, instructions, sound }
 }
 
 /**
+ * The user's own prompt template, from a ComfyUI workflow they have (API format): the text that feeds the
+ * reference-to-video node's prompt and the RegexReplace steps on its way there (in order). Kept in the user's data
+ * only — never in the app.
+ */
+export function extractPromptTemplate(workflow) {
+  const nodes = workflow && typeof workflow === "object" && !Array.isArray(workflow.nodes) ? workflow : null;
+  if (!nodes) throw new AppError("VALIDATION", "err.videoTemplateFormat");
+  const target = Object.values(nodes).find((n) => n?.class_type === "MiniMaxH3ReferenceToVideo");
+  if (!target) throw new AppError("VALIDATION", "err.videoTemplateNone");
+  const steps = [];
+  let link = target.inputs?.prompt;
+  for (let guard = 0; guard < 50 && Array.isArray(link); guard++) {
+    const n = nodes[link[0]];
+    if (!n) break;
+    if (n.class_type === "RegexReplace") {
+      const { regex_pattern, replace, case_insensitive = true, multiline = false, dotall = false, count = 0 } = n.inputs;
+      steps.unshift({ regex_pattern: String(regex_pattern), replace: String(replace), case_insensitive: !!case_insensitive, multiline: !!multiline, dotall: !!dotall, count: Number(count) || 0 });
+      link = n.inputs.string;
+    } else if (/^Primitive(String|StringMultiline)$/.test(n.class_type)) {
+      const text = String(n.inputs.value || "");
+      if (!/subject_definitions\s*:/i.test(text)) break;
+      return { text, steps };
+    } else link = Object.values(n.inputs || {}).find(Array.isArray); // a switch or a reroute: follow its input
+  }
+  throw new AppError("VALIDATION", "err.videoTemplateNone");
+}
+
+/** The user's template with this request's references, sound and notes (as the original studio fills it). */
+export function templatePrompt(text, { characterNotes, instructions, sound }, refCount) {
+  let prompt = text;
+  if (refCount > 1) {
+    const refs = Array.from({ length: refCount - 1 }, (_, i) => `<Picture ${i + 2}>`).join(", ");
+    const note = `${refs} show additional views of the same <Subject 1>, not additional people. Use these only to clarify identity and facial details. <Picture 1> remains the primary reference for outfit and body appearance.\n`;
+    prompt = prompt.replace("<Video 1> is the source clip;", `${note}<Video 1> is the source clip;`);
+  }
+  if (!sound) {
+    prompt = prompt.split("\n").filter((l) => !l.startsWith("<Audio 1>")).join("\n")
+      .replace(" Match the timing of mouth movement to the visible performer and the original speech or singing in <Audio 1>.", "")
+      .replace(" Do not invent dialogue or add mouth movements for background music or off-screen voices.", "")
+      .replace("Natural ambience and physical sounds matching the source clip. No invented dialogue.", "N/A");
+  }
+  const notes = [];
+  if (characterNotes) notes.push(`User-specified character details: ${characterNotes}`);
+  if (instructions) notes.push(`Additional user direction: ${instructions}`);
+  if (notes.length) prompt = prompt.replace("\n\noverall_soundscape:", `\n${notes.join("\n")}\n\noverall_soundscape:`);
+  return prompt;
+}
+
+/**
  * The generation graph: the cut source (`video`, a file in the engine's input folder, exactly `frames` frames at 24 fps,
  * `width`×`height`), 1–3 reference images, the settings. The person in the source is found (SAM 3.1) and inverted
  * into a small motion guide; MiniMax H3 makes the new video with the source's sound.
  */
-export function buildGenerateGraph({ video, images, frames, width, height, hasAudio, settings, prefix }) {
+export function buildGenerateGraph({ video, images, frames, width, height, hasAudio, settings, prefix, template = null }) {
   const s = generateSettings(settings);
   if (!images?.length || images.length > MAX_REFS) throw new AppError("VALIDATION", "err.videoRefs");
   const sound = s.sound && hasAudio;
@@ -147,8 +196,16 @@ export function buildGenerateGraph({ video, images, frames, width, height, hasAu
   // The references and the source's sound.
   images.forEach((img, i) => node(String(14 + i), "LoadImage", { image: img }));
   if (sound) node("17", "AudioAdjustVolume", { volume: 0, audio: ["2", 1] });
+  // The prompt: the helper's own text, or the user's template through its own regex steps (ComfyUI's RegexReplace).
+  let prompt, promptIn;
+  if (s.promptStyle === "original") {
+    if (!template?.text) throw new AppError("VALIDATION", "err.videoNoTemplate");
+    prompt = templatePrompt(template.text, { ...s, sound }, images.length);
+    promptIn = prompt;
+    template.steps.forEach((st, i) => { node(String(40 + i), "RegexReplace", { ...st, string: promptIn }); promptIn = [String(40 + i), 0]; });
+  } else promptIn = prompt = buildPrompt({ ...s, sound }, images.length);
   const ref = {
-    prompt: buildPrompt(s, images.length), width: w, height: h, length: frames, ref_image_size: "match",
+    prompt: promptIn, width: w, height: h, length: frames, ref_image_size: "match",
     clip: ["11", 0], vae: ["12", 0], audio_vae: ["13", 0], "ref_videos.ref_video_0": ["8", 0],
     ...Object.fromEntries(images.map((_, i) => [`ref_images.ref_image_${i}`, [String(14 + i), 0]])),
     ...(sound ? { "ref_audios.ref_audio_0": ["17", 0] } : {}),
@@ -163,7 +220,7 @@ export function buildGenerateGraph({ video, images, frames, width, height, hasAu
   node("27", "VAEDecode", { samples: ["26", 0], vae: ["12", 0] });
   node("28", "CreateVideo", { fps: FPS, bit_depth: 8, color_space: "sRGB", codec: "none", images: ["27", 0], ...(sound ? { audio: ["17", 0] } : {}) });
   node("29", "SaveVideo", { video: ["28", 0], filename_prefix: prefix, format: "mp4", "format.codec": "h264", "format.codec.encoding": "re-encode", "format.codec.encoding.crf": 16 });
-  return { graph: g, width: w, height: h, sound, steps: s.turbo ? s.turboSteps : s.steps, prompt: ref.prompt };
+  return { graph: g, width: w, height: h, sound, steps: s.turbo ? s.turboSteps : s.steps, prompt };
 }
 
 /** The stage each node belongs to (the progress the user sees). */

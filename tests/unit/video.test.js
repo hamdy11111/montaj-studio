@@ -168,3 +168,27 @@ test("a result in the library: versions, thumbnail, inputs kept, save as MP4, in
   const r2 = S.video.remove(b.id);
   assert.equal(r2.keptFile, false); assert.ok(!fs.existsSync(b.path));
 });
+
+test("the user's own template: found through switches and its regex steps in order; filled like the original studio", async () => {
+  const { extractPromptTemplate, templatePrompt } = await import("../../src/services/video/graphs.js");
+  const wf = {
+    1: { class_type: "PrimitiveStringMultiline", inputs: { value: "subject_definitions:\n<Video 1> is the source clip; x\n\noverall_soundscape:\nNatural ambience and physical sounds matching the source clip. No invented dialogue.\n<Audio 1> keep" } },
+    2: { class_type: "Any Switch (rgthree)", inputs: { any_02: ["1", 0] } },
+    3: { class_type: "RegexReplace", inputs: { string: ["2", 0], regex_pattern: "a", replace: "b", case_insensitive: true, multiline: true, dotall: false, count: 0 } },
+    4: { class_type: "RegexReplace", inputs: { string: ["3", 0], regex_pattern: "c", replace: "d", count: 1 } },
+    5: { class_type: "MiniMaxH3ReferenceToVideo", inputs: { prompt: ["4", 0] } },
+  };
+  const t = extractPromptTemplate(wf);
+  assert.deepEqual(t.steps.map((s) => s.regex_pattern), ["a", "c"]);
+  const p = templatePrompt(t.text, { characterNotes: "n", instructions: "", sound: false }, 2);
+  assert.match(p, /<Picture 2> show additional views/);
+  assert.match(p, /User-specified character details: n\n\noverall_soundscape:/);
+  assert.doesNotMatch(p, /<Audio 1>/);
+  assert.match(p, /overall_soundscape:\nN\/A/);
+  assert.throws(() => extractPromptTemplate({ nodes: [] }), (e) => e.messageKey === "err.videoTemplateFormat");
+  assert.throws(() => extractPromptTemplate({ 1: { class_type: "KSampler", inputs: {} } }), (e) => e.messageKey === "err.videoTemplateNone");
+  const g = buildGenerateGraph({ video: "v", images: ["a"], frames: 22, width: 640, height: 360, hasAudio: true, settings: { promptStyle: "original" }, prefix: "p", template: t });
+  assert.deepEqual(g.graph["20"].inputs.prompt, ["41", 0]);
+  assert.equal(g.graph["41"].inputs.count, 1);
+  assert.throws(() => buildGenerateGraph({ video: "v", images: ["a"], frames: 22, width: 640, height: 360, hasAudio: true, settings: { promptStyle: "original" }, prefix: "p" }), (e) => e.messageKey === "err.videoNoTemplate");
+});

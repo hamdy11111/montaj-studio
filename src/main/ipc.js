@@ -254,6 +254,8 @@ export function registerIpc({ getServices, getAgents = () => null, getWindow, ap
     "video.choices": () => S().video.choices(),
     "video.describe": (sel) => S().video.describe(obj(sel)),
     "video.saveDefaults": (o) => S().video.saveDefaults(obj(o)),
+    "video.importTemplate": (file) => S().video.importTemplate(str(file, "file")),
+    "video.removeTemplate": () => S().video.removeTemplate(),
     "video.addSource": (file, name) => S().video.addSource(str(file, "file"), name ? String(name).slice(0, 120) : null),
     "video.addMediaSource": (mid) => S().video.addMediaSource(id(mid)),
     "video.addRangeSource": (tid, startUs, endUs) => S().video.addRangeSource(id(tid), Number(startUs), Number(endUs)),
