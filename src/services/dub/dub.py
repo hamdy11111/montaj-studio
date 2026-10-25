@@ -740,6 +740,56 @@ def line_parts(l, words, text):
     return [(text[bounds[i]:bounds[i + 1]].strip(), merged[i][0], merged[i][1]) for i in range(len(merged))]
 
 
+CALM_PITCH = {"male": 130.0, "female": 220.0, "child": 280.0}  # a calm conversational voice of each kind (Hz)
+
+
+def voice_arousal(lines, words, a16, kinds=None):
+    """How worked-up each line sounds in the Arabic voice itself, 0..1 (0.5 = calm), from what can be measured without
+    a model: how loud they speak, how high and how much the pitch moves, how fast — against the same speaker's other
+    lines (a loud person is not "angry" all the time), plus how far the speaker's whole voice is above a calm voice of
+    their kind (someone upset through a whole scene speaks high all along). Sets the line's "arousal"."""
+    import numpy as np
+    import librosa
+    feats = {}
+    for n, l in enumerate(lines):
+        ws = words[l["from"]:l["to"] + 1]
+        seg = np.concatenate([a16[int(w["start"] * 16000):int(w["end"] * 16000)] for w in ws]) if ws else np.zeros(0, dtype=np.float32)
+        if len(seg) < 4000:
+            continue
+        loud = 20 * np.log10(float(np.sqrt(np.mean(np.square(seg)))) + 1e-9)
+        f0, vf, _ = librosa.pyin(seg[: 16000 * 12], fmin=70, fmax=500, sr=16000, frame_length=1024)
+        v = np.log(f0[vf & ~np.isnan(f0)])
+        if len(v) < 10:
+            continue
+        rate = len(ws) / max(0.3, sum(w["end"] - w["start"] for w in ws))
+        feats[n] = (l["spk"], np.array([loud, float(np.median(v)), float(np.std(v)), rate]))
+    WEIGHT, FLOOR = np.array([0.35, 0.25, 0.25, 0.15]), np.array([1.5, 0.04, 0.02, 0.3])
+    level = {}
+    for spk in {s2 for s2, _ in feats.values()}:
+        f0 = float(np.exp(np.median([y[1] for s2, y in feats.values() if s2 == spk])))
+        calm = CALM_PITCH.get((kinds or {}).get(spk, "male"), 130.0)
+        level[spk] = float(np.clip(np.log(f0 / calm) / 0.25, -2, 2))
+    for n, (spk, x) in feats.items():
+        mine = np.array([y for s2, y in feats.values() if s2 == spk])
+        if len(mine) < 3:
+            mine = np.array([y for _, y in feats.values()])
+        med = np.median(mine, axis=0)
+        mad = np.maximum(np.median(np.abs(mine - med), axis=0) * 1.4826, FLOOR)
+        z = np.clip((x - med) / mad, -3, 3)
+        lines[n]["arousal"] = round(float(1 / (1 + np.exp(-(1.2 * float(WEIGHT @ z) + 0.6 * level[spk])))), 3)
+
+
+def voice_controls(l, ex_cap=1.2):
+    """Chatterbox's controls for a line: the kind of feeling (the translator's reading of the words) picks the base;
+    how strong it is comes from the Arabic voice (arousal) — louder, higher, livelier speech is said with more
+    exaggeration and a quicker, less held-back delivery. A strength the user set by hand wins."""
+    ex0, cfg = EMOTION.get(l.get("emotion"), EMOTION["neutral"])
+    if l.get("intensityByUser") or "arousal" not in l:
+        return min(ex_cap, ex0 + 0.25 * (l.get("intensity", 0.4) - 0.4)), cfg
+    v = l["arousal"]
+    return round(min(ex_cap, 1.0, max(0.25, ex0 + 0.6 * (v - 0.5))), 3), round(min(0.6, max(0.25, cfg - 0.25 * (v - 0.5))), 3)
+
+
 def cmd_synth(a):
     import numpy as np
     import soundfile as sf
@@ -802,6 +852,8 @@ def cmd_synth(a):
         return t if re.search(r"[.!?…。！？]$", t) else re.sub(r"[,;:\-–—\s]+$", "", t) + "."
 
     vocals = load_mono(a.vocals, sr)
+    if any("arousal" not in l for l in lines if l.get("text")):
+        voice_arousal(lines, words, load_mono(a.vocals, 16000), {k: s2["kind"] for k, s2 in speakers.items()})
     bg_full = load_mono(a.background, sr) if a.background else None
     total = max(len(vocals), len(bg_full) if bg_full is not None else 0)
     voice = np.zeros(total + sr * 5, dtype=np.float32)
@@ -814,8 +866,7 @@ def cmd_synth(a):
         if not text:
             continue
         spk = speakers.get(l["spk"]) or next(iter(speakers.values()))
-        ex0, cfg = EMOTION.get(l.get("emotion"), EMOTION["neutral"])
-        ex = min(a.ex_cap, ex0 + 0.25 * (l.get("intensity", 0.4) - 0.4))
+        ex, cfg = voice_controls(l, a.ex_cap)
         if a.cfg is not None:
             cfg = a.cfg
         nxt = lines[n + 1]["start"] if n + 1 < len(lines) else l["end"] + 1.5

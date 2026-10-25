@@ -346,7 +346,7 @@ export class DubService {
       if (!l) continue;
       if (typeof e.text === "string" && e.text.trim()) { l.text = e.text.trim().slice(0, 400); delete l.spoken; l.edited = true; }
       if (typeof e.emotion === "string") l.emotion = e.emotion;
-      if (Number.isFinite(e.intensity)) l.intensity = Math.max(0, Math.min(1, e.intensity));
+      if (Number.isFinite(e.intensity)) { l.intensity = Math.max(0, Math.min(1, e.intensity)); l.intensityByUser = true; } // wins over the strength heard in the voice
       if (ids.has(e.speaker)) l.spk = e.speaker;
     }
     fs.writeFileSync(file, JSON.stringify(data));
