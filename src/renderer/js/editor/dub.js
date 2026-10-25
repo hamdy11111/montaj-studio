@@ -114,6 +114,28 @@ export function openDub(ed) {
   // The speakers and the lines of a dub; changed lines can be voiced again.
   function show(r) {
     const edits = new Map();
+    // Each speaker: listen to the voice the dub copies; "is the same person as" gives all their lines to another
+    // speaker (voiced again with "Voice the changes").
+    let playing = null;
+    const speakerRows = () => h("div", { class: "col", style: { gap: "4px" } }, ...r.speakers.map((s) => {
+      const play = h("button", { class: "btn small ghost", title: t("dub.listen") }, icon("play"), t("dub.listen"));
+      play.onclick = async () => {
+        try {
+          playing?.pause();
+          playing = new Audio(await call("dub.speakerSample", ed.timelineId(), { lang: r.lang, speaker: s.id }));
+          await playing.play();
+        } catch (e) { status.textContent = errorText(e); }
+      };
+      const others = r.speakers.filter((x) => x.id !== s.id);
+      const merge = others.length ? h("select", { onchange: (e) => {
+        if (e.target.value === "") return;
+        const to = Number(e.target.value);
+        for (const l of r.lines) if ((edits.get(l.n)?.speaker ?? l.spk) === s.id) { edit(l.n, "speaker", to); whoOf.get(l.n) && (whoOf.get(l.n).value = String(to)); }
+        status.textContent = t("dub.merged", { a: spkName(s.id), b: spkName(to) });
+      } }, [h("option", { value: "" }, t("dub.samePerson")), ...others.map((x) => h("option", { value: x.id }, spkName(x.id)))]) : null;
+      return h("div", { class: "row small", style: { gap: "8px", flexWrap: "wrap" } },
+        h("span", {}, spkName(s.id)), h("span", { class: "muted" }, t("dub.talks", { s: Math.round(s.speech || 0) })), play, merge);
+    }));
     const edit = (n, k, v) => { edits.set(n, { ...(edits.get(n) || { n }), [k]: v }); again.disabled = false; };
     const spkName = (id) => t("dub.speaker", { n: r.speakers.findIndex((s) => s.id === id) + 1, kind: kindOf(r.speakers.find((s) => s.id === id) || {}) });
     const doubt = r.lines.filter((l) => l.check !== null && l.check < 0.7).length, sped = r.lines.filter((l) => (l.speed || 1) > 1.01).length;
@@ -127,6 +149,7 @@ export function openDub(ed) {
     remove.onclick = async () => {
       try { await call("dub.remove", ed.timelineId(), {}); await ed.reloadTimeline(); status.textContent = t("dub.removed"); } catch (e) { status.textContent = errorText(e); }
     };
+    const whoOf = new Map();
     const lines = r.lines.map((l) => {
       const text = h("textarea", { rows: 2, maxlength: 400, dir: "auto", style: { width: "100%" } });
       text.value = l.text || "";
@@ -134,6 +157,7 @@ export function openDub(ed) {
       const emo = h("select", { onchange: (e) => edit(l.n, "emotion", e.target.value) }, EMOTIONS.map((x) => h("option", { value: x, selected: x === l.emotion }, t(`dub.emo.${x}`))));
       const force = h("input", { type: "range", min: 0, max: 100, value: Math.round((l.intensity ?? 0.4) * 100), title: t("dub.intensity"), style: { width: "90px" }, oninput: (e) => edit(l.n, "intensity", Number(e.target.value) / 100) });
       const who = h("select", { onchange: (e) => edit(l.n, "speaker", Number(e.target.value)) }, r.speakers.map((s) => h("option", { value: s.id, selected: s.id === l.spk }, spkName(s.id))));
+      whoOf.set(l.n, who);
       const flag = l.check !== null && l.check < 0.7, thin = l.fill !== null && l.fill < 0.75;
       return h("div", { class: "col", style: { gap: "4px", padding: "6px 0", borderBottom: "1px solid var(--bg-hover)" } },
         h("div", { class: "row small", style: { gap: "8px", flexWrap: "wrap" } },
@@ -144,7 +168,7 @@ export function openDub(ed) {
     });
     result.replaceChildren(
       h("div", { class: "pilot-msg bot" },
-        h("div", {}, r.speakers.map((s) => spkName(s.id)).join(" · ")),
+        speakerRows(),
         sped ? h("div", { class: "muted small" }, t("dub.sped", { n: sped })) : null,
         doubt ? h("div", { class: "small", style: { color: "var(--danger)" } }, t("dub.doubtful", { n: doubt })) : null),
       h("div", { class: "muted small" }, t("dub.lines")),

@@ -108,6 +108,21 @@ export async function removeDubbing(ctx, timelineId, opts = {}) {
   return S.timelines.execAs(ctx.source, timelineId, "removeDub", { mediaId: m.id, lang: opts.lang || null });
 }
 
+/**
+ * A speaker's voice sample (what the dub copies), as a data: URL the dialog can play — opts: { lang, speaker }. Only a
+ * file of this media's dub work folder is read.
+ */
+export function dubSpeakerSample(ctx, timelineId, opts = {}) {
+  const S = ctx.services;
+  const { m } = theMedia(S, timelineId, opts.mediaId);
+  const last = S.dubber.last(m.id, opts.lang || "en");
+  const sp = last?.speakers.find((x) => x.id === Number(opts.speaker));
+  const work = S.dubber.workDir(m);
+  const file = sp?.ref && path.resolve(sp.ref);
+  if (!file || !file.startsWith(path.resolve(work) + path.sep) || !fs.existsSync(file)) throw new AppError("NOT_FOUND", "err.dubNone");
+  return `data:audio/wav;base64,${fs.readFileSync(file).toString("base64")}`;
+}
+
 /** The dubbed language that is heard (its voice on, its subtitles shown); the others are muted. */
 export async function dubSetLanguage(ctx, timelineId, opts = {}) {
   const S = ctx.services;
