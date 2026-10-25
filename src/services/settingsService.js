@@ -14,7 +14,7 @@ export function defaultSettings(paths) {
       fps: 30, timecode: "HH:MM:SS+frame", exportSound: false, dreaminaSync: false, magnet: true, snapping: true, previewAxis: false,
     },
     performance: { hwEncode: true, hwDecode: true, gpuUI: true, autoOptimize: "smart", proxy: false, autoClearGB: 10, autoRender: false, outputDevice: "default", ffmpegPath: "", ffprobePath: "" },
-    general: { language: "ar", notifications: true, updates: "notify", shellMenu: false, layout: "default", onboarded: false },
+    general: { language: "ar", notifications: true, updates: "auto", shellMenu: false, layout: "default", onboarded: false },
     providers: { whisperPath: "", whisperModel: "", whisperLanguage: "auto", asrEngine: "auto", pythonPath: "", fwModel: "large-v3-turbo" },
     export: { resolution: "1080p", bitrate: "recommended", codec: "h264", format: "mp4", fps: 30, audioFormat: "flac", gifResolution: "320p", captionsFormat: "srt", dir: paths.media },
     // Agent Control Server (local named pipe for MCP / external agents) — off until the user enables it.

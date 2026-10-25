@@ -28,6 +28,7 @@ import { openSkills } from "./skills.js";
 import { openSettings } from "../dialogs/settings.js";
 import { openShortcuts } from "../dialogs/shortcuts.js";
 import { openAbout } from "../dialogs/about.js";
+import { checkForUpdates } from "../ui/updates.js";
 
 const MARKER_COLORS = ["#00C1CD", "#FFD400", "#FF3B6B", "#30A46C", "#8E4EC6", "#F76B15"];
 const LAYOUT_KEY = "montaj.editor.sizes";
@@ -538,6 +539,7 @@ export async function openEditor(root, params) {
       { label: t("ed.shortcuts"), run: () => openShortcuts() },
       { label: t("ed.help"), items: [
         { label: t("ed.walkthrough"), run: walkthrough },
+        { label: t("upd.check"), run: () => checkForUpdates() },
         { label: t("ed.about"), run: openAbout },
       ] },
     ]);

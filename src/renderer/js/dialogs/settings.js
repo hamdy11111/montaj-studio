@@ -85,7 +85,9 @@ export function openSettings(initialTab = "draft") {
       mount(pane,
         row(t("set.language"), sel("general", "language", [{ value: "ar", label: "العربية" }, { value: "en", label: "English" }])),
         row(t("set.notifications"), tg("general", "notifications")),
-        row(t("set.updates"), h("span", { class: "muted" }, t("set.updatesHint"))),
+        row(t("set.updates"), h("div", { class: "row", style: { gap: "8px", flexWrap: "wrap" } },
+          sel("general", "updates", [{ value: "auto", label: t("upd.auto") }, { value: "notify", label: t("upd.notify") }]),
+          h("button", { class: "btn small", onclick: async () => { const { checkForUpdates } = await import("../ui/updates.js"); checkForUpdates(); } }, t("upd.check"))), t("set.updatesHint")),
         row(t("set.shellMenu"), toggle({ checked: s.general.shellMenu, onChange: async (v) => { if (await guard(() => call("settings.shellMenu", v)) !== undefined) set("general", "shellMenu", v); } })),
         row(t("ed.shortcuts"), h("button", { class: "btn small", onclick: async () => { const { openShortcuts } = await import("./shortcuts.js"); openShortcuts(); } }, icon("shortcuts"), t("ed.shortcuts"))));
     } else if (tab === "providers") {

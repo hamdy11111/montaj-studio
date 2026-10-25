@@ -10,11 +10,14 @@ import { createServices } from "../services/index.js";
 import { closeDatabase } from "../db/realmClient.js";
 import { AgentHub } from "../agent/controlServer.js";
 import { RasterHost } from "./rasterHost.js";
+import { Updater } from "./updater.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const SRC = path.join(here, "..");
 const isDev = process.argv.includes("--dev");
 const smoke = process.argv.includes("--smoke-test"); // used by tests: start, report readiness, quit
+// Release check of the update path: --update-check [--update-download] prints what the updater found, then quits.
+const updateCheck = process.argv.includes("--update-check");
 
 // Test runs can isolate user data: MONTAJ_USER_DATA=<dir>
 if (process.env.MONTAJ_USER_DATA) app.setPath("userData", process.env.MONTAJ_USER_DATA);
@@ -121,10 +124,19 @@ app.whenReady().then(async () => {
   await applyAgents(services.settings.get("agents").enabled);
 
   handleProtocols({ rendererDir: path.join(SRC, "renderer"), coreDir: path.join(SRC, "core"), assetsDir: path.join(SRC, "renderer", "assets"), getServices: () => services });
-  registerIpc({ getServices: () => services, getAgents: () => agents, getWindow: () => mainWindow, appInfo: () => ({ version: app.getVersion(), electron: process.versions.electron, node: process.versions.node, chrome: process.versions.chrome, realm: realmVersion(), platform: process.platform, packaged: app.isPackaged, userData: app.getPath("userData"), pendingOpen, smoke, bench: process.env.MONTAJ_BENCH === "1" }) });
+  const updater = new Updater({ app, notify: notifyAll, mode: () => services.settings.get("general").updates || "auto", log: (...a) => console.log(...a) });
+  if (updateCheck) {
+    const r = await updater.check({ manual: process.argv.includes("--update-download") });
+    console.log(`UPDATE_CHECK ${JSON.stringify(r)}`);
+    app.quit();
+    return;
+  }
+  registerIpc({ getServices: () => services, getAgents: () => agents, getWindow: () => mainWindow, updater, appInfo: () => ({ version: app.getVersion(), electron: process.versions.electron, node: process.versions.node, chrome: process.versions.chrome, realm: realmVersion(), platform: process.platform, packaged: app.isPackaged, userData: app.getPath("userData"), pendingOpen, smoke, bench: process.env.MONTAJ_BENCH === "1" }) });
   mainWindow = createWindow();
   if (smoke) {
     mainWindow.webContents.once("did-finish-load", () => setTimeout(() => { console.log("SMOKE_OK"); app.quit(); }, 1500));
+  } else if (updater.usable) {
+    mainWindow.webContents.once("did-finish-load", () => setTimeout(() => updater.check().catch(() => {}), 8000));
   }
   app.on("activate", () => { if (BrowserWindow.getAllWindows().length === 0) mainWindow = createWindow(); });
 });

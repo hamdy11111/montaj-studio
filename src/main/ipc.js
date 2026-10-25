@@ -21,7 +21,7 @@ const id = (v, field = "id") => validateId(v, field);
 const obj = (v) => (v && typeof v === "object" ? v : {});
 const arr = (v, field) => { if (!Array.isArray(v)) throw new AppError("VALIDATION", "err.array", { field }); return v; };
 
-export function registerIpc({ getServices, getAgents = () => null, getWindow, appInfo }) {
+export function registerIpc({ getServices, getAgents = () => null, getWindow, appInfo, updater = null }) {
   const S = () => getServices();
   const A = () => { const a = getAgents(); if (!a) throw new AppError("VALIDATION", "err.agentsUnavailable"); return a; };
   const win = () => getWindow() || BrowserWindow.getFocusedWindow();
@@ -48,6 +48,11 @@ export function registerIpc({ getServices, getAgents = () => null, getWindow, ap
       return { freeMem: os.freemem(), totalMem: os.totalmem(), freeDiskMedia: free(S().paths.media), freeDiskExport: free(S().settings.get("export").dir) };
     },
     "app.relaunch": () => { app.relaunch(); app.exit(0); return true; },
+    // Software updates from the GitHub releases (installed app only; progress: "update:status").
+    "update.status": () => updater?.status() || { status: "unsupported" },
+    "update.check": () => updater ? updater.check({ manual: true }) : { status: "unsupported" },
+    "update.download": () => updater?.download(),
+    "update.install": () => !!updater?.install(),
     "app.quit": () => { app.quit(); return true; },
     "app.notify": (title, body) => { if (S().settings.get("general").notifications && Notification.isSupported()) new Notification({ title: str(title, "title"), body: String(body || "") }).show(); return true; },
     "app.setFullScreen": (v) => { win()?.setFullScreen(!!v); return !!v; },

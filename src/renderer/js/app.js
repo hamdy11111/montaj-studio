@@ -5,6 +5,7 @@ import { setLang, t, errorText, has } from "./i18n.js";
 import { call, on } from "./api.js";
 import { app, pushNotification } from "./state.js";
 import { toast } from "./ui/toast.js";
+import { wireUpdates } from "./ui/updates.js";
 import { modal } from "./ui/modal.js";
 import { installFonts } from "./fonts.js";
 import { renderHome } from "./pages/home.js";
@@ -61,6 +62,7 @@ async function go(route, params = {}) {
 }
 
 function wireGlobalEvents() {
+  wireUpdates();
   on("export:done", (p) => {
     pushNotification({ kind: "export", ok: true, path: p.path, text: `${t("ex.done")} · ${formatBytes(p.sizeBytes || 0)}` });
     if (app.settings.edit.exportSound) new Audio(beepUrl()).play().catch(() => {});

@@ -12,6 +12,7 @@ Montaj Studio's code.
 | MCP TypeScript SDK (`@modelcontextprotocol/sdk`) | 1.32.0 | MIT | `resources/app.asar/node_modules/@modelcontextprotocol/sdk` | https://github.com/modelcontextprotocol/typescript-sdk |
 | Ajv (JSON Schema validator) | 8.17.1 | MIT | `resources/app.asar/node_modules/ajv` | https://github.com/ajv-validator/ajv |
 | Zod | 4.6.5 | MIT | `resources/app.asar/node_modules/zod` | https://github.com/colinhacks/zod |
+| electron-updater (software updates from this project's GitHub releases) | 6.8.11 | MIT | `resources/app.asar/node_modules/electron-updater` | https://github.com/electron-userland/electron-builder |
 | Fonts: Cairo, Alexandria, Readex Pro, IBM Plex Sans Arabic, Tajawal, Lalezar, El Messiri, Changa, Noto Kufi Arabic, Baloo Bhaijaan 2, Marhey, Lemonada, Noto Sans Arabic, Almarai, Zain, Kufam, Reem Kufi, Montserrat, Bebas Neue, Anton, Inter, Poppins, Plus Jakarta Sans | Google Fonts (2026-10) | SIL Open Font License 1.1 | `resources/app.asar/src/renderer/assets/fonts/<family>/`, `OFL.txt` in each folder | https://fonts.google.com |
 | Fluent Emoji (3D style), 85 images | microsoft/fluentui-emoji | MIT | `resources/app.asar/src/renderer/assets/emoji/` (`LICENSE.txt`) | https://github.com/microsoft/fluentui-emoji |
 | Lucide icons, 86 SVG files | lucide-static 1.61.0 | ISC | `resources/app.asar/src/renderer/assets/icons/` (`LICENSE.txt`) | https://lucide.dev |
