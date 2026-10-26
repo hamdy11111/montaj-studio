@@ -210,8 +210,8 @@ Not downloaded:
 Also: VideoMaMa test only (not used by the app): `SammyLim/VideoMaMa` @e289a7a (6.1 GB, Stability AI Community License)
 + `stabilityai/stable-video-diffusion-img2vid-xt` @9e43909 (VAE, image encoder, configs: 1.4 GB, Stability AI Community
 License) + code `cvlab-kaist/VideoMaMa` @c3ffc16 (CC-BY-NC-4.0) under `runtime\media\src\VideoMaMa`; diffusers 0.36.0 +
-accelerate in `runtime\media`. Sound library: 3.2 GB in `D:\capcut newssets-library\sfx` (Mixkit SFX Free License,
-CC0 Kenney, @remotion/sfx). B-roll test index: 67 MB in `D:\capcut newssets-libraryroll-index`.
+accelerate in `runtime\media`. Sound library: 3.2 GB in `D:\capcut new\assets-library\sfx` (Mixkit SFX Free License,
+CC0 Kenney, @remotion/sfx). B-roll test index: 67 MB in `D:\capcut new\assets-library\broll-index`.
 Runtime `runtime\media`: 0.2 GB (+ sources).
 
 ## Needs a practical test on the user's footage
