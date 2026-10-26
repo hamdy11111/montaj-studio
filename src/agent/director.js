@@ -58,12 +58,25 @@ async function cachedTimeline(S, file) {
   return null;
 }
 
+/**
+ * The machine-wide lock file (gpu-lock.mjs) for a script path. Inside Electron `process.execPath` is the Electron
+ * binary: without ELECTRON_RUN_AS_NODE it would start the script as an app that takes the lock and never exits (it
+ * held the shared lock for 13 minutes in the first bench run) — so the script always runs as plain Node here.
+ */
+export function fileGpuLock(script, name = "director", { execFile = null } = {}) {
+  const call = async (cmd) => {
+    const run = execFile || (await import("node:child_process")).execFile;
+    return new Promise((resolve, reject) => run(process.execPath, [script, cmd, name, "--wait-min", "240"], { windowsHide: true, env: { ...process.env, ELECTRON_RUN_AS_NODE: "1" } }, (err, stdout, stderr) => (err ? reject(new Error(`gpu-lock ${cmd}: ${stderr || err.message}`)) : resolve(String(stdout).trim()))));
+  };
+  return { kind: "file", acquire: async () => { await call("acquire"); let done = false; return async () => { if (!done) { done = true; await call("release").catch(() => {}); } }; } };
+}
+
 /** The GPU lock for the planner model: the app's queue, and the machine-wide lock file when one is set (shared card). */
 async function directorGpuLock(S) {
   const { makeGpuLock } = await import("../services/perception/perceptionService.js");
   const queue = S.gpu ? makeGpuLock({ queue: S.gpu, name: "director" }) : null;
   const script = process.env.DIRECTOR_GPU_LOCK || process.env.PERCEPTION_GPU_LOCK || null;
-  const file = script && fs.existsSync(script) ? makeGpuLock({ script, name: "director" }) : null;
+  const file = script && fs.existsSync(script) ? fileGpuLock(script, "director") : null;
   return { acquire: async (id) => { const a = queue ? await queue.acquire(id) : null; try { const b = file ? await file.acquire(id) : null; return async () => { if (b) await b(); if (a) await a(); }; } catch (e) { if (a) await a(); throw e; } } };
 }
 

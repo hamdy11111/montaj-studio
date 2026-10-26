@@ -12,6 +12,7 @@ import { directPlan, withSpans, toPlanV2 } from "../../src/core/director.js";
 import { retakeGroups } from "../../src/core/speech.js";
 import { EDIT_PLAN_SCHEMA } from "../../src/core/editPlan.js";
 import { treatmentsFromAnswer, llmGraphicsRanker, ClaudeDirectorLLM, PLAN_SCHEMA, planPrompt } from "../../src/services/directorLLM.js";
+import { fileGpuLock } from "../../src/agent/director.js";
 import { US } from "../../src/core/util.js";
 
 const W = (text, s, e) => ({ text, startUs: Math.round(s * US), endUs: Math.round(e * US) });
@@ -306,4 +307,14 @@ test("a line the model did not hear again is settled by its sound: the same soun
   assert.equal(settleLine(check, r1).level, "warn"); assert.equal(settleLine(check, r1).id, "out.lineHeardDifferently");
   assert.equal(settleLine({ ...check, id: "out.lineWeak", level: "warn", args: { important: true } }, r2).level, "fail", "an important line with another sound");
   assert.equal(settleLine({ ...check, id: "out.lineWeak", level: "warn", args: { important: false } }, r2).level, "warn", "an ordinary line stays a warning");
+});
+
+test("the machine-wide GPU lock runs its script as Node even inside Electron (else it never exits and holds the lock)", async () => {
+  const seen = [];
+  const execFile = (bin, args, opts, cb) => { seen.push({ bin, args, env: opts.env }); cb(null, args[1] === "acquire" ? "acquired" : "released", ""); };
+  const lock = fileGpuLock("D:/x/gpu-lock.mjs", "director", { execFile });
+  const release = await lock.acquire();
+  await release(); await release();
+  assert.deepEqual(seen.map((x) => x.args.slice(1, 3)), [["acquire", "director"], ["release", "director"]], "released once");
+  assert.ok(seen.every((x) => x.env.ELECTRON_RUN_AS_NODE === "1" && x.bin === process.execPath));
 });
