@@ -119,6 +119,8 @@ export class ImagegenService {
   async generate({ prompt, model = "qwen", width = 1024, height = 1024, megapixels = 1, transparent = false, seed = Math.floor(Math.random() * 2 ** 31), upsample = false, keepEngine = false }) {
     if (transparent && model !== "qwen") throw new AppError("VALIDATION", "err.imagegenAlphaQwenOnly");
     let text = prompt, upsampled = null;
+    // An Arabic request goes through the upsampler, which writes it in English (a model never sees Arabic letters).
+    if (/[؀-ۿ]/.test(prompt)) upsample = true;
     if (upsample) { upsampled = await this.withGpu("imagegen-upsample", () => this.upsample(prompt, { transparent })); text = upsampled; }
     const clean = cleanPrompt(text, { transparent });
     const size = sizeFor(width, height, megapixels);

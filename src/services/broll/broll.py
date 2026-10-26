@@ -149,8 +149,11 @@ def load(name, models, device):
         sys.path.remove(path); sys.modules.pop("scripts", None); sys.modules.pop("scripts.qwen3_vl_embedding", None)
         return {"emb": e}
     if name == "reranker":
-        from scripts.qwen3_vl_reranker import Qwen3VLReranker
+        from scripts.qwen3_vl_reranker import Qwen3VLReranker, sample_frames
         r = Qwen3VLReranker(model_name_or_path=path, dtype=torch.bfloat16, max_pixels=448 * 448, total_pixels=4 * 448 * 448)
+        # The published script calls self._sample_frames for a video document but only defines the module function.
+        if not hasattr(r, "_sample_frames"):
+            r._sample_frames = sample_frames
         sys.path.remove(path); sys.modules.pop("scripts", None); sys.modules.pop("scripts.qwen3_vl_reranker", None)
         return {"rr": r}
     raise ValueError(name)

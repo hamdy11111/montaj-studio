@@ -15,11 +15,18 @@ const QWEN_TURBO_SIGMAS = "1.0, 0.978453, 0.95418, 0.926626, 0.89508, 0.845148, 
 export const NO_TEXT = "no text, no letters, no words, no captions, no watermark, no logo";
 export const RGBA_PHRASE = "The result is an RGBA image with an alpha channel and a fully transparent background; only the subject is opaque, with clean soft edges.";
 
+const AR = /[؀-ۿݐ-ݿࢠ-ࣿﭐ-﷿ﹰ-﻿]/;
+// Arabic words (with their quotes) and the words that introduce them: left alone, "a sign that says" makes the model
+// write those English words instead (tested: a sign reading ABOVE).
+const AR_RUN = /(?:\s*(?:that|which)?\s*(?:says|reads|saying|reading|written|with the (?:text|words?)|labell?ed|titled|showing)\s*)?["«“']?\s*[؀-ۿݐ-ݿࢠ-ࣿﭐ-﷿ﹰ-﻿][؀-ۿݐ-ݿࢠ-ࣿﭐ-﷿ﹰ-﻿\s.,!؟?،]*["»”']?/g;
+
 /** A prompt the models may receive: no Arabic script (it would come out as fake letters), "no text" asked for. */
 export function cleanPrompt(prompt, { transparent = false, allowText = false } = {}) {
-  let p = String(prompt || "").replace(/[؀-ۿݐ-ݿࢠ-ࣿﭐ-﷿ﹰ-﻿]+/g, " ")
-    .replace(/["«»“”']\s*["«»“”']/g, " ").replace(/\s+/g, " ").trim();
+  const raw = String(prompt || "");
+  const hadArabic = AR.test(raw);
+  let p = raw.replace(AR_RUN, " ").replace(/["«»“”']\s*["«»“”']/g, " ").replace(/\s+/g, " ").replace(/\s+([,.])/g, "$1").replace(/^[\s,.]+/, "").trim();
   if (!p) throw Object.assign(new Error("empty prompt after removing Arabic text"), { code: "err.imagePromptEmpty" });
+  if (hadArabic) p = `${p}. Every sign, label, screen and surface is blank, with no writing at all.`;
   if (transparent && !/alpha channel|transparent background/i.test(p)) p = `${p} ${RGBA_PHRASE}`;
   if (!allowText && !/no text/i.test(p)) p = `${p} ${NO_TEXT}.`;
   return p;
