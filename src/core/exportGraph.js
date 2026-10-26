@@ -72,7 +72,7 @@ export function estimateSizeBytes(durationUs, videoKbps, audioKbps = 192) {
 /**
  * @param {object} tl plain timeline
  * @param {object} o
- *   media: {id: MediaAsset}, overlays: {segId: png path}, luts: {assetId: path}, compoundFiles: {timelineId: path}
+ *   media: {id: MediaAsset}, overlays: {segId: png path | { path, x, y, w, h } (a Remotion clip and its band)}, luts: {assetId: path}, compoundFiles: {timelineId: path}
  *   width, height, fps, range: {startUs, endUs} | null, video: {codec, format, bitrate, hw}, audio: {enabled, format} ,
  *   mode: "video" | "audio" | "gif" | "still", stillAtUs, gifFps, caps, ffmpegMajor, out
  *
@@ -202,14 +202,17 @@ export function buildExport(tl, o) {
     const toWindow = w0 > visStart + 1 || w1 < visEnd - 1 ? `,trim=start=${rel(w0)}:end=${rel(w1)}` : "";
     const out = L();
     if (seg.kind === "image" || seg.kind === "text" || seg.kind === "sticker") {
-      const file = seg.kind === "image" ? media.path : o.overlays?.[seg.id];
+      // A Remotion graphic's overlay is { path, x, y, w, h }: its clip and the band of the frame it covers.
+      const ov = seg.kind === "image" ? media.path : o.overlays?.[seg.id];
+      const file = ov && typeof ov === "object" ? ov.path : ov;
       if (!file) throw new AppError("MEDIA", "err.overlayMissing", { segId: seg.id });
       if (/\.ffconcat$/i.test(file)) { // word-timed caption: a timed image sequence from the segment start
         const ii = addInput(["-f", "concat", "-safe", "0", "-i", file]);
         chains.push(`[${ii}:v]format=rgba,fps=${FPS},${at(visStart)}${toWindow}[${out}]`);
       } else if (/\.(mov|webm|mkv)$/i.test(file)) { // Remotion graphic: a transparent clip from the segment start
         const ii = addInput(["-i", file]);
-        chains.push(`[${ii}:v]format=rgba,fps=${FPS},${at(visStart)}${toWindow}[${out}]`);
+        const band = ov && typeof ov === "object" && (ov.w !== W || ov.h !== H || ov.x || ov.y) ? `,pad=${W}:${H}:${ov.x || 0}:${ov.y || 0}:color=black@0` : ""; // back to the full frame
+        chains.push(`[${ii}:v]format=rgba${band},fps=${FPS},${at(visStart)}${toWindow}[${out}]`);
       } else if (/\.gif$/i.test(file)) { // animated: keep its own clock from the visible start
         const ii = addInput(["-ignore_loop", "0", "-t", String(s(visEnd - visStart)), "-i", file]);
         chains.push(`[${ii}:v]fps=${FPS},${at(visStart)}${toWindow}[${out}]`);

@@ -8,14 +8,14 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import Ajv from "ajv";
-import { KIT_TEMPLATES, KIT_IDS, PUNCHY_COMPONENTS, EXTRA_COMPONENTS, kitParams, kitBox, kitTexts, kitBlend, isRemotionTemplate } from "../../src/core/graphicsKit.js";
+import { KIT_TEMPLATES, KIT_IDS, PUNCHY_COMPONENTS, EXTRA_COMPONENTS, kitParams, kitBox, kitTexts, kitBlend, kitCrop, isRemotionTemplate } from "../../src/core/graphicsKit.js";
 import { GRAPHIC_TEMPLATES, graphicStates, graphicParams } from "../../src/core/graphics.js";
 import { PACKS, PACK_SCHEMA, packOf, packSound } from "../../src/graphics/packs/index.js";
 import { splitWords, splitLines, visibleChars, readSeconds, formatNumber, toArabicDigits, wordTimes, emphasisIndexes, normWord } from "../../src/graphics/arabic.js";
 import { platformZones, safeRect, placeY, faceUnion, overlapArea, inside } from "../../src/graphics/layout.js";
 import { sentenceNeeds } from "../../src/graphics/needs.js";
 import { eligible, eligibleTemplates, fillParams, hardChecks, densityGuard, densityReport, planGraphics, frameCtx, rankNeed, clampParams, lengthFor, heuristicRanker, DENSITY } from "../../src/graphics/selection.js";
-import { remotionSegments, assetRefs, segmentJob, jobKey, GraphicsRenderer } from "../../src/graphics/render.js";
+import { remotionSegments, assetRefs, segmentJob, jobKey, groupJobs, bandOf, touchesEdge, GraphicsRenderer } from "../../src/graphics/render.js";
 import { alphaStats, measureAlpha, measureClip } from "../../src/graphics/measure.js";
 import { graphicsRuntime } from "../../src/graphics/setup.js";
 import { buildExport } from "../../src/core/exportGraph.js";
@@ -279,6 +279,21 @@ test("render wiring: remotion segments of a timeline, their pictures, stable cac
   assert.ok(inputs.join(" ").includes("C:/cache/abc.mov"));
   assert.doesNotMatch(inputs.join(" "), /-loop 1 [^]*abc\.mov/, "a clip, not a looped still");
   assert.match(graph, /format=rgba,fps=30,setpts=PTS-STARTPTS\+30/, "starts at the segment's frame");
+  // A banded clip is padded back to the full frame at its place.
+  const banded = buildExport(tl2, { media: {}, overlays: { [sid]: { path: "C:/cache/abc.mov", x: 0, y: 300, w: 1080, h: 600 } }, width: 1080, height: 1920, fps: 30, mode: "video", caps: { encoders: new Set(["libx264"]), filters: new Set(), timeline: new Set() }, video: { codec: "h264" }, audio: { enabled: false } });
+  assert.match(banded.graph, /format=rgba,pad=1080:1920:0:300:color=black@0,fps=30/);
+  // Bands: kinetic words are rendered as a band, full-frame looks as whole frames; groups by band height.
+  const kw = segmentJob({ seg: { duration: US }, template: "kinetic-word", params: {}, pack: "punchy" }, { width: 1080, height: 1920, fps: 30 });
+  assert.ok(kw.crop && kw.crop.w === 1080 && kw.crop.h < 1920 * 0.8 && kw.crop.h % 2 === 0);
+  assert.equal(segmentJob({ seg: { duration: US }, template: "tint-fx", params: {}, pack: "punchy" }, { width: 1080, height: 1920, fps: 30 }).crop, null);
+  const g = groupJobs([kw, { ...kw, crop: { ...kw.crop, h: 200 } }, { ...kw, crop: null }]);
+  assert.equal(g.length, 3, "a whole frame, and two bands too different to share a render");
+  assert.equal(groupJobs([kw, { ...kw, crop: { ...kw.crop, h: kw.crop.h - 10 } }]).length, 1, "close bands share one render");
+  const b = bandOf({ ...kw, crop: { x: 0, y: 1800, w: 1080, h: 100 } }, 400);
+  assert.ok(b.y + b.h <= 1920 && b.h === 400, "a band stays inside the frame");
+  const edge = new Uint8Array(10 * 10); edge[5] = 255;
+  assert.equal(touchesEdge({ frames: [edge], w: 10, h: 10 }, { y: 100, h: 10 }, 1920), true);
+  assert.equal(touchesEdge({ frames: [edge], w: 10, h: 10 }, { y: 0, h: 10 }, 1920), false, "the frame's own edge is fine");
 });
 
 test("measure: alpha statistics of a frame and the first visible frame of a clip", () => {
@@ -298,11 +313,20 @@ test("real render (graphics runtime installed): a kit graphic renders transparen
   const r = new GraphicsRenderer({ cacheDir: path.join(dir, "cache"), concurrency: 4 });
   try {
     const job = { template: "kinetic-word", params: kitParams("kinetic-word", { text: "مفيهاش فراخ!!", y: 0.45 }), pack: "punchy", width: 540, height: 960, fps: 30, durationInFrames: 30 };
-    const clip = await r.renderJob(job);
+    const res = await r.renderJob({ ...job, crop: kitCrop(job.template, job.params, 540, 960) });
+    const clip = res.path;
     assert.ok(fs.statSync(clip).size > 1000);
-    assert.equal(await r.renderJob(job), clip, "cached");
+    assert.ok(res.h < 960 && res.y > 0, `rendered as a band: ${JSON.stringify(res)}`);
+    assert.deepEqual(await r.renderJob({ ...job, crop: kitCrop(job.template, job.params, 540, 960) }), res, "cached");
+    // The band, padded back into the frame, is the same picture as a whole-frame render.
+    const r2 = new GraphicsRenderer({ cacheDir: path.join(dir, "cache2"), concurrency: 4, bands: false });
+    const whole = await r2.renderJob({ ...job, crop: null }).finally(() => r2.close());
+    const pad = path.join(dir, "padded.mov");
+    await run(binaries().ffmpeg, ["-hide_banner", "-y", "-i", clip, "-vf", `format=rgba,pad=540:960:0:${res.y}:color=black@0`, "-c:v", "prores_ks", "-profile:v", "4444", "-pix_fmt", "yuva444p10le", pad], { timeoutMs: 120_000 });
+    const a = await measureClip(pad, { w: 135, h: 240, fps: 30 }), b = await measureClip(whole.path, { w: 135, h: 240, fps: 30 });
+    assert.ok(a.coverage.every((c, i) => Math.abs(c - b.coverage[i]) < 0.002), "band == whole frame");
     const f = frameCtx({ width: 540, height: 960, fps: 30 });
-    const m = await measureClip(clip, { w: 135, h: 240, fps: 30, inUs: 200_000, outUs: 140_000, zones: f.zones.block });
+    const m = await measureClip(clip, { w: 135, h: 240, band: res, W: 540, H: 960, fps: 30, inUs: 200_000, outUs: 140_000, zones: f.zones.block });
     assert.ok(m.entryFrame !== null && m.entryFrame <= 3, `entry ${m.entryFrame}`);
     assert.ok(m.bbox && m.bbox.y > 0.25 && m.bbox.y + m.bbox.h < 0.7, `box ${JSON.stringify(m.bbox)}`);
     assert.ok(m.zonePixels <= 400, `zone pixels ${m.zonePixels}`);

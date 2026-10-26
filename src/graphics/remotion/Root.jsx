@@ -6,12 +6,13 @@ import { Graphic } from "./Graphic.jsx";
 
 const meta = ({ props }) => ({ durationInFrames: Math.max(1, Math.round(props.durationInFrames || 60)), fps: props.fps || 30, width: props.width || 1080, height: props.height || 1920 });
 
-/** items: [{ template, params, from, durationInFrames }] — each graphic in its own Sequence (its own clock). */
-const Sheet = ({ items = [], pack, assetBase, background }) => (
+/** items: [{ template, params, from, durationInFrames, crop? }] — each graphic in its own Sequence (its own clock);
+ * with frameWidth/frameHeight, each item's crop band is shifted to the top-left of this (band-sized) composition. */
+const Sheet = ({ items = [], pack, assetBase, background, frameWidth, frameHeight }) => (
   <AbsoluteFill style={{ background: background || "transparent" }}>
     {items.map((it, i) => (
       <Sequence key={i} from={it.from} durationInFrames={it.durationInFrames} layout="none">
-        <Graphic template={it.template} params={it.params} pack={pack} assetBase={assetBase} />
+        <Graphic template={it.template} params={it.params} pack={pack} assetBase={assetBase} crop={it.crop || null} frameWidth={frameWidth} frameHeight={frameHeight} />
       </Sequence>
     ))}
   </AbsoluteFill>

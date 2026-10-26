@@ -1,6 +1,10 @@
 // Time and motion helpers shared by the components (the edit-hamdy kit's own helpers, unchanged in behaviour): every
 // motion is a pure function of the current frame, so the Player preview and the render are the same picture.
+import { createContext, useContext } from "react";
 import { useCurrentFrame, useVideoConfig } from "remotion";
+
+/** The full frame a graphic is laid out on when only a band of it is rendered ({ W, H } or null: the composition). */
+export const FrameContext = createContext(null);
 
 export const cl = (x) => Math.max(0, Math.min(1, x));
 /** Progress of the window [a, b] at time t (0..1, linear). */
@@ -22,14 +26,16 @@ export const inWin = (t, s, e) => t >= s - 0.001 && t <= e;
 export const abs = (s) => ({ position: "absolute", ...s });
 
 /**
- * Seconds since the graphic's start and its window: { t, s, e, W, H, u, k, wide }. u = 1 % of the short side
+ * Seconds since the graphic's start and its window: { t, s, e, W, H, u, k, wide }. W×H is the full frame (also when
+ * only a band of it is rendered — FrameContext). u = 1 % of the short side
  * (the numbers kit's unit), k = short side / 1080 (the Punchy kit was designed on 1080×1920 pixels).
  * Components read the frame themselves (never a `t` prop) so wrappers that re-render children at sub-frame times
  * (@remotion/motion-blur) move them correctly.
  */
 export function useClock(props = {}) {
   const frame = useCurrentFrame();
-  const { fps, durationInFrames, width: W, height: H } = useVideoConfig();
+  const cfg = useVideoConfig(), frameSize = useContext(FrameContext);
+  const { fps, durationInFrames } = cfg, W = frameSize?.W ?? cfg.width, H = frameSize?.H ?? cfg.height;
   const short = Math.min(W, H);
   return { t: frame / fps, s: props.s ?? 0, e: props.e ?? durationInFrames / fps, fps, W, H, u: short / 100, k: short / 1080, wide: W > H };
 }

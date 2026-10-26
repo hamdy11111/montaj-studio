@@ -9,10 +9,15 @@ import { intersect } from "./layout.js";
 /** Alpha above this (0–255) counts as drawn — soft shadows and glows below it do not. */
 export const ALPHA_ON = 40;
 
-/** Decode the alpha plane of a clip at w×h: Promise<{ frames: Uint8Array[], w, h }>. */
-export function decodeAlpha(file, { w = 270, h = 480, ffmpeg = binaries().ffmpeg } = {}) {
+/**
+ * Decode the alpha plane of a clip at w×h: Promise<{ frames: Uint8Array[], w, h }>. band ({ x, y, w, h } of a frame
+ * W×H, as render.js returns it): the clip is a band of that frame — it is put back in place first, so the numbers
+ * are about the whole frame.
+ */
+export function decodeAlpha(file, { w = 270, h = 480, band = null, W, H, ffmpeg = binaries().ffmpeg } = {}) {
+  const place = band && W && H && (band.w !== W || band.h !== H) ? `format=rgba,pad=${W}:${H}:${band.x || 0}:${band.y || 0}:color=black@0,` : "";
   return new Promise((resolve, reject) => {
-    const p = spawn(ffmpeg, ["-v", "error", "-i", file, "-vf", `scale=${w}:${h}:flags=area,format=rgba,alphaextract`, "-f", "rawvideo", "-pix_fmt", "gray", "-"], { windowsHide: true });
+    const p = spawn(ffmpeg, ["-v", "error", "-i", file, "-vf", `${place}scale=${w}:${h}:flags=area,format=rgba,alphaextract`, "-f", "rawvideo", "-pix_fmt", "gray", "-"], { windowsHide: true });
     const chunks = [];
     let err = "";
     p.stdout.on("data", (d) => chunks.push(d));
