@@ -77,7 +77,7 @@ export function verifyPlan({ moments = [], links = [], cuts = [], durationUs, tr
  * important(word span) → bool marks lines that must survive (the punch / setup / reaction moments).
  */
 export function expectedSpeech(plan, wordsByMedia, { important = () => false } = {}) {
-  const lines = [], joints = [], words = [], sounds = [];
+  const lines = [], joints = [], words = [], sounds = [], segs = [];
   let t = 0;
   for (const [k, sg] of (plan.segments || []).entries()) {
     const ws = (wordsByMedia[sg.mediaId] || []).filter((w) => (w.startUs + w.endUs) / 2 >= sg.fromUs && (w.startUs + w.endUs) / 2 < sg.toUs);
@@ -87,9 +87,11 @@ export function expectedSpeech(plan, wordsByMedia, { important = () => false } =
     const flush = () => { if (run.length) lines.push({ text: run.map((w) => w.text).join(" "), editFromUs: at(run[0].startUs), editToUs: at(run[run.length - 1].endUs), mediaId: sg.mediaId, srcFromUs: run[0].startUs, srcToUs: run[run.length - 1].endUs, segFromUs: t, segToUs: t + (sg.toUs - sg.fromUs), important: !!important(sg.mediaId, run[0].startUs, run[run.length - 1].endUs), segment: k, first: run[0] === ws[0], last: run[run.length - 1] === ws[ws.length - 1] }); run = []; };
     // The sounds the plan adds over this segment (their accent time; a library sound up to ~1.6 s, a bundled one ~1 s).
     for (const x of plan.sfx || []) if (x.mediaId === sg.mediaId && x.atUs >= sg.fromUs && x.atUs < sg.toUs && !sounds.some((y) => y.editUs === at(x.atUs))) sounds.push({ editUs: at(x.atUs), what: x.library?.title || x.sound });
-    for (const w of ws) { if (run.length && w.startUs - run[run.length - 1].endUs >= 700_000) flush(); run.push(w); }
+    const lineOf = new Map();
+    for (const w of ws) { if (run.length && w.startUs - run[run.length - 1].endUs >= 700_000) flush(); run.push(w); lineOf.set(w, lines.length); }
     flush();
-    ws.forEach((w, i) => words.push({ text: w.text, editUs: at(w.startUs), joint: (i === 0 && k > 0) || (i === ws.length - 1 && k < (plan.segments || []).length - 1) }));
+    ws.forEach((w, i) => words.push({ text: w.text, editUs: at(w.startUs), editEndUs: at(w.endUs), segment: k, line: lineOf.get(w), joint: (i === 0 && k > 0) || (i === ws.length - 1 && k < (plan.segments || []).length - 1), first: i === 0, last: i === ws.length - 1 }));
+    segs.push({ k, editFromUs: t, editToUs: t + (sg.toUs - sg.fromUs), mediaId: sg.mediaId, srcFromUs: sg.fromUs, srcToUs: sg.toUs });
     if (k) joints.push({ editUs: t, before: joints.pendingBefore ?? null, after: ws[0] ? { text: ws[0].text, editUs: at(ws[0].startUs) } : null, segment: k });
     joints.pendingBefore = ws.length ? { text: ws[ws.length - 1].text, editUs: at(ws[ws.length - 1].endUs) } : null;
     t += sg.toUs - sg.fromUs;
@@ -102,7 +104,7 @@ export function expectedSpeech(plan, wordsByMedia, { important = () => false } =
     l.atJoint = (l.first && l.segment > 0) || (l.last && l.segment < nSeg - 1);
     l.masked = sounds.filter((x) => x.editUs > l.editFromUs - 1_600_000 && x.editUs < l.editToUs + 300_000).map((x) => x.what);
   }
-  return { lines, joints, words, sounds, editUs: t };
+  return { lines, joints, words, sounds, segs, editUs: t };
 }
 
 /**
@@ -168,6 +170,166 @@ export function verifyOutput({ expected, outWords = [], loudness = null, black =
   if (durationS !== null && plannedS !== null && Math.abs(durationS - plannedS) > 0.5) add("out.length", "warn", `the export is ${durationS.toFixed(1)} s, the plan ${plannedS.toFixed(1)} s`, { got: durationS, planned: plannedS });
   const r2 = (x) => (x === null ? null : Math.round(x * 100) / 100);
   return { checks, passed, ok: !checks.some((c) => c.level === "fail"), stats: { lines: expected.lines.length, linesFound: found, important: imp.length, importantFound: impFound, agreement: r2(agreement), joints: jointWords.length, jointRecall: r2(jointRecall) } };
+}
+
+// ------------------------------------------------------------------ the precise check: forced alignment
+// The re-transcription above hears only ~70–77 % of a talking video's words again (a second NeMo pass hears mumbled and
+// short words differently), so it can only catch gross losses: one clipped word at a joint stays inside its noise.
+// Here the words the plan keeps are FORCE-ALIGNED onto the export's own sound (perception's wav2vec2 worker, align.py):
+// every expected letter must be found, in order, inside its own segment. The export's audio is laid out with a short
+// silence after every segment, so a word whose sound was cut at a joint cannot borrow the next segment's sound: its
+// letters are dragged into the silence (the aligned word spills past its segment). A single word's letter probability is
+// no test (a misheard word matches at 0 % in a perfect export); lines are judged by their words' median against the
+// file's own (the inside words), never an absolute number — a noisy street and a studio both pass when nothing is lost.
+export const ALIGN = {
+  gapUs: 600_000,                  // silence put after every segment in the aligned audio
+  // s of sound around each line the worker may use. Short on purpose: the aligner drags a line's last letter to the end
+  // of its window when it finds nothing better (with 0.3 s, 13 of 01's joint words "spilled" 165–187 ms = 0.3 s minus
+  // the director's ~135 ms margin — every one exactly at the window's edge); with 0.15 s such a drag stays under ~30 ms.
+  pad: 0.15,
+  spillUs: 120_000,                // a word whose letters reach this far into the silence after its segment lost sound at the cut
+                                   // (a drag reaches at most pad − the director's smallest margin, 60 ms: 90 ms; real cuts 258–331 ms)
+  edgeUs: 40_000,                  // the sound at each cut (reported with the check)
+  lineRatio: 0.45, lineMin: 3,     // a line (≥ 3 aligned words) under 45 % of the median: not heard (masked or lost)
+  minWords: 8,                     // fewer aligned inside words than this: no reference, nothing judged
+};
+
+// Egyptian speech says a word-final ه / ة as a vowel («التركيه» torkeyya, «عنده» 3ando), but the Arabic wav2vec2
+// aligns the letter ه to breath and room noise: on a cut after such a word it drags the ه across the silence and the
+// word looks cut. The final ه is left out of the text the aligner gets (never in the few words that say a real h).
+// The same for the adverbs written with a final ا and said with -an («مثلا» masalan, «طبعا» tab3an): their ا is read as n.
+const REAL_H = new Set(["الله", "والله", "بالله", "لله", "عليه", "فيه", "ليه", "وجه", "شبه", "اتجاه", "انتباه"]);
+const TANWEEN = new Set(["مثلا", "طبعا", "جدا", "ابدا", "شكرا", "عفوا", "اصلا", "فعلا", "تماما", "حالا", "دايما", "دائما", "غالبا", "احيانا", "اولا", "ثانيا", "اخيرا", "حرفيا", "تقريبا", "فورا", "سريعا", "اكيدا", "عموما", "خصوصا", "نهائيا", "مبدئيا", "حاليا", "يوميا", "اساسا", "قريبا", "مؤخرا", "سابقا", "لاحقا", "اهلا", "سهلا"]);
+export function alignText(text) {
+  const t = String(text || "").replace(/[ً-ْـٰ]/g, "");
+  if (TANWEEN.has(t)) return `${t.slice(0, -1)}ن`;
+  return t.length >= 4 && /[هة]$/.test(t) && !REAL_H.has(t) ? t.slice(0, -1) : t;
+}
+
+/**
+ * Where each segment's sound goes in the aligned audio and the job for align.py. expected: expectedSpeech's result.
+ * Returns { pieces: [{ k, editFromUs, editToUs, wavFromUs }], totalUs, asr: { segments: [{ start, end, words: [{ start,
+ * end, word }] }] } (seconds of the aligned audio, one per line), index: [expected word index, in the order the worker
+ * returns them] }.
+ */
+export function alignLayout(expected, A = ALIGN) {
+  const segs = expected.segs || [];
+  const pieces = segs.map((s, i) => ({ k: s.k, editFromUs: s.editFromUs, editToUs: s.editToUs, wavFromUs: s.editFromUs + i * A.gapUs }));
+  const wav = (k, us) => us + k * A.gapUs;
+  const groups = new Map();
+  (expected.words || []).forEach((w, i) => { const key = `${w.segment}:${w.line}`; if (!groups.has(key)) groups.set(key, []); groups.get(key).push(i); });
+  const segments = [], index = [];
+  for (const ids of groups.values()) {
+    const ws = ids.map((i) => expected.words[i]);
+    const k = ws[0].segment;
+    segments.push({ start: wav(k, ws[0].editUs) / US, end: wav(k, ws[ws.length - 1].editEndUs ?? ws[ws.length - 1].editUs) / US, words: ws.map((w) => ({ start: wav(k, w.editUs) / US, end: wav(k, w.editEndUs ?? w.editUs) / US, word: alignText(w.text) })) });
+    index.push(...ids);
+  }
+  const last = pieces[pieces.length - 1];
+  return { pieces, totalUs: last ? last.wavFromUs + (last.editToUs - last.editFromUs) + A.gapUs : 0, asr: { segments }, index };
+}
+
+/** The aligned audio: each piece of the export's PCM (`rate` Hz mono Int16Array, edit time) at its place, silence between. */
+export function layoutAudio(pcm, rate, layout) {
+  const at = (us) => Math.round((us * rate) / US);
+  const out = new Int16Array(at(layout.totalUs));
+  for (const p of layout.pieces) {
+    const a = at(p.editFromUs), b = Math.min(pcm.length, at(p.editToUs)), o = at(p.wavFromUs);
+    if (b > a && o < out.length) out.set(pcm.subarray(a, Math.min(b, a + out.length - o)), o);
+  }
+  return out;
+}
+
+/** A mono 16-bit WAV file's bytes (for the worker, which reads files). */
+export function wavBytes(pcm, rate) {
+  const h = Buffer.alloc(44), n = pcm.length * 2;
+  h.write("RIFF", 0); h.writeUInt32LE(36 + n, 4); h.write("WAVE", 8); h.write("fmt ", 12); h.writeUInt32LE(16, 16); h.writeUInt16LE(1, 20); h.writeUInt16LE(1, 22);
+  h.writeUInt32LE(rate, 24); h.writeUInt32LE(rate * 2, 28); h.writeUInt16LE(2, 32); h.writeUInt16LE(16, 34); h.write("data", 36); h.writeUInt32LE(n, 40);
+  return Buffer.concat([h, Buffer.from(pcm.buffer, pcm.byteOffset, n)]);
+}
+
+/**
+ * The sound right at every joint of the export (pcm in edit time): { quietDb (the file's 10th percentile of 50 ms
+ * windows), edges: Map(segment k → { endDb (its last edgeUs), startDb (its first edgeUs) }) } — shown with a cut word.
+ */
+export function edgeLevels(pcm, rate, layout, A = ALIGN) {
+  const at = (us) => Math.round((us * rate) / US);
+  const db = (a, b) => { a = Math.max(0, a); b = Math.min(pcm.length, b); if (b <= a) return -120; let q = 0; for (let i = a; i < b; i++) q += pcm[i] * pcm[i]; return 10 * Math.log10(q / (b - a) / 1073741824 + 1e-12); };
+  const win = at(50_000), lv = [];
+  for (let i = 0; i + win <= pcm.length; i += win) lv.push(db(i, i + win));
+  lv.sort((a, b) => a - b);
+  const edges = new Map();
+  for (const p of layout.pieces || []) edges.set(p.k, { startDb: db(at(p.editFromUs), at(p.editFromUs + A.edgeUs)), endDb: db(at(p.editToUs - A.edgeUs), at(p.editToUs)) });
+  return { quietDb: lv.length ? lv[Math.floor(lv.length * 0.1)] : -120, edges };
+}
+
+const median = (xs) => { if (!xs.length) return null; const s = [...xs].sort((a, b) => a - b), m = s.length >> 1; return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2; };
+
+/**
+ * The output's speech checks by forced alignment. aligned: align.py's `words` (same order as layout.index). Every word:
+ * its letter probability (`align_conf`) and where its letters landed. Fails: a word at a joint whose sound is cut
+ * («out.clippedWord»: its letters spill into the silence around its segment), an important line that is not there
+ * («out.lineMissing»). Returns { checks, passed, ok, stats: { median, words, aligned,
+ * jointWords, clipped, lines, linesFound, important, importantFound }, words: [per expected word { text, editUs, conf,
+ * spillUs, joint }], judged } — the speech part of verifyOutput, so the two can stand in for each other.
+ */
+export function verifyAligned({ expected, layout, aligned, levels = null }, A = ALIGN) {
+  const checks = [], passed = [];
+  const add = (id, level, message, args = {}) => checks.push({ id, level, message, args });
+  const segOf = new Map((layout.pieces || []).map((p) => [p.k, p]));
+  const per = expected.words.map((w) => ({ text: w.text, editUs: w.editUs, segment: w.segment, line: w.line, joint: w.joint, first: w.first, last: w.last, conf: null, spillUs: 0 }));
+  layout.index.forEach((i, j) => {
+    const r = aligned[j], p = segOf.get(per[i].segment);
+    if (!r || r.align_conf === null || r.align_conf === undefined || !p) return;
+    const off = p.wavFromUs - p.editFromUs, s = Math.round(r.start * US) - off, e = Math.round(r.end * US) - off;
+    per[i].conf = r.align_conf; per[i].fromUs = s; per[i].toUs = e;
+    // Letters outside the segment's own sound: after its end (a word cut at the joint after it) or before its start;
+    // and how much sound is left between the word and its cut (the director keeps a margin around every kept word).
+    per[i].spillUs = Math.max(0, e - p.editToUs, p.editFromUs - s);
+    per[i].spillSide = e - p.editToUs >= p.editFromUs - s ? "end" : "start";
+    per[i].edgeUs = per[i].last && !per[i].first ? p.editToUs - e : per[i].first && !per[i].last ? s - p.editFromUs : Math.min(p.editToUs - e, s - p.editFromUs);
+  });
+  const content = per.filter((w) => w.conf !== null && alignToken(w.text).length >= 3);
+  const inside = content.filter((w) => !w.joint);
+  const med = median(inside.map((w) => w.conf));
+  const r2 = (x) => (x === null ? null : Math.round(x * 100) / 100);
+  if (med === null || inside.length < A.minWords) {
+    if (content.length) add("out.alignFew", "warn", `too few words to align (${inside.length}): lines and joints not judged`, { n: inside.length });
+    return { checks, passed, ok: true, stats: { median: r2(med), words: per.length, aligned: content.length }, words: per, judged: false };
+  }
+  // 1. Words cut at a joint: their letters pushed past the cut into the silence. (The sound at the cut, edgeLevels, is
+  // reported with the check, not used to judge: in a noisy outdoor vlog a cut inside a word sits only 3–13 dB over the
+  // room noise.)
+  const jointWords = per.filter((w) => w.joint && w.conf !== null && alignToken(w.text).length >= 2);
+  const clipped = jointWords.filter((w) => w.spillUs >= A.spillUs);
+  for (const w of clipped) add("out.clippedWord", "fail", `the word «${w.text}» at a joint (${sec(w.editUs)} s) is cut: its letters run ${Math.round(w.spillUs / 1000)} ms past the cut`, { word: w.text, at: sec(w.editUs), conf: r2(w.conf), spillMs: Math.round(w.spillUs / 1000), median: r2(med), side: w.spillSide, ...(levels?.edges?.get(w.segment) ? { atCutDb: Math.round(w.spillSide === "end" ? levels.edges.get(w.segment).endDb : levels.edges.get(w.segment).startDb), quietDb: Math.round(levels.quietDb) } : {}) });
+  if (!clipped.length) passed.push("out.clippedWord");
+  // 2. Every line still there: its words' median letter probability against the file's.
+  let found = 0, impFound = 0;
+  const imp = expected.lines.filter((l) => l.important);
+  expected.lines.forEach((l, li) => {
+    const ws = per.filter((w) => w.line === li && w.conf !== null);
+    if (ws.length < A.lineMin) { found++; if (l.important) impFound++; return; } // a short fragment: not a fair test
+    const m = median(ws.map((w) => w.conf));
+    if (m >= med * A.lineRatio) { found++; if (l.important) impFound++; return; }
+    const why = l.masked?.length ? ` — under the sound «${l.masked[0]}»` : l.atJoint ? " — next to a cut" : "";
+    add(l.important ? "out.lineMissing" : "out.lineWeak", l.important ? "fail" : "warn", `«${l.text.slice(0, 60)}» is not there in the export around ${sec(l.editFromUs)} s (its letters match at ${Math.round(100 * m)} %, the file ${Math.round(100 * med)} %)${why}`, { text: l.text.slice(0, 60), at: sec(l.editFromUs), conf: r2(m), median: r2(med), important: l.important, editFromUs: l.editFromUs, editToUs: l.editToUs, mediaId: l.mediaId, srcFromUs: l.srcFromUs, segFromUs: l.segFromUs, segToUs: l.segToUs });
+  });
+  if (!checks.some((c) => c.id === "out.lineMissing")) passed.push("out.lineMissing");
+  return { checks, passed, ok: !checks.some((c) => c.level === "fail"), stats: { median: r2(med), words: per.length, aligned: content.length, jointWords: jointWords.length, clipped: clipped.length, lines: expected.lines.length, linesFound: found, important: imp.length, importantFound: impFound }, words: per, judged: true };
+}
+
+const SPEECH_IDS = new Set(["out.noTranscript", "out.lowAgreement", "out.lineMissing", "out.lineWeak", "out.lineHeardDifferently", "out.jointWord", "out.cutWords"]);
+/**
+ * verifyOutput's result with its speech part (re-transcription) replaced by verifyAligned's (forced alignment), when
+ * the alignment could judge the file. The transcription's numbers stay in stats.transcript for comparison.
+ */
+export function withAlignment(out, al) {
+  if (!al?.judged) return { ...out, stats: { ...out.stats, method: "transcribe", align: al?.stats || null } };
+  const checks = [...out.checks.filter((c) => !SPEECH_IDS.has(c.id)), ...al.checks];
+  const passed = [...out.passed.filter((id) => !SPEECH_IDS.has(id)), ...al.passed];
+  const { lines, linesFound, important, importantFound, agreement, joints, jointRecall } = out.stats;
+  return { ...out, checks, passed, ok: !checks.some((c) => c.level === "fail"), stats: { method: "align", lines: al.stats.lines, linesFound: al.stats.linesFound, important: al.stats.important, importantFound: al.stats.importantFound, median: al.stats.median, aligned: al.stats.aligned, jointWords: al.stats.jointWords, clipped: al.stats.clipped, transcript: { lines, linesFound, important, importantFound, agreement, joints, jointRecall } } };
 }
 
 /** The loudness envelope of mono 16-bit PCM (an Int16Array): one RMS value per `winMs`. */
