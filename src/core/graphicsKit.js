@@ -294,7 +294,7 @@ export const KIT_TEMPLATES = {
   "animated-emoji": {
     name: "Animated emoji (video)", ar: "إيموجي متحرك (فيديو)", use: "Google's animated emoji as a transparent video (@remotion/animated-emoji) by a spot",
     component: "AnimatedEmojiSticker", family: "extras", inUs: 300_000, outUs: 250_000, durUs: 2_000_000, sfx: { in: "pop" },
-    params: { emoji: str("Emoji name (e.g. joy, fire, mind-blown)", "joy", 40), x: num("Across (centre)", 0.05, 0.95, 0.78), y: num("Down (centre)", 0.05, 0.95, 0.24), size: num("Size", 0.06, 0.5, 0.2) },
+    params: { emoji: str("Emoji name (e.g. joy, fire, mind-blown)", "joy", 40), src: image("Video file (filled by the app from the emoji family)"), x: num("Across (centre)", 0.05, 0.95, 0.78), y: num("Down (centre)", 0.05, 0.95, 0.24), size: num("Size", 0.06, 0.5, 0.2) },
     contract: contract({ tags: ["reaction"], minSec: 1, maxSec: 3, region: "side", energy: 3, major: false }),
     reach: 1.6,
     box: (P, W, H) => { const s = P.size * short(W, H); return centred(s / W, s / H, P.y, P.x); },

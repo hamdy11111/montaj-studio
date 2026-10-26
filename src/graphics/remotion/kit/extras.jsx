@@ -35,7 +35,7 @@ export const HandDrawn = (P) => {
   const Mark = MARKS[P.type] || RCircle;
   const progress = outCubic(p(t, s, s + 0.7)), out = exitOf(t, e);
   const x = P.x * W, y = P.y * H, w = P.w * W, h = P.h * H, color = P.color || pk.colors.accent;
-  const extra = P.type === "highlight" ? { color: `${color}88` } : { color, strokeWidth: (P.strokeWidth ?? 7) * K };
+  const extra = P.type === "highlight" ? { color: `${color}5C`, iterations: 1 } : { color, strokeWidth: (P.strokeWidth ?? 7) * K };
   return (
     <div style={{ opacity: 1 - out }}>
       <div style={abs({ left: x, top: y, width: w, height: h })}>
