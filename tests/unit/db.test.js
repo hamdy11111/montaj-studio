@@ -7,9 +7,10 @@ import path from "node:path";
 import Realm from "realm";
 import { openDatabase, closeDatabase } from "../../src/db/realmClient.js";
 import { createRepositories } from "../../src/db/repositories.js";
-import { legacySchemaV1, legacySchemaV2, legacySchemaV4 } from "../../src/db/migrations.js";
+import { legacySchemaV1, legacySchemaV2, legacySchemaV4, legacySchemaV5 } from "../../src/db/migrations.js";
+import { SCHEMA_VERSION } from "../../src/db/schemas.js";
 import { newSegment } from "../../src/core/model.js";
-import { addMediaSegment, addSegment, split, setBehindPerson } from "../../src/core/timelineOps.js";
+import { addMediaSegment, addSegment, split, setBehindPerson, setJL } from "../../src/core/timelineOps.js";
 import { US } from "../../src/core/util.js";
 
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), "montaj-db-"));
@@ -169,8 +170,8 @@ test("migration v1 → v5 (through v2, v3, v4) backfills lastOpenedAt and keeps 
   const migrated = await openDatabase({ file: legacy });
   const p = migrated.objectForPrimaryKey("Project", "aaaaaaaa-0000-0000-0000-000000000002");
   assert.equal(p.lastOpenedAt.toISOString(), updated.toISOString());
-  assert.equal(migrated.schemaVersion, 5);
-  assert.ok(fs.existsSync(`${legacy}.pre-v5.bak`), "a safety copy is written before migrating");
+  assert.equal(migrated.schemaVersion, SCHEMA_VERSION);
+  assert.ok(fs.existsSync(`${legacy}.pre-v${SCHEMA_VERSION}.bak`), "a safety copy is written before migrating");
   migrated.close();
   realm = await openDatabase({ file });
   repo = createRepositories(realm);
@@ -188,12 +189,12 @@ test("migration v2 → v5 adds TextStyle.caption/graphic and keeps existing text
   });
   old.close();
   const migrated = await openDatabase({ file: legacy });
-  assert.equal(migrated.schemaVersion, 5);
+  assert.equal(migrated.schemaVersion, SCHEMA_VERSION);
   const s = migrated.objectForPrimaryKey("Segment", "bbbbbbbb-0000-0000-0000-000000000003");
   assert.equal(s.text.content, "old caption");
   assert.equal(s.text.caption, null);
   assert.equal(s.text.graphic, null);
-  assert.ok(fs.existsSync(`${legacy}.pre-v5.bak`));
+  assert.ok(fs.existsSync(`${legacy}.pre-v${SCHEMA_VERSION}.bak`));
   migrated.close();
 });
 
@@ -209,11 +210,40 @@ test("migration v4 → v5 adds VideoFx.matte = none and keeps the clip's effects
   });
   old.close();
   const migrated = await openDatabase({ file: legacy });
-  assert.equal(migrated.schemaVersion, 5);
+  assert.equal(migrated.schemaVersion, SCHEMA_VERSION);
   const s = migrated.objectForPrimaryKey("Segment", "cccccccc-0000-0000-0000-000000000003");
   assert.equal(s.videoFx.matte, "none");
   assert.equal(s.videoFx.maskType, "circle");
   assert.equal(s.videoFx.chroma, true);
   assert.equal(migrated.objectForPrimaryKey("Track", "cccccccc-0000-0000-0000-000000000004").role, "");
   migrated.close();
+});
+
+test("migration v5 → v6 adds Segment.jlUs = 0; a J/L cut is saved and read back", async () => {
+  const legacy = path.join(dir, "legacy-v5.realm");
+  const old = await Realm.open({ path: legacy, schema: legacySchemaV5(), schemaVersion: 5 });
+  const at = new Date("2026-10-01T00:00:00Z");
+  old.write(() => {
+    const seg = old.create("Segment", { _id: "dddddddd-0000-0000-0000-000000000003", kind: "video", start: 0, duration: 1000000 });
+    const tr = old.create("Track", { _id: "dddddddd-0000-0000-0000-000000000004", type: "video", order: 0, isMain: true, segments: [seg] });
+    const t = old.create("Timeline", { _id: "dddddddd-0000-0000-0000-000000000001", name: "Timeline 01", createdAt: at, updatedAt: at, tracks: [tr], markers: [] });
+    old.create("Project", { _id: "dddddddd-0000-0000-0000-000000000002", name: "v5", createdAt: at, updatedAt: at, lastOpenedAt: at, mainTimelineId: t._id, timelines: [t], media: [], tags: [] });
+  });
+  old.close();
+  const migrated = await openDatabase({ file: legacy });
+  assert.equal(migrated.schemaVersion, SCHEMA_VERSION);
+  assert.equal(migrated.objectForPrimaryKey("Segment", "dddddddd-0000-0000-0000-000000000003").jlUs, 0);
+  migrated.close();
+  realm = await openDatabase({ file });
+  repo = createRepositories(realm);
+  // Through the repositories: two clips, a J of 0.3 s on the second joint, saved and reloaded.
+  const p = repo.projects.create({ name: "jl", canvas: { ratio: "16:9", width: 1920, height: 1080 }, fps: 30 });
+  const tl = repo.timelines.get(p.mainTimelineId);
+  const m = { id: null, type: "video", name: "a", durationUs: 10 * US };
+  const a = addMediaSegment(tl, m), b = addMediaSegment(tl, m);
+  assert.equal(setJL(tl, b.id, -300_000), -300_000);
+  repo.timelines.saveState(tl);
+  const back = repo.timelines.get(p.mainTimelineId).tracks.find((t) => t.isMain).segments;
+  assert.equal(back.find((s) => s.id === b.id).jlUs, -300_000);
+  assert.equal(back.find((s) => s.id === a.id).jlUs, 0);
 });

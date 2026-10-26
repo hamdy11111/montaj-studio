@@ -81,7 +81,10 @@ test("the director's plan (the skill's rules): angles never repeat, the head is 
   const { plan, notes, qa } = directPlan({ mediaId: "m1", words: TALK, durationUs: 15 * US, track: TRACK, cta: "تابعني", captionTemplate: "clean-pro", corrections: [{ from: "منكوش", to: "منكوش!" }], media: { width: 1080, height: 1920 }, canvas: { width: 1080, height: 1920 } });
   const ajv = new Ajv({ allErrors: true, strict: false });
   assert.ok(ajv.validate(EDIT_PLAN_SCHEMA, plan), JSON.stringify(ajv.errors));
-  assert.ok(plan.cuts.every((c) => c.toUs <= beats[0][0] || c.fromUs >= beats[0][1]), "the beat is not cut");
+  assert.equal(plan.schema, "montaj.editplan/2");
+  assert.ok(plan.segments.some((x) => x.fromUs <= beats[0][0] && x.toUs >= beats[0][1]), "the beat is not cut");
+  assert.ok(plan.segments.every((x, i) => !i || x.fromUs > plan.segments[i - 1].toUs), "one clip: its kept spans in source order");
+  assert.ok(plan.graphics.filter((g) => g.template !== "progress-bar" && g.template !== "follow-cta").every((g) => g.anchor?.word && g.reason), "every graphic lands on a word, with a reason");
   // Angles: medium and close alternate; within a 1080p source's sharpness the close shot is ×1.25.
   const angles = plan.zooms.filter((z) => z.reason.startsWith("angle"));
   assert.ok(angles.length >= 3);
@@ -201,11 +204,11 @@ test("a reel from a long talk: the strongest whole sentences within the target, 
   assert.ok(sel.estUs <= 20 * US, `${sel.estUs}`);
   for (let i = 1; i < kept.length; i++) assert.ok(kept[i].w0 > kept[i - 1].w1, "the video's order is kept");
   // In the director: a 20 s reel, paced, within 2 s of the target, no word cut inside a kept sentence.
-  const { plan, qa, notes } = directPlan({ mediaId: "m1", words, durationUs: Math.round((t + 1) * US), track: [], targetUs: 20 * US });
+  const { plan, qa, notes } = directPlan({ mediaId: "m1", words, durationUs: Math.round((t + 1) * US), track: [], targetUs: 20 * US, retakes: false });
   assert.ok(qa.stats.editUs <= 22 * US, `${qa.stats.editUs}`);
   assert.ok(qa.passed.includes("speech.cutInsideWord") && qa.passed.includes("speech.lostWord"));
   assert.ok(notes.some((n) => n.startsWith("reel of 20 s")));
-  assert.ok(plan.cuts.some((c) => /reel/.test(c.reason)));
+  assert.ok(plan.segments.some((x) => /reel/.test(x.reason || "")));
 });
 
 test("the work estimate: stages weighted by measured speeds; cached stages are nearly free; a fast run drops the slow steps", () => {

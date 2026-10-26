@@ -1,9 +1,14 @@
 // The director: turns what is said (word timings) and what is seen (where the person's head is, how it moves) into
-// a whole edit plan (montaj.editplan/1) — the decisions an editor makes, written as rules. The rules and their
+// a whole edit plan (montaj.editplan/2) — the decisions an editor makes, written as rules. The rules and their
 // numbers are the edit-hamdy editing skill's (core/policy.js):
+//  · several clips: planned as one story, in their timeline order (story ordering is a later stage); each clip's
+//    words and person track are laid on one "virtual" time axis, and the plan is mapped back to each file;
+//  · retakes: repeated attempts of a line grouped by their words (core/speech.js retakeGroups) — the last complete
+//    take is kept, the others and their asides go (the groups are in the plan for the cut sheet);
 //  · pacing: what is said is kept whole; stretched hesitations, stutters, restarted sentences and the recogniser's
 //    hallucinations go; the silence kept between words depends on the moment (glued after a question, faster before
 //    a punchline, a breath after a laugh, never above 0.6 s); wordless moments where something is shown are kept;
+//  · a small J cut (the next sound first) on a change of scene: another file, or a long stretch left out;
 //  · angles from one camera: wide / medium / close, never the same twice in a row, close on a punchline or a
 //    reaction, the head never cropped (14 % above, 6 % below), within the video's sharpness;
 //  · zooms by meaning (moments lexicon): a punch-in on a shock/laugh/win, a push on a question or an idea, spaced;
@@ -14,7 +19,7 @@
 //  · captions that reveal the words as they are spoken, the chosen words emphasised;
 //  · quality guards on the result (core/qa.js), reported with the plan.
 // Pure: the caller provides the transcript, the person track and the media facts (agent/director.js).
-import { normWord, pauseKind, correctWords, sentences, smartCuts } from "./speech.js";
+import { normWord, pauseKind, correctWords, sentences, smartCuts, retakeGroups, retakeDrops } from "./speech.js";
 import { US } from "./util.js";
 import { POLICY } from "./policy.js";
 import { MOMENT_TYPES } from "./momentsLexicon.js";
@@ -167,30 +172,46 @@ export function videoFit(media, canvas) {
 const SYNC_US = Math.round(POLICY.sync.tol * US);
 
 /**
- * A whole edit plan. input: { mediaId, words: [{text,startUs,endUs}], durationUs, track (MatteService.track, may be
- * empty), media: { width, height }, canvas: { width, height }, style, keywords, cta, captionTemplate, title }.
+ * A whole edit plan (montaj.editplan/2). input: { mediaId, words: [{text,startUs,endUs}], durationUs, track (MatteService.track,
+ * may be empty), media: { width, height }, canvas: { width, height }, style, keywords, cta, captionTemplate, title }; several
+ * clips: clips [{ mediaId, srcStart, srcEnd, vStart, speed }] with words, track and durationUs on their virtual axis (the
+ * clips one after another) and protect [[a, b]] (virtual spans never cut: clips without speech); retakes: false keeps every take.
  * The rules and numbers are the edit-hamdy skill's (core/policy.js). Returns { plan, notes, qa } — notes explain each
  * decision, qa is the quality guards' verdict on the plan (core/qa.js).
  */
 export function directPlan(input) {
-  const { mediaId, durationUs, track = [], keywords = [], style = "energetic", cta = "", captionTemplate = "clean-pro", title = "Auto edit", corrections = [], targetUs = null, stabilize = true } = input;
+  const { durationUs, track = [], keywords = [], style = "energetic", cta = "", captionTemplate = "clean-pro", title = "Auto edit", corrections = [], targetUs = null, stabilize = true, protect = [] } = input;
+  // Several clips: one virtual time axis (the clips one after another); the plan is mapped back to each file at the end.
+  const clips = input.clips?.length ? input.clips : [{ mediaId: input.mediaId, srcStart: 0, srcEnd: durationUs, vStart: 0 }];
+  const mediaId = input.clips?.length ? "virtual" : input.mediaId;
+  const joints = clips.slice(1).map((c) => c.vStart);
   // Recognition fixes first, so graphics show the right words (the same fixes go to the captions).
   const words = correctWords((input.words || []).map((w) => ({ t: w.text, s: w.startUs, e: w.endUs })), corrections).map((w) => ({ text: w.t, startUs: w.s, endUs: w.e }));
   const st = DIRECTOR_STYLES[style] || DIRECTOR_STYLES.energetic;
   // notes: the reasons in English (for agents); decisions: the same, structured (the app shows them in its language).
   const notes = [], decisions = [];
   const r1 = (v) => Math.round(v * 10) / 10;
-  if (!words.length) return { plan: { schema: "montaj.editplan/1", title, audio: { denoise: true, enhanceVoice: true, normalizeLufs: -14 }, stabilize: true }, notes: ["no speech: clean-up and stabilization only"], decisions: [{ k: "noSpeech" }], qa: null };
+  if (!words.length) return { plan: toPlanV2({ schema: "montaj.editplan/1", title, cuts: [], audio: { denoise: true, enhanceVoice: true, normalizeLufs: -14 }, stabilize: true }, { clips, durationUs }), notes: ["no speech: clean-up and stabilization only"], decisions: [{ k: "noSpeech" }], qa: null };
   const Z = POLICY.zoom, A = POLICY.angles, E = POLICY.emoji;
   const S = (s) => Math.round(s * US);
 
   // 1. Pacing (the skill's rhythm): what is said is kept whole; stretched hesitations, stutters, restarts and the
   // recogniser's hallucinations go; the silence left between words depends on the moment.
   const moments = detectMoments(words, { keywords });
-  const keep = visualBeats(words, track);
-  for (const [a, b] of keep) { notes.push(`kept a wordless moment ${(a / US).toFixed(1)}–${(b / US).toFixed(1)} s (something is shown)`); decisions.push({ k: "kept", from: r1(a / US), to: r1(b / US) }); }
+  const beats = visualBeats(words, track);
+  for (const [a, b] of beats) { notes.push(`kept a wordless moment ${(a / US).toFixed(1)}–${(b / US).toFixed(1)} s (something is shown)`); decisions.push({ k: "kept", from: r1(a / US), to: r1(b / US) }); }
+  const keep = [...beats, ...protect]; // + clips without speech (pictures, silent shots): never cut
+  // Retakes by meaning: of each line said several times, the last complete take stays; the others and the asides
+  // between them («تاني», «استنى») go. No judging of the performance yet (a later stage scores the takes).
+  const groups = input.retakes === false ? [] : retakeGroups(words, { withinUs: S(POLICY.retakes.within), falseStartWithinUs: S(POLICY.retakes.falseStart) });
+  const retakeDrop = retakeDrops(groups);
+  if (groups.length) {
+    const left = groups.reduce((n, g) => n + g.takes.length - 1, 0);
+    notes.push(`retakes: ${groups.length} line(s) said more than once — kept the last complete take, ${left} take(s) left out (${groups.slice(0, 3).map((g) => `«${clean(g.line).slice(0, 30)}» ×${g.takes.length}`).join(", ")})`);
+    decisions.push({ k: "retakes", lines: groups.length, left, groups: groups.map((g) => ({ takes: g.takes.length, kept: g.kept + 1, at: r1(g.takes[g.kept].fromUs / US), text: clean(g.line).slice(0, 60) })) });
+  }
   const pace = (drop) => smartCuts(words, {
-    pace: POLICY.pace, rhythm: st.rhythm, durationUs, keep, drop,
+    pace: POLICY.pace, rhythm: st.rhythm, durationUs, keep, drop: new Map([...retakeDrop, ...(drop || [])]),
     moments: moments.map((m) => ({ s: m.s, e: m.e, punch: isPunch(m) && m.score >= Z.minScore, reaction: isReaction(m) })),
   });
   let { cuts: rawCuts, removed } = pace(null);
@@ -225,9 +246,10 @@ export function directPlan(input) {
   let C = A.C, M = A.M;
   if (fit.sharpZoom && C > 1.02 * fit.sharpZoom) { C = Math.max(A.minC, fit.sharpZoom); M = Math.min(M, 1 + (C - 1) / 2); }
   const LEVEL = { W: A.W, M, C };
+  // Shots: between the cuts — and at a joint between two clips (a new shot even without a cut).
   const shots = [];
   let s0 = 0;
-  for (const c of cuts) { if (c.fromUs - s0 > 200_000) shots.push([s0, c.fromUs]); s0 = c.toUs; }
+  for (const c of [...cuts, ...joints.map((j) => ({ fromUs: j, toUs: j }))].sort((x, y) => x.fromUs - y.fromUs)) { if (c.fromUs - s0 > 200_000) shots.push([s0, c.fromUs]); s0 = Math.max(s0, c.toUs); }
   if (durationUs - s0 > 200_000) shots.push([s0, durationUs]);
   let prevAngle = null;
   const angleOf = shots.map(([a, b]) => {
@@ -296,7 +318,7 @@ export function directPlan(input) {
   for (const L of nums.lists) {
     const items = L.map((idx, k) => {
       const x = nums.numbers[idx], next = nums.numbers[L[k + 1]];
-      return [{ template: "list-item", fromUs: x.at - SYNC_US, toUs: next ? next.at - SYNC_US : srcAfter(cuts, x.at, 1_500_000, durationUs), params: { number: String(k + 1), text: x.label.slice(0, 60), position: "top" } }, `list point ${k + 1}: «${x.label}»`];
+      return [{ template: "list-item", fromUs: x.at - SYNC_US, toUs: next ? next.at - SYNC_US : srcAfter(cuts, x.at, 1_500_000, durationUs), params: { number: String(k + 1), text: x.label.slice(0, 60), position: "top" }, anchor: { word: x.label.slice(0, 60), atUs: Math.round(x.at) } }, `list point ${k + 1}: «${x.label}»`];
     });
     if (items.some(([g]) => collides(g, graphics))) continue; // never on top of another text
     for (const [g, why] of items) addGraphic(g, why);
@@ -306,7 +328,7 @@ export function directPlan(input) {
     const t = editAt(cuts, x.at);
     if (taken.some((o) => Math.abs(o.t - t) < 1_500_000)) continue;
     const accent = x.sign === "-" ? "#FF4D6D" : x.sign === "+" ? "#3EE07B" : "#FFD84D";
-    const g = { template: "counter", fromUs: x.at - SYNC_US, toUs: srcAfter(cuts, x.at, 2_400_000, durationUs), params: { from: 0, to: x.value, decimals: Number.isInteger(x.value) ? 0 : 1, prefix: x.sign === "-" ? "−" : x.sign, suffix: x.unit ? ` ${x.unit}` : "", label: "", accent, position: "top" } };
+    const g = { template: "counter", fromUs: x.at - SYNC_US, toUs: srcAfter(cuts, x.at, 2_400_000, durationUs), params: { from: 0, to: x.value, decimals: Number.isInteger(x.value) ? 0 : 1, prefix: x.sign === "-" ? "−" : x.sign, suffix: x.unit ? ` ${x.unit}` : "", label: "", accent, position: "top" }, anchor: { word: x.label.slice(0, 60), atUs: Math.round(x.at) } };
     if (collides(g, graphics)) continue; // a counter still counting: the next number waits
     addGraphic(g, `the number «${x.label}» (${x.kind})`);
   }
@@ -355,11 +377,11 @@ export function directPlan(input) {
       const first = pickWords[0], last = pickWords[pickWords.length - 1];
       const e0 = editTime(cuts, first.startUs);
       for (const w of pickWords) emphasis.add(pick(w));
-      return [{ template: "word-stack", fromUs: startAt(first), toUs: Math.max(srcAfter(cuts, last.endUs, 1_000_000, durationUs), srcAfter(cuts, first.startUs, 2_000_000, durationUs)), params: { words: pickWords.map(pick), times: pickWords.map((w) => Math.max(0, Math.round(((editTime(cuts, w.startUs) ?? e0) - e0 + SYNC_US) / 1000))) } }, `words as they are said: ${pickWords.map(pick).join(" / ")}`];
+      return [{ template: "word-stack", anchor: { word: pick(first), atUs: first.startUs }, fromUs: startAt(first), toUs: Math.max(srcAfter(cuts, last.endUs, 1_000_000, durationUs), srcAfter(cuts, first.startUs, 2_000_000, durationUs)), params: { words: pickWords.map(pick), times: pickWords.map((w) => Math.max(0, Math.round(((editTime(cuts, w.startUs) ?? e0) - e0 + SYNC_US) / 1000))) } }, `words as they are said: ${pickWords.map(pick).join(" / ")}`];
     }
     const look = kind === "emerge-side" ? LOOKS[looks++ % LOOKS.length] : {};
     emphasis.add(pick(key));
-    return [{ template: kind, fromUs: startAt(key), toUs: srcAfter(cuts, key.startUs, kind === "rise-behind" ? 1_800_000 : 1_600_000, durationUs), params: { text: pick(key), ...look } }, `the key word «${pick(key)}» ${kind === "rise-behind" ? "rises from behind" : "comes out from behind"} the person`];
+    return [{ template: kind, anchor: { word: pick(key), atUs: key.startUs }, fromUs: startAt(key), toUs: srcAfter(cuts, key.startUs, kind === "rise-behind" ? 1_800_000 : 1_600_000, durationUs), params: { text: pick(key), ...look } }, `the key word «${pick(key)}» ${kind === "rise-behind" ? "rises from behind" : "comes out from behind"} the person`];
   };
   for (const c of chosen) {
     if (c.start >= ctaFrom - 300_000) continue;
@@ -377,7 +399,7 @@ export function directPlan(input) {
       if (name) {
         emojiUsed.push({ t, name });
         const whyText = concept ? `«${pick(concept.w)}» → ${name}` : moment ? `${moment.type} «${clean(moment.text)}» → ${name}` : "a question: a thinking face";
-        made = [{ template: "head-emoji", fromUs: startAt(at), toUs: srcAfter(cuts, at.startUs, S(moment?.type === "laugh" ? E.laughDur : E.dur), durationUs), params: { emoji: name, motion: question ? "wiggle" : "bounce", size: 0.26 } }, whyText];
+        made = [{ template: "head-emoji", anchor: { word: pick(at), atUs: at.startUs }, fromUs: startAt(at), toUs: srcAfter(cuts, at.startUs, S(moment?.type === "laugh" ? E.laughDur : E.dur), durationUs), params: { emoji: name, motion: question ? "wiggle" : "bounce", size: 0.26 } }, whyText];
       }
     }
     if (!made && key && track.length) {
@@ -400,6 +422,7 @@ export function directPlan(input) {
     const at = editTime(cuts, c.toUs);
     if (c.toUs - c.fromUs < 1_200_000 || at === null) continue;
     if (transitions.some((x) => Math.abs(editTime(cuts, x.atUs) - at) < st.transitionsEvery) || at < 2 * US) continue;
+    if (joints.some((j) => j > c.fromUs && j <= c.toUs)) continue; // a change of clip: a J lead marks it (toPlanV2), not a transition
     transitions.push({ mediaId, atUs: Math.round(c.fromUs), type: transitions.length % 2 ? "push_left" : "zoom_in", durationUs: 280_000, reason: "topic change (a long pause was cut)" });
     sfxWanted.push({ mediaId, atUs: Math.round(c.toUs), sound: "whoosh", why: "transition" });
   }
@@ -451,7 +474,7 @@ export function directPlan(input) {
       } else if (!track.length && !collides({ template: "big-word", fromUs: startAt(best.w), toUs: srcAfter(cuts, best.w.startUs, 1_600_000, durationUs) }, plan.graphics)) {
         // Where the person is is not known: the word, large, at the top of the frame (away from a face).
         emphasis.add(pick(best.w));
-        plan.graphics.push({ mediaId, template: "big-word", fromUs: Math.round(startAt(best.w)), toUs: Math.round(srcAfter(cuts, best.w.startUs, 1_600_000, durationUs)), params: { text: pick(best.w), position: "top", size: 0.8 }, reason: `retention: the word «${pick(best.w)}» on screen`.slice(0, 200), sfx: true });
+        plan.graphics.push({ mediaId, template: "big-word", anchor: { word: pick(best.w), atUs: best.w.startUs }, fromUs: Math.round(startAt(best.w)), toUs: Math.round(srcAfter(cuts, best.w.startUs, 1_600_000, durationUs)), params: { text: pick(best.w), position: "top", size: 0.8 }, reason: `retention: the word «${pick(best.w)}» on screen`.slice(0, 200), sfx: true });
         notes.push(`big-word at ${(best.w.startUs / US).toFixed(1)} s: nothing new for ${((b - a) / US).toFixed(1)} s — «${pick(best.w)}»`);
         decisions.push({ k: "retention", template: "big-word", at: r1(editAt(cuts, best.w.startUs) / US), gap: r1((b - a) / US), text: pick(best.w) });
       } else {
@@ -514,7 +537,73 @@ export function directPlan(input) {
   const qa = qaPlan(plan, { words, removed, durationUs, track, style, numbers: nums.numbers, fit });
   const fails = qa.checks.filter((c) => c.level === "fail");
   notes.push(qa.ok ? `quality guards: all ${qa.passed.length} passed` : `quality guards: ${fails.length} problem(s) — ${fails.slice(0, 3).map((c) => c.message).join("; ")}`);
-  return { plan, notes, qa, decisions };
+  const out = toPlanV2(plan, { clips, durationUs, groups });
+  const jl = out.segments.filter((x) => x.jl).length;
+  if (jl) { notes.push(`${jl} J cut(s) of ${POLICY.jl.leadMs} ms where the scene changes (the next sound starts before its picture)`); decisions.push({ k: "jl", n: jl, ms: POLICY.jl.leadMs }); }
+  if (clips.length > 1) { notes.push(`${clips.length} clips planned as one story, in their timeline order`); decisions.unshift({ k: "clips", n: clips.length }); }
+  return { plan: out, notes, qa, decisions };
+}
+
+/**
+ * The director's plan — worked out on one virtual time axis (the clips one after another, cuts as v1) — as
+ * montaj.editplan/2: the kept spans of each clip as ordered segments (each with what was cut before it), every overlay
+ * mapped back to its file, a small J lead where the scene changes (POLICY.jl), and the retake groups for the cut sheet.
+ * clips: [{ mediaId, srcStart, srcEnd, vStart, speed }] (one clip = the media itself from 0); groups: retakeGroups.
+ */
+export function toPlanV2(vplan, { clips, durationUs, groups = [], J = POLICY.jl }) {
+  const C = clips.map((c, i) => ({ ...c, i, speed: c.speed || 1, vEnd: i + 1 < clips.length ? clips[i + 1].vStart : Math.max(c.vStart, durationUs) }));
+  const clipOf = (v) => C.find((c) => v >= c.vStart && v < c.vEnd) || (v >= C[C.length - 1].vEnd ? C[C.length - 1] : C[0]);
+  const src = (c, v) => Math.max(0, Math.round(c.srcStart + (Math.min(Math.max(v, c.vStart), c.vEnd) - c.vStart) * c.speed));
+  const cuts = [...(vplan.cuts || [])].sort((a, b) => a.fromUs - b.fromUs);
+  // Kept spans of the virtual axis, split at the clips' joints.
+  const kept = [];
+  let t = 0, why = null;
+  const keepSpan = (a, b, reason) => {
+    for (const c of C) {
+      const x = Math.max(a, c.vStart), y = Math.min(b, c.vEnd);
+      if (y - x >= 40_000) kept.push({ v0: x, v1: y, c, reason: kept.length && x === a ? reason : null });
+    }
+  };
+  for (const c of cuts) { if (c.fromUs > t) keepSpan(t, c.fromUs, why); if (c.toUs > t) { t = c.toUs; why = c.reason; } }
+  if (durationUs > t) keepSpan(t, durationUs, why);
+  const dup = new Set(C.map((c) => c.mediaId).filter((m, i, a) => a.indexOf(m) !== i)); // a file used twice: pin overlays
+  const segAt = (v) => { const k = kept.findIndex((s) => v >= s.v0 && v < s.v1); return k >= 0 ? k : kept.findIndex((s) => s.v0 >= v); };
+  const segments = kept.map((s, k) => {
+    const out = { mediaId: s.c.mediaId, fromUs: src(s.c, s.v0), toUs: src(s.c, s.v1) };
+    if (k && s.reason) out.reason = `after a cut: ${s.reason}`.slice(0, 200);
+    else if (k && kept[k - 1].c !== s.c) out.reason = "next clip";
+    return out;
+  });
+  // J lead into a new scene: the previous picture holds (from its own footage after its out point, inside its clip)
+  // while the next sound starts. Not where a transition already marks the change.
+  const transAt = new Set((vplan.transitions || []).map((x) => segAt(cuts.find((c) => c.fromUs === x.atUs)?.toUs ?? x.atUs)));
+  for (let k = 1; k < kept.length; k++) {
+    const a = kept[k - 1], b = kept[k];
+    const newScene = a.c !== b.c || b.v0 - a.v1 >= J.longGap * US;
+    const handle = (a.c.vEnd - a.v1) * a.c.speed;
+    if (newScene && !transAt.has(k) && b.v1 - b.v0 >= J.minSegment * US && handle >= J.leadMs * 1000) segments[k].jl = -J.leadMs;
+  }
+  const pin = (mid, v) => (dup.has(mid) ? { segment: Math.max(0, segAt(v)) } : {});
+  const span = (x) => { const c = clipOf(x.fromUs); return { mediaId: c.mediaId, fromUs: src(c, x.fromUs), toUs: Math.max(src(c, x.fromUs) + 1, src(c, Math.min(x.toUs, c.vEnd))), ...pin(c.mediaId, x.fromUs) }; };
+  const point = (v) => { const c = clipOf(v); return { mediaId: c.mediaId, atUs: src(c, v), ...pin(c.mediaId, v) }; };
+  const anchor = (a) => { if (!a?.word || !String(a.word).trim()) return {}; const c = clipOf(a.atUs ?? 0); return { anchor: { word: String(a.word).slice(0, 60), ...(a.atUs !== undefined ? { atUs: src(c, a.atUs) } : {}) } }; };
+  // Zooms are picture: one per kept segment they cover.
+  const zooms = [];
+  for (const z of vplan.zooms || []) for (const [k, s] of kept.entries()) {
+    const a = Math.max(z.fromUs, s.v0), b = Math.min(z.toUs, s.v1);
+    if (b - a >= 150_000) zooms.push({ ...z, mediaId: s.c.mediaId, fromUs: src(s.c, a), toUs: src(s.c, b), ...(dup.has(s.c.mediaId) ? { segment: k } : {}) });
+  }
+  const plan = {
+    schema: "montaj.editplan/2", title: vplan.title, segments,
+    ...(zooms.length ? { zooms } : {}),
+    ...(vplan.texts?.length ? { texts: vplan.texts.map((x) => ({ ...x, ...span(x) })) } : {}),
+    ...(vplan.graphics?.length ? { graphics: vplan.graphics.map(({ anchor: a, ...g }) => ({ ...g, ...span(g), ...anchor(a) })) } : {}),
+    ...(vplan.transitions?.length ? { transitions: vplan.transitions.map((x) => ({ segment: Math.max(1, segAt(cuts.find((c) => c.fromUs === x.atUs)?.toUs ?? x.atUs)), type: x.type, durationUs: x.durationUs, reason: x.reason })).filter((x) => x.segment < segments.length) } : {}),
+    ...(vplan.sfx?.length ? { sfx: vplan.sfx.map((x) => ({ ...x, ...point(x.atUs) })) } : {}),
+    ...(groups.length ? { retakes: groups.map((g) => ({ line: String(g.line).slice(0, 300), kept: g.kept, reason: g.reason, takes: g.takes.map((tk) => { const c = clipOf(tk.fromUs); return { mediaId: c.mediaId, fromUs: src(c, tk.fromUs), toUs: Math.max(src(c, tk.fromUs) + 1, src(c, tk.toUs)), text: String(tk.text).slice(0, 300), complete: tk.complete, kind: tk.kind }; }) })) } : {}),
+  };
+  for (const k of ["stabilize", "filter", "audio", "captions", "canvas"]) if (vplan[k] !== undefined) plan[k] = vplan[k];
+  return plan;
 }
 
 /**

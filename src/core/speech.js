@@ -298,3 +298,160 @@ export function smartCuts(words, { pace, rhythm = "mrbeast", durationUs = null, 
   }
   return { cuts, removed };
 }
+
+// ------------------------------------------------------------------ retake groups (by meaning, no performance judging)
+// Repeated attempts of the same line, found from the words alone: sentence units, compared by a local alignment of
+// their normalised tokens (Smith–Waterman — the same line said again with a word changed, added or dropped still
+// aligns), a short attempt whose opening matches a later longer one (a false start / a partial take), and only between
+// nearby units with nothing but short asides («تاني», «استنى») between them. The default choice is the LAST complete
+// take (what the speaker settled on); phase 5 replaces it with a performance score over the same groups (chooseTake).
+
+/** Token form for alignment: normWord, then a leading «و»/«ف» and the article «ال» dropped (when a stem is left). */
+export function alignToken(w) {
+  let n = normWord(w);
+  if (/^[وف]/.test(n) && n.length >= 5) n = n.slice(1);
+  if (n.startsWith("ال") && n.length >= 5) n = n.slice(2);
+  return n;
+}
+function lev1(a, b) { // edit distance ≤ 1?
+  if (Math.abs(a.length - b.length) > 1) return false;
+  let i = 0, j = 0, d = 0;
+  while (i < a.length && j < b.length) {
+    if (a[i] === b[j]) { i++; j++; continue; }
+    if (++d > 1) return false;
+    if (a.length > b.length) i++; else if (b.length > a.length) j++; else { i++; j++; }
+  }
+  return d + (a.length - i) + (b.length - j) <= 1;
+}
+/** Same token: equal, or one letter apart when both have at least 4 letters (recognition / dialect spelling). */
+export const sameToken = (a, b) => !!a && !!b && (a === b || (Math.min(a.length, b.length) >= 4 && lev1(a, b)));
+
+/**
+ * Smith–Waterman local alignment of two token lists (match +2, mismatch −1, gap −1). Returns { score, matches,
+ * a: [start, end], b: [start, end] } — the aligned region (inclusive token indices) — or null when nothing aligns.
+ */
+export function alignTokens(A, B, { match = 2, mismatch = -1, gap = -1 } = {}) {
+  const n = A.length, m = B.length;
+  if (!n || !m) return null;
+  const H = Array.from({ length: n + 1 }, () => new Float64Array(m + 1));
+  let best = 0, bi = 0, bj = 0;
+  for (let i = 1; i <= n; i++) for (let j = 1; j <= m; j++) {
+    const v = Math.max(0, H[i - 1][j - 1] + (sameToken(A[i - 1], B[j - 1]) ? match : mismatch), H[i - 1][j] + gap, H[i][j - 1] + gap);
+    H[i][j] = v;
+    if (v > best) { best = v; bi = i; bj = j; }
+  }
+  if (!best) return null;
+  let i = bi, j = bj, matches = 0, a0 = bi, b0 = bj;
+  while (i > 0 && j > 0 && H[i][j] > 0) {
+    const same = sameToken(A[i - 1], B[j - 1]);
+    if (H[i][j] === H[i - 1][j - 1] + (same ? match : mismatch)) { if (same) matches++; a0 = i; b0 = j; i--; j--; }
+    else if (H[i][j] === H[i - 1][j] + gap) { a0 = i; i--; }
+    else { b0 = j; j--; }
+  }
+  return { score: best, matches, a: [a0 - 1, bi - 1], b: [b0 - 1, bj - 1] };
+}
+
+/**
+ * Sentence units: sentences (end punctuation or a pause ≥ gapUs), each also split where it starts its own opening
+ * again after a short pause (a restart inside one breath). [{ w0, w1, startUs, endUs, text, toks }].
+ */
+export function speechUnits(words, { gapUs = 600_000, restartPauseUs = 150_000 } = {}) {
+  const out = [];
+  for (const sn of sentences(words, { gapUs })) {
+    let w0 = sn.w0;
+    for (let j = sn.w0 + 2; j < sn.w1; j++) {
+      const a0 = alignToken(words[w0].text), a1 = alignToken(words[w0 + 1].text);
+      if (j - w0 >= 2 && a0 && sameToken(alignToken(words[j].text), a0) && sameToken(alignToken(words[j + 1].text), a1) && words[j].startUs - words[j - 1].endUs >= restartPauseUs) {
+        out.push({ w0, w1: j - 1 });
+        w0 = j;
+      }
+    }
+    out.push({ w0, w1: sn.w1 });
+  }
+  return out.map((u) => {
+    const ws = words.slice(u.w0, u.w1 + 1);
+    return { ...u, startUs: ws[0].startUs, endUs: ws[ws.length - 1].endUs, text: ws.map((w) => w.text).join(" "), toks: ws.map((w) => alignToken(w.text)).filter(Boolean) };
+  });
+}
+
+// Asides between two attempts: a short unit of only these words («تاني», «استنى», «لا لا», «من الأول»…) goes with the retake.
+const ASIDE = new Set(["تاني", "تانى", "استني", "استنى", "استنا", "لا", "لأ", "معلش", "خليني", "خلينا", "اعيد", "اعيدها", "هعيد", "نعيد", "نعيدها", "من", "الاول", "الأول", "اول", "كده", "مش", "صح", "اسف", "sorry", "again", "wait", "cut", "اوكي", "طيب", "امم", "اه", "ok", "okay"].map(alignToken));
+const isAside = (u) => u.toks.length <= 3 && u.toks.every((t) => ASIDE.has(t) || t.length <= 1);
+
+/**
+ * How unit `a` (earlier) relates to unit `b` (later): "full" (the same line again), "partial" / "false-start" (a
+ * shorter attempt whose opening matches b's opening), or null.
+ */
+export function retakeKind(a, b) {
+  const la = a.toks.length, lb = b.toks.length;
+  if (!la || !lb) return null;
+  const al = alignTokens(a.toks, b.toks);
+  if (!al || al.matches < 2) return null;
+  const short = Math.min(la, lb), long = Math.max(la, lb);
+  if (short >= 3 && al.matches >= 3 && al.matches / short >= 0.6 && al.matches / long >= 0.5 && la >= 0.6 * lb) return "full";
+  if (la < lb && al.a[0] <= 1 && al.b[0] <= 1 && al.matches / la >= 0.7) return la <= 3 || la <= 0.5 * lb ? "false-start" : "partial";
+  return null;
+}
+
+/** The take a group keeps: the last complete one; with `score` (phase 5: a performance score per take), the best. */
+export function chooseTake(g, score = null) {
+  if (score) return g.takes.map((t, i) => ({ i, s: score(t, g) })).sort((x, y) => y.s - x.s || y.i - x.i)[0].i;
+  for (let i = g.takes.length - 1; i >= 0; i--) if (g.takes[i].complete) return i;
+  return g.takes.length - 1;
+}
+
+/**
+ * Retake groups of a transcript: [{ line, takes: [{ w0, w1, fromUs, toUs, text, kind, complete }], asides: [{ w0, w1 }],
+ * kept, reason }] — takes in time order, kept = chooseTake. A full retake may come up to `withinUs` after the previous
+ * attempt, a false start is redone within `falseStartWithinUs`; at most `maxBetween` short asides between attempts.
+ */
+export function retakeGroups(words, { withinUs = 20_000_000, falseStartWithinUs = 4_000_000, maxBetween = 2, maxTakes = 8, maxSpanUs = 60_000_000, score = null, units = speechUnits(words) } = {}) {
+  const parent = units.map((_, i) => i), size = units.map(() => 1), first = units.map((u) => u.startUs);
+  const root = (i) => (parent[i] === i ? i : (parent[i] = root(parent[i])));
+  const link = (i, j) => { // a group stays a handful of attempts within a minute (a line said over and over is a refrain)
+    const a = root(i), b = root(j);
+    if (a === b) return true;
+    if (size[a] + size[b] > maxTakes || units[j].endUs - Math.min(first[a], first[b]) > maxSpanUs) return false;
+    parent[a] = b; size[b] += size[a]; first[b] = Math.min(first[a], first[b]);
+    return true;
+  };
+  const linked = new Set();
+  const fits = (a, b) => { const kind = retakeKind(a, b); return kind && (kind === "full" || b.startUs - a.endUs <= falseStartWithinUs); };
+  for (let j = 1; j < units.length; j++) {
+    // Every earlier attempt of the same line, back across other attempts and a few short asides; anything else
+    // said in between ends the search (a line said again much later is a deliberate repetition, not a retake).
+    for (let i = j - 1, between = 0; i >= 0 && units[j].startUs - units[i].endUs <= withinUs; i--) {
+      if (fits(units[i], units[j]) && link(i, j)) { linked.add(i).add(j); continue; }
+      if (linked.has(i) && root(i) === root(j)) continue;
+      if (!isAside(units[i]) || ++between > maxBetween) break;
+    }
+  }
+  const byRoot = new Map();
+  for (const i of [...linked].sort((x, y) => x - y)) { const r = root(i); if (!byRoot.has(r)) byRoot.set(r, []); byRoot.get(r).push(i); }
+  return [...byRoot.values()].map((idx) => {
+    const longest = Math.max(...idx.map((i) => units[i].toks.length));
+    const last = units[idx[idx.length - 1]];
+    const takes = idx.map((i, k) => {
+      const u = units[i];
+      const kind = k === idx.length - 1 ? "full" : retakeKind(u, units[idx[k + 1]]) || retakeKind(u, last) || "full";
+      return { w0: u.w0, w1: u.w1, fromUs: u.startUs, toUs: u.endUs, text: u.text, kind, complete: kind !== "false-start" && u.toks.length >= 0.8 * longest };
+    });
+    const asides = [];
+    for (let i = idx[0] + 1; i < idx[idx.length - 1]; i++) if (!idx.includes(i)) asides.push({ w0: units[i].w0, w1: units[i].w1 });
+    const out = { takes, asides };
+    out.kept = chooseTake(out, score);
+    out.line = takes[out.kept].text;
+    out.reason = score ? "best performance" : takes[out.kept].complete ? "last complete take" : "last take (none complete)";
+    return out;
+  });
+}
+
+/** The words retake groups leave out: Map(word index → "retake") — every take but the kept one, and the asides. */
+export function retakeDrops(groups) {
+  const out = new Map();
+  for (const g of groups) {
+    g.takes.forEach((t, i) => { if (i !== g.kept) for (let w = t.w0; w <= t.w1; w++) out.set(w, "retake"); });
+    for (const a of g.asides) for (let w = a.w0; w <= a.w1; w++) out.set(w, "retake");
+  }
+  return out;
+}

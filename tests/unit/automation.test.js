@@ -13,7 +13,7 @@ import { closeDatabase } from "../../src/db/realmClient.js";
 import { binaries, run } from "../../src/services/ffmpeg.js";
 import { AgentHub } from "../../src/agent/controlServer.js";
 import { fillers, pauses, retakes, sentences, suggestCuts, normWord } from "../../src/core/speech.js";
-import { paginate, captionStates, captionWords, captionQc, emphasisFor, CAPTION_TEMPLATES, POP_FRAMES } from "../../src/core/captionTemplates.js";
+import { paginate, captionStates, captionWords, captionQc, emphasisFor, CAPTION_TEMPLATES, SPRING } from "../../src/core/captionTemplates.js";
 import { mainPieces, mapSpan, mapPoint, predictCuts, normalizeCuts, checkPlan } from "../../src/core/editPlan.js";
 import { US } from "../../src/core/util.js";
 import { refineWordTimes } from "../../src/services/captionService.js";
@@ -73,7 +73,8 @@ test("caption pages break at punctuation, pauses and the template budget; states
   const pg = pages[0];
   const text = { content: pg.words.map((w) => w.t).join(" "), caption: { template: "karaoke-yellow", words: pg.words.map((w) => ({ ...w, s: w.s - pg.startUs, e: w.e - pg.startUs })) } };
   const st = captionStates(text, pg.endUs - pg.startUs, 30);
-  assert.deepEqual(st.slice(0, POP_FRAMES.length).map((x) => x.pop), POP_FRAMES);
+  assert.equal(st[0].pop, SPRING.page.from, "the page springs in from its first frame");
+  assert.ok(st.filter((x) => x.fromUs < 200_000).length >= 4, "eased per frame");
   assert.deepEqual([...new Set(st.map((x) => x.active))], [0, 1, 2, 3, 4]);
   assert.equal(st.find((x) => x.active === 2).fromUs, 500_000);
   assert.equal(st[st.length - 1].toUs, pg.endUs - pg.startUs);
@@ -126,7 +127,7 @@ test("editing a caption keeps or redistributes word timings; emphasis and readin
   assert.equal(re.length, 4);
   assert.equal(re[0].s, 0); assert.equal(re[3].e, 1_000_000);
   for (let i = 1; i < re.length; i++) assert.ok(re[i].s >= re[i - 1].e - 1);
-  assert.deepEqual(emphasisFor(words([["save", 0, 1], ["50%", 1, 2], ["Today", 2, 3]]), ["today"]), [1, 2]);
+  assert.deepEqual(emphasisFor(words([["save", 0, 1], ["50%", 1, 2], ["Today", 2, 3]]), ["today"]), [2], "one emphasis in 3 words: the keyword first");
   const qc = captionQc([{ startUs: 0, endUs: 500_000, words: words([["incomprehensibilities", 0, 500], ["everywhere", 0, 500]]) }]);
   assert.equal(qc.issues[0].kind, "fast");
   assert.ok(Object.keys(CAPTION_TEMPLATES).length >= 8);

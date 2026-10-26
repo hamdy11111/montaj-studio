@@ -577,6 +577,14 @@ const D = {
   "err.musicVram": ["The graphics card has only {free} GB free. Close what uses it (or stop other engines) and try again.", "كارت الشاشة فاضي فيه {free} جيجا بس. اقفل اللي شاغله وجرّب تاني."],
   "err.diskLow": ["Not enough disk space ({free} GB free).", "المساحة على القرص مش كفاية ({free} جيجا فاضية)."], "err.musicFormat": ["The saved file {file} is not in the format of its extension; it was removed.", "الملف {file} اتحفظ بصيغة غير امتداده، فاتمسح."],
   "err.musicSource": ["This file has no readable sound.", "الملف ده مفيهوش صوت يتقري."],
+  // Phase 2 (quick wins): edit plan v2, J/L cuts, the director on several clips, retake groups.
+  "err.directorClips": ["The automatic edit needs the main track to hold only videos and pictures at a constant speed.", "المونتاج التلقائي محتاج المسار الرئيسي يكون فيه فيديوهات وصور بس، بسرعة ثابتة."],
+  "err.jlMainOnly": ["A J/L cut is set on a clip of the main track.", "قطع J/L بيتعمل على كليب في المسار الرئيسي بس."],
+  "err.jlNoJoint": ["A J/L cut needs two picture clips side by side with no transition between them.", "قطع J/L محتاج كليبين صورة ورا بعض من غير انتقال بينهم."],
+  "err.layoutAudio": ["A sound file cannot be a main-track segment of a plan (use music).", "ملف صوت ماينفعش يبقى مقطع في المسار الرئيسي للخطة (استخدمه موسيقى)."],
+  "dec.retakes": ["{lines} line(s) said more than once: kept the last complete take ({left} take(s) left out)", "{lines} جملة اتقالت أكتر من مرة: سبت آخر إعادة كاملة (شلت {left} إعادة)"],
+  "dec.jl": ["{n} J cut(s) of {ms} ms where the scene changes: the next sound starts before its picture", "{n} قطع J ({ms} ملي ثانية) عند تغيير المشهد: الصوت الجاي بيبدأ قبل صورته"],
+  "dec.clips": ["{n} clips edited as one story, in their timeline order", "{n} كليب اتمنتجوا كحكاية واحدة بترتيبهم في التايملاين"],
 };
 
 let lang = "ar";
