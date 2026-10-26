@@ -3,7 +3,7 @@
 //   Segment n─1 Timeline (compound clips);  Workspace n─n Project;  ExportRecord/ShareRecord n─1 Project.
 // Embedded objects hold value-typed parameter blocks (transform, adjust, effects...).
 
-export const SCHEMA_VERSION = 5;
+export const SCHEMA_VERSION = 6;
 
 const emb = (name, properties) => ({ name, embedded: true, properties });
 
@@ -90,6 +90,7 @@ export const Segment = {
     changePitch: { type: "bool", default: false }, volumeDb: { type: "double", default: 0 }, fadeInUs: { type: "int", default: 0 }, fadeOutUs: { type: "int", default: 0 },
     disabled: { type: "bool", default: false }, groupId: "string?", colorTag: { type: "string", default: "" }, // colorTag added in schema v2
     audioDetached: { type: "bool", default: false }, // Extract audio (FEAT-066): the clip keeps its video, audio lives on an audio track
+    jlUs: { type: "int", default: 0 }, // schema v6: J/L cut at the joint before a main-track clip (< 0 = J, > 0 = L; core/timelineOps.js)
     transform: "Transform?", crop: "Crop?", adjust: "Adjust?", videoFx: "VideoFx?", audioFx: "AudioFx?",
     animIn: "AnimSpec?", animOut: "AnimSpec?", animCombo: "AnimSpec?", transitionOut: "AnimSpec?",
     clipEffects: "ClipEffect[]", keyframes: "Keyframe[]", text: "TextStyle?",

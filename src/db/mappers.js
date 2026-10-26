@@ -62,14 +62,14 @@ export function audioFxFromRealm(r) {
 }
 
 // ---------------------------------------------------------------- segment
-const SEG_SCALARS = ["kind", "name", "start", "duration", "sourceStart", "sourceDuration", "speed", "speedMode", "changePitch", "volumeDb", "fadeInUs", "fadeOutUs", "disabled", "groupId", "colorTag", "audioDetached"];
+const SEG_SCALARS = ["kind", "name", "start", "duration", "sourceStart", "sourceDuration", "speed", "speedMode", "changePitch", "volumeDb", "fadeInUs", "fadeOutUs", "disabled", "groupId", "colorTag", "audioDetached", "jlUs"];
 
 export function segmentToRealm(s, realm) {
   return {
     _id: s.id,
     ...pick(s, SEG_SCALARS),
     start: Math.round(s.start), duration: Math.round(s.duration), sourceStart: Math.round(s.sourceStart || 0), sourceDuration: Math.round(s.sourceDuration || 0),
-    groupId: s.groupId || null, colorTag: s.colorTag || "",
+    groupId: s.groupId || null, colorTag: s.colorTag || "", jlUs: Math.round(s.jlUs || 0),
     curvePreset: s.curve?.preset || "none", curvePoints: flat(s.curve?.points || []),
     transform: { ...DEFAULT_TRANSFORM, ...(s.transform || {}) }, crop: { ...DEFAULT_CROP, ...(s.crop || {}) },
     adjust: adjustToRealm(s.adjust), videoFx: videoFxToRealm(s.videoFx), audioFx: audioFxToRealm(s.audioFx),

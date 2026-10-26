@@ -34,6 +34,11 @@ export const POLICY = {
   hook: { sec: 2.0, firstCaption: 0.5 },
   ending: { strike: 2.0, question: 2.5 },
   numbers: { listGap: 3.5, listSpan: 12, listMin: 3, impactMin: 10 },
+  // J cut on a change of scene (another file, or a stretch of ≥ longGap s left out): the next sound starts leadMs
+  // before its picture — short, so it reads as a lead-in, not as a lip-sync error; only into a segment ≥ minSegment s.
+  jl: { leadMs: 200, minSegment: 1.0, longGap: 4.0 },
+  // Retakes: a repeated line is looked for this far back (s); a false start is redone within falseStart s.
+  retakes: { within: 20, falseStart: 4 },
   // Reference cuts per minute by style (±30 % is "in style"); used for the report only.
   cutsPerMin: { energetic: [22.1, 46.2], explain: [14.8, 26.4], calm: [14.8, 18.0] },
 };

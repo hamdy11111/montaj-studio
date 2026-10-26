@@ -10,6 +10,7 @@ import { EFFECTS, VOICE_CHANGERS, AUDIO_CHAINS } from "./presets.js";
 import { RESOLUTIONS } from "./model.js";
 import { AppError } from "./validation.js";
 import { cutoutLayers, cutoutAfterTrack } from "./cutout.js";
+import { pictureTracks } from "./timelineOps.js";
 
 const s = (us) => Number((us / US).toFixed(6));
 const hex = (c) => `0x${(c || "#000000").replace("#", "").slice(0, 6)}`;
@@ -575,7 +576,11 @@ export function buildExport(tl, o) {
 
   // ------------------------------------------------------------------ video layers
   let comp = null;
+  const allTracks = tracks;
   if (wantVideo) {
+    // J/L cuts: the picture is laid with its own edit points (core/timelineOps.js pictureTracks); the sound below keeps
+    // the clips' edit points.
+    const tracks = pictureTracks(allTracks, (seg) => o.media[seg.mediaId]?.durationUs || null);
     const main = tracks.find((t) => t.isMain);
     const shows = (t) => !t.hidden && t.segments.some((x) => !x.disabled && (isVisualKind(x.kind) || isGrade(x.kind)));
     const sequence = main && !main.hidden && !main.segments.some((x) => !x.disabled && isGrade(x.kind)) && !tracks.some((t) => t !== main && t.order <= main.order && shows(t));
@@ -602,7 +607,7 @@ export function buildExport(tl, o) {
       layTrack(track);
       // Text behind the person: the person, cut out of the main clip, over the behind tracks (core/cutout.js).
       if (track.id === cutoutAfter) {
-        for (const c of cutoutLayers(tl, { startUs: rangeStart, endUs: rangeEnd })) {
+        for (const c of cutoutLayers({ ...tl, tracks }, { startUs: rangeStart, endUs: rangeEnd })) {
           const media = mediaOf(c.seg);
           placeLayer(c.seg, layerLook(c.seg, videoSource(c.seg, media, 0, 0, c.a, c.b), media), media, { W, H, transIn: null, transOut: null }, c.a, c.b, span);
         }

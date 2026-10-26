@@ -320,6 +320,7 @@ export function splitSegment(tl, segId, atUs) {
   const local = atUs - s.start;
   const right = deepClone(s);
   right.id = uid();
+  delete right.jlUs; // the new joint is continuous: a J/L stays on the outer edge
   right.start = atUs;
   right.duration = s.duration - local;
   if (s.speedMode === "curve") {
@@ -692,6 +693,90 @@ export function setTrackFlag(tl, trackId, flag, value) {
   if (!["locked", "hidden", "muted"].includes(flag)) throw new AppError("VALIDATION", "err.enum");
   t[flag] = !!value;
   return t;
+}
+
+// ------------------------------------------------------------------ J/L cuts (split edits)
+// seg.jlUs is the joint BEFORE a main-track clip: < 0 = a J cut (the clip's sound starts |jlUs| before its picture —
+// the previous clip's picture holds over its first words), > 0 = an L cut (the previous clip's sound runs on under this
+// clip's picture). The clips' start/duration stay the SOUND's edit points — what edit plans, captions, sound effects
+// and the speech checks map — and only the picture edit point moves (pictureTracks), so a J/L never loses a word.
+export const JL_MAX_US = 500_000;
+const jlJoint = (prev, s) => !!prev && Math.abs(end(prev) - s.start) <= MIN_DUR / 2 && (prev.transitionOut?.type || "none") === "none"
+  && ["video", "image", "compound"].includes(prev.kind) && ["video", "image", "compound"].includes(s.kind);
+
+/** Set the J/L of the joint before a main-track clip (µs, clamped to ±0.5 s and to half of each side). Returns it. */
+export function setJL(tl, segId, jlUs) {
+  const f = findSegment(tl, segId);
+  if (!f) throw new AppError("NOT_FOUND", "err.segmentNotFound");
+  if (!f.track.isMain) throw new AppError("VALIDATION", "err.jlMainOnly");
+  assertUnlocked(f.track);
+  const segs = sortSegments(f.track), i = segs.indexOf(f.segment), s = f.segment, prev = segs[i - 1];
+  const want = Math.round(Number(jlUs) || 0);
+  if (want && !jlJoint(prev, s)) throw new AppError("VALIDATION", "err.jlNoJoint");
+  const lim = Math.max(0, Math.min(JL_MAX_US, (prev?.duration || 0) / 2, s.duration / 2 - MIN_DUR));
+  s.jlUs = clamp(want, -lim, lim);
+  if (!s.jlUs) delete s.jlUs;
+  return s.jlUs || 0;
+}
+
+/**
+ * Lay the main track out as an ordered list of source spans (an edit plan v2): the main track's clips are replaced by
+ * one clip per item, packed from 0, in the given order — any media, any order, a span may repeat. items:
+ * [{ media, fromUs, toUs, jlUs, attrs }] (attrs: the look of the clip it replaces — transform, colour, effects,
+ * sound — keyed as ATTRIBUTE_KEYS). Other tracks are left as they are. Returns the new clips' ids in order.
+ */
+export function layoutMain(tl, items) {
+  const main = mainTrack(tl);
+  assertUnlocked(main);
+  main.segments = [];
+  let t = 0;
+  const ids = [];
+  for (const it of items) {
+    const seg = segmentFromMedia(it.media, { imageDurationUs: it.toUs - it.fromUs });
+    if (seg.kind === "audio") throw new AppError("VALIDATION", "err.layoutAudio");
+    const dur = Math.max(MIN_DUR, Math.round(it.toUs - it.fromUs));
+    Object.assign(seg, deepClone(it.attrs || {}), { start: t, duration: dur, sourceStart: seg.kind === "video" ? Math.round(it.fromUs) : 0, sourceDuration: seg.kind === "video" ? dur : 0, speed: 1, speedMode: "standard" });
+    main.segments.push(seg);
+    ids.push(seg.id);
+    t += dur;
+  }
+  items.forEach((it, i) => { if (i && it.jlUs) { try { setJL(tl, ids[i], it.jlUs); } catch { /* no joint for a J/L (a transition, a picture): plain cut */ } } });
+  cleanupTracks(tl);
+  return ids;
+}
+
+/**
+ * The tracks as the PICTURE shows them: main-track clips with their picture edit points moved by their J/L (the next
+ * picture comes later for a J, earlier for an L). A J needs picture after the previous clip's out point and an L
+ * picture before this clip's in point (handles); the shift is clamped to what the files have (`durOf(seg)` = the
+ * media's length in µs, unknown = no limit). Joints with a transition, gaps or non-picture clips are left as cut.
+ * Returns the same array when there is nothing to move.
+ */
+export function pictureTracks(tracks, durOf = () => null) {
+  const main = tracks.find((t) => t.isMain);
+  if (!main?.segments.some((s) => s.jlUs)) return tracks;
+  const segs = [...main.segments].sort((a, b) => a.start - b.start).map((s) => ({ ...s }));
+  const src = (s, d) => { s.sourceStart = Math.round(s.sourceStart + d * (s.speed || 1)); };
+  for (let i = 1; i < segs.length; i++) {
+    const s = segs[i], prev = segs[i - 1];
+    if (!s.jlUs || !jlJoint(prev, s) || s.speedMode === "curve" || prev.speedMode === "curve") continue;
+    let shift = -Math.max(-JL_MAX_US, Math.min(JL_MAX_US, s.jlUs)); // > 0: the picture cut comes later (J)
+    if (shift > 0) {
+      const d = prev.kind === "video" ? durOf(prev) : null;
+      if (d) shift = Math.min(shift, Math.max(0, (d - (prev.sourceStart + prev.duration * (prev.speed || 1))) / (prev.speed || 1)));
+      shift = Math.min(shift, s.duration - MIN_DUR);
+    } else {
+      if (s.kind === "video") shift = -Math.min(-shift, s.sourceStart / (s.speed || 1));
+      shift = -Math.min(-shift, prev.duration - MIN_DUR);
+    }
+    shift = Math.round(shift);
+    if (!shift) continue;
+    prev.duration += shift;
+    s.start += shift; s.duration -= shift;
+    if (s.kind === "video" || s.kind === "compound") src(s, shift);
+    for (const x of [prev, s]) if (x.sourceDuration) x.sourceDuration = Math.round(x.duration * (x.speed || 1));
+  }
+  return tracks.map((t) => (t === main ? { ...t, segments: segs } : t));
 }
 
 /** Validation of a whole timeline (used before saving). */

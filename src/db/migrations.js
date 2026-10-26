@@ -29,6 +29,11 @@ export const MIGRATIONS = [
     description: "v5: VideoFx.matte (\"none\" | \"person\") and Track.role (\"behind\" = behind the person). New fields with defaults.",
     run(oldRealm, newRealm) { for (const s of newRealm.objects("Segment")) if (s.videoFx && !s.videoFx.matte) s.videoFx.matte = "none"; },
   },
+  {
+    from: 5,
+    description: "v6: Segment.jlUs (J/L cut at the joint before a main-track clip, default 0 = a plain cut). New field with a default.",
+    run() { /* nothing to convert */ },
+  },
 ];
 
 export function onMigration(oldRealm, newRealm) {
@@ -39,8 +44,11 @@ export function onMigration(oldRealm, newRealm) {
 const without = (name, ...keys) => (s) => { if (s.name !== name) return s; const p = { ...s.properties }; for (const k of keys) delete p[k]; return { ...s, properties: p }; };
 const withoutText = (...keys) => without("TextStyle", ...keys);
 
+/** The v5 schema (before Segment.jlUs), for the v5 → v6 upgrade test. */
+export function legacySchemaV5() { return ALL_SCHEMAS.map(without("Segment", "jlUs")); }
+
 /** The v4 schema (before VideoFx.matte), for the v4 → v5 upgrade test. */
-export function legacySchemaV4() { return ALL_SCHEMAS.map(without("VideoFx", "matte")).map(without("Track", "role")); }
+export function legacySchemaV4() { return legacySchemaV5().map(without("VideoFx", "matte")).map(without("Track", "role")); }
 
 /** The v3 schema (before TextStyle.graphic), for the v3 → v4 upgrade test. */
 export function legacySchemaV3() { return legacySchemaV4().map(withoutText("graphic")); }
