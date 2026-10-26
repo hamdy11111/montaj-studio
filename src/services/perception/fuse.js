@@ -15,10 +15,11 @@ export const DEFAULTS = Object.freeze({
   pauseMinS: 0.5,
   asdSmooth: 5,            // frames of moving average on the ASD score
   asdMinS: 0.3,            // shortest "speaking on screen" span
-  linkThreshold: 0.15,     // voice ↔ face: the contrast score (see linkSpeakersToFaces) a link needs
+  linkThreshold: 0.4,      // voice ↔ face: the contrast score (see linkSpeakersToFaces) a link needs
   linkMinEvidenceS: 3,     // seconds of the voice with that face visible, below which no link is made
   linkPriorS: 5,           // evidence shrink: a score counts fully only after several seconds of visible speech
-  linkBaseline: 0.3,       // the face's "speaking" share assumed when it is hardly seen at other times
+  linkBaseline: 0,         // the face's mean ASD score assumed when it is hardly seen at other times (0 = undecided)
+  linkClip: 4,             // ASD scores are clipped to ±this before averaging (one wild frame does not decide)
   linkMinCoverage: 0.25,   // the face must be on screen for this share of the voice's speech (else: a voice heard
                            // mostly off-screen — a TV, the person filming — that a face happened to mouth along with)
   // Laughter: laughter-detection fires on crowd noise and chatter (alone: ~40–50 % of its spans were laughs on the
@@ -183,14 +184,16 @@ const sigmoid = (x) => 1 / (1 + Math.exp(-x));
 
 /**
  * Voices ↔ on-screen people. For a voice S and a person P, over the whole file:
- *   shareS   of the seconds S talks while P is on screen, the share where P's mouth is seen speaking (ASD > 0)
- *   baseline the same share when S is NOT talking (other voices, silence) — a face that always "speaks" (eating,
- *            laughing, a moving camera, the model's bias) has a high baseline and earns nothing
- *   score    (shareS − baseline) × visible / (visible + linkPriorS): the contrast, trusted more with more evidence
+ *   meanS     P's mean ASD score (LR-ASD logit, clipped to ±linkClip) while S talks and P is on screen
+ *   baseline  P's mean ASD score while S is NOT talking (other voices, silence) — the comparison that matters: a face
+ *             the model rates as "speaking" almost all the time (side view, eating, laughing; seen on the user's
+ *             interview, 97 % of frames > 0) still scores much higher when its own voice talks (3.2 vs 1.2)
+ *   score     (meanS − baseline) × visible / (visible + linkPriorS): the contrast, trusted more with more evidence
+ *   coverage  the share of S's speech with P on screen
  * The Hungarian method picks the best one-to-one pairing; a pair under linkThreshold, with under linkMinEvidenceS of
- * visible time, or with the face on screen for under linkMinCoverage of the voice's speech, is not made, and that voice
- * is off-screen (the person behind the camera, a TV, a voice-over). On the user's raw videos the wrong links all had
- * the face on screen for 3–10 % of the voice's speech, the right ones for 75–100 %.
+ * visible time, or with coverage under linkMinCoverage, is not made, and that voice is off-screen (the person behind
+ * the camera, a TV, a voice-over). On the user's raw videos the wrong links all had the face on screen for 3–10 % of the
+ * voice's speech, the right ones for 75–100 %. (shareS/baseline as shares of frames > 0 are kept in the result too.)
  * tracks: [{id, identity, t0, fps, scores: [per frame]}] · exclusive: [{start, end, speaker}]
  */
 export function linkSpeakersToFaces(exclusive, tracks, opts = {}) {
@@ -198,41 +201,45 @@ export function linkSpeakersToFaces(exclusive, tracks, opts = {}) {
   const voices = [...new Set(exclusive.map((t) => t.speaker))];
   const people = [...new Set(tracks.map((t) => t.identity))];
   const talk = voices.map((v) => exclusive.filter((t) => t.speaker === v).reduce((a, t) => a + t.end - t.start, 0));
-  const stat = voices.map(() => people.map(() => ({ visible: 0, speaking: 0 })));
-  const all = people.map(() => ({ visible: 0, speaking: 0 }));
+  const zero = () => ({ n: 0, sum: 0, on: 0 });
+  const stat = voices.map(() => people.map(zero));
+  const all = people.map(zero);
+  const clip = (v) => Math.max(-o.linkClip, Math.min(o.linkClip, v));
+  const add = (c, v) => { c.n++; c.sum += clip(v); if (v > 0) c.on++; };
   for (const tr of tracks) {
     const pj = people.indexOf(tr.identity);
     const fps = tr.fps || 25;
     const scores = tr.scores || [];
-    for (const v of scores) { all[pj].visible += 1 / fps; if (v > 0) all[pj].speaking += 1 / fps; }
+    for (const v of scores) add(all[pj], v);
     for (const turn of exclusive) {
       const vi = voices.indexOf(turn.speaker);
       const f0 = Math.max(0, Math.floor((turn.start - tr.t0) * fps)), f1 = Math.min(scores.length, Math.ceil((turn.end - tr.t0) * fps));
-      for (let f = f0; f < f1; f++) {
-        stat[vi][pj].visible += 1 / fps;
-        if (scores[f] > 0) stat[vi][pj].speaking += 1 / fps;
-      }
+      for (let f = f0; f < f1; f++) add(stat[vi][pj], scores[f]);
     }
+    stat.fps = fps;
   }
+  const fps = stat.fps || 25;
   const detail = stat.map((row, i) => row.map((c, j) => {
-    const visO = all[j].visible - c.visible, spkO = all[j].speaking - c.speaking;
-    const baseline = visO >= 2 ? spkO / visO : o.linkBaseline;
-    const shareS = c.visible > 0 ? c.speaking / c.visible : 0;
-    const coverage = talk[i] > 0 ? c.visible / talk[i] : 0;
-    const score = c.visible >= o.linkMinEvidenceS ? (shareS - baseline) * (c.visible / (c.visible + o.linkPriorS)) : -1;
-    return { shareS, baseline, score, coverage, visible: c.visible, speaking: c.speaking };
+    const visible = c.n / fps, visO = (all[j].n - c.n) / fps;
+    const meanS = c.n ? c.sum / c.n : 0;
+    const baseline = visO >= 2 ? (all[j].sum - c.sum) / (all[j].n - c.n) : o.linkBaseline;
+    const coverage = talk[i] > 0 ? visible / talk[i] : 0;
+    const score = visible >= o.linkMinEvidenceS ? (meanS - baseline) * (visible / (visible + o.linkPriorS)) : -9;
+    return { meanS, baseline, score, coverage, visible, shareS: c.n ? c.on / c.n : 0, shareO: all[j].n - c.n ? (all[j].on - c.on) / (all[j].n - c.n) : null };
   }));
-  const pick = hungarian(detail.map((row) => row.map((d) => -d.score)));
-  const r3 = (x) => Number(x.toFixed(3));
+  // A pair that cannot link is worth 0 (= no link), never less: a very negative pair must not push another voice off
+  // its own face just to avoid it.
+  const pick = hungarian(detail.map((row) => row.map((d) => -Math.max(0, d.score))));
+  const r3 = (x) => (x === null ? null : Number(x.toFixed(3)));
   const links = {};
   voices.forEach((v, i) => {
     const j = pick[i];
     const d = j >= 0 ? detail[i][j] : null;
-    const conf = d ? r3(sigmoid((d.score - o.linkThreshold) * 10)) : null;
+    const conf = d ? r3(sigmoid((d.score - o.linkThreshold) * 4)) : null;
+    const facts = d ? { score: r3(d.score), meanS: r3(d.meanS), baseline: r3(d.baseline), coverage: r3(d.coverage), visibleS: r3(d.visible), shareS: r3(d.shareS), shareO: r3(d.shareO) } : {};
     links[v] = d && d.score >= o.linkThreshold && d.coverage >= o.linkMinCoverage
-      ? { face: people[j], confidence: conf, score: r3(d.score), shareS: r3(d.shareS), baseline: r3(d.baseline), coverage: r3(d.coverage), visibleS: r3(d.visible), speakingS: r3(d.speaking) }
-      : { face: null, offScreen: true, confidence: d ? r3(d.coverage < o.linkMinCoverage ? Math.max(1 - conf, 1 - d.coverage / o.linkMinCoverage) : 1 - conf) : null,
-        best: d ? people[j] : null, score: d ? r3(d.score) : null, coverage: d ? r3(d.coverage) : null };
+      ? { face: people[j], confidence: conf, ...facts }
+      : { face: null, offScreen: true, confidence: d ? r3(d.coverage < o.linkMinCoverage ? Math.max(1 - conf, 1 - d.coverage / o.linkMinCoverage) : 1 - conf) : null, best: d ? people[j] : null, ...facts };
   });
   return { links, voices, people, score: detail.map((r) => r.map((d) => r3(d.score))) };
 }

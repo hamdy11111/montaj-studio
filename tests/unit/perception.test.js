@@ -81,6 +81,17 @@ test("voices ↔ faces: the face that speaks during a voice is linked; a voice w
   const tv = linkSpeakersToFaces([{ start: 0, end: 60, speaker: "S1" }], [{ id: "T1", identity: "P1", t0: 10, fps, scores: new Array(4 * fps).fill(1) }, { id: "T2", identity: "P1", t0: 70, fps, scores: new Array(20 * fps).fill(-1) }]);
   assert.equal(tv.links.S1.face, null);
   assert.ok(tv.links.S1.coverage < 0.25);
+  // The interview pattern: the guest's ASD score is above zero almost all the time, but much higher while the guest talks.
+  const guest = Array.from({ length: 40 * fps }, (_, f) => (f / fps < 20 ? 3 : 1));
+  const host = Array.from({ length: 40 * fps }, (_, f) => (f / fps < 20 ? -1 : 2));
+  const iv = linkSpeakersToFaces([{ start: 0, end: 20, speaker: "S1" }, { start: 20, end: 40, speaker: "S2" }], [{ id: "T1", identity: "P1", t0: 0, fps, scores: host }, { id: "T2", identity: "P2", t0: 0, fps, scores: guest }]);
+  assert.equal(iv.links.S1.face, "P2");
+  assert.equal(iv.links.S2.face, "P1");
+  // A short extra voice that the main face never mouths (a very negative pair) must not take the main voice's link away.
+  const main = Array.from({ length: 60 * fps }, (_, f) => (f / fps < 50 ? 2 : -3));
+  const kid = Array.from({ length: 4 * fps }, () => 1);
+  const ex = linkSpeakersToFaces([{ start: 0, end: 50, speaker: "S1" }, { start: 50, end: 56, speaker: "S2" }], [{ id: "T1", identity: "P1", t0: 0, fps, scores: main }, { id: "T2", identity: "P2", t0: 10, fps, scores: kid }]);
+  assert.equal(ex.links.S1.face, "P1");
 });
 
 test("buildTimeline joins the stages into one sorted, valid timeline (missing stages are fine)", () => {

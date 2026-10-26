@@ -23,7 +23,7 @@ node src/services/perception/cli.mjs <file|folder>… --out <dir> [--stages word
 | shots | **TransNetV2** (authors' PyTorch port, weights converted from the official TF release with their converter: 100 % output match) | `shot` |
 | faces | **InsightFace buffalo_l** (SCRFD-10G detection + ArcFace R50) on onnxruntime-gpu, IoU tracking at 25 fps, tracks split where the face changes, identity clusters (average linkage); **AdaFace IR-101** (CVLFace WebFace12M, exported to ONNX here) used for tracks in poor light / blur | `face_track` (identity `P1…`, quality, 5 boxes/s normalised) |
 | asd | **LR-ASD** (TalkSet fine-tuned weights; the authors' Columbia_test recipe) — `--asd light-asd` = **Light-ASD** fast mode | per-frame scores → `active_speaker` |
-| fusion (JS) | voices ↔ faces: contrast score over the whole file + **Hungarian** assignment, threshold → "off-screen" | `speaker_turn.entity`, `active_speaker.speaker`, `timeline.speakers/faces/links` |
+| fusion (JS) | voices ↔ faces: mean-ASD-score contrast (voice talking vs not) × evidence, ≥ 25 % coverage, **Hungarian** assignment, threshold → "off-screen" | `speaker_turn.entity`, `active_speaker.speaker`, `timeline.speakers/faces/links` |
 | vision | **Qwen3.6-35B-A3B** UD-IQ4_XS + mmproj F16 (llama.cpp b11870, thinking off, JSON schema), keyframes with their times in the prompt; long shots cut into ≤ 12 s windows | `shot_log` (who, where, action, objects, text on screen, shot size, camera, change, energy 1–5, B-roll candidate + reason, English + Egyptian summary, confidence) |
 | window check (hook, not a stage) | `PerceptionService.windowCheck(file, [{t0,t1,question}], {engine})`: Qwen3-Omni-30B-A3B (sound + frames) implemented, Keye-VL-2.0 answers "unavailable" (needs Kwai's llama.cpp fork) | yes/no + confidence + reason per window |
 
@@ -35,7 +35,7 @@ node src/services/perception/cli.mjs <file|folder>… --out <dir> [--stages word
 { version: 1, media: {path, name, hash, duration, width, height, fps, hasAudio, hasVideo},
   speakers: [{id: "S1", seconds, face: "P1" | null, offScreen, linkConfidence}],
   faces:    [{id: "P1", tracks, seconds, poor, thumb, voice: "S1" | null}],
-  links:    {S1: {face, confidence, score, shareS, baseline, coverage, visibleS, speakingS} | {face: null, offScreen, best, …}},
+  links:    {S1: {face, confidence, score, meanS, baseline, coverage, visibleS, shareS, shareO} | {face: null, offScreen, best, …}},
   events:   [{id, t0, t1, type, source_model, confidence, speaker, entity, text, extra}],   // sorted by t0
   report:   {stages: {<stage>: {ms, gpuWaitMs, device, model, torchPeakMB, vram: {baseMB, peakMB, deltaMB}, parts, cached}}},
   artifacts: {dir, faces, vision} }
@@ -60,7 +60,8 @@ weights are downloaded; the `shot_log` gives context per ≤ 12 s window.
 
 `D:\capcut new\montaj-bench\النتائج\perception\` — `index.html` (overview), per case `<case>.html` (Arabic summary with
 face thumbnails, timeline strip, shot log, the hand-check rows, per-stage time and GPU memory) and `<case>.timeline.json`,
-plus `handcheck.json` (every judged clip). 5 cases (04-مقابلة has no raw yet), 17.6 min of 4K/1080p HEVC phone video.
+plus `handcheck.json` (every judged clip). 6 cases, 21.0 min: five 4K/1080p HEVC phone raws and the interview
+(04-مقابلة, 1080p h264, horizontal, already edited: 25 shots, burned-in captions).
 
 Per stage: wall time of the first run · torch peak MB / card-wide increase MB (nvidia-smi every 0.5 s; other sessions'
 small jobs can show up in the card-wide number):
@@ -72,10 +73,11 @@ small jobs can show up in the card-wide number):
 | 03-طبخ | 300 s | 22 s · 2082 / 2495 | 11 s · 2010 / 2432 | 12 s · 2642 / 3057 | 10 s · 1020 / 1178 | 10 s · 224 / 849 | 72 s · — / 2573 | 10 s · 618 / 1382 | 104 s · — / 18464 |
 | 05-شرح | 300 s | 23 s · 1606 / 2012 | 14 s · 2010 / 3457 | 13 s · 2642 / 1543 | 11 s · 1002 / 1219 | 10 s · 224 / 973 | 100 s · — / 4565 | 20 s · 618 / 1229 | 115 s · — / 18464 |
 | 06-كوميديا | 179 s | 29 s · 1590 / 903 | 10 s · 2010 / 2432 | 9 s · 2644 / 3058 | 10 s · 788 / 1188 | 17 s · 224 / 1126 | 66 s · — / 2796 | 11 s · 702 / 1125 | 84 s · — / 18464 |
-| **total** | 1056 s | 171 s | 72 s | 52 s | 74 s | 120 s | 403 s | 76 s | 448 s |
+| 04-مقابلة | 206 s | 44 s · 1616 / 2028 | 10 s · 2010 / 2432 | 10 s · 2644 / 3058 | 10 s · 1384 / 1298 | 10 s · 224 / 851 | 52 s · — / 2604 | 10 s · 618 / 1034 | 131 s · — / 20102 |
+| **total** | 1262 s | 215 s | 83 s | 62 s | 84 s | 130 s | 455 s | 86 s | 579 s |
 
-≈ 23.6 min of compute for 17.6 min of video on the first run (≈ 1.3× real time), seconds from the cache afterwards. Only
-the vision stage is heavy (Qwen3.6 ≈ 18.5 GB); every other stage stays under ~3.5 GB, matching the plan's VRAM schedule
+≈ 28.2 min of compute for 21.0 min of video on the first run (≈ 1.3× real time), seconds from the cache afterwards. Only
+the vision stage is heavy (Qwen3.6 ≈ 18.5 GB, 20.1 GB with the wider 16:9 keyframes); every other stage stays under ~3.5 GB, matching the plan's VRAM schedule
 (section 4: steps أ–د). Words: NeMo runs on the CPU (as in the app), alignment on the GPU. Faces: decoding 4K HEVC is
 the bulk — the GPU-resize recipe of `fastDecode.js` (orientation checked against a CPU frame) is ~4× faster than CPU
 decoding; plain `-hwaccel cuda` was *slower* than the CPU here (full 4K frames downloaded).
@@ -93,20 +95,29 @@ No human labels exist yet for these files; checks used (a) an independent listen
   frame tracks are stored, so a new threshold needs no model re-run). Final output: **10 laughs in 17.6 min; the
   listener says 8/10 are laughter**; by eye 3 clearly laughing, 1 clearly not (05 @ 274 s), 6 not decidable from the
   picture (two of them a crying toddler with a smiling adult — crying may read as laughter).
-- **Speaker changes** (pyannote community-1, exclusive mode). 47 sampled changes re-checked with TitaNet (is the audio
-  before/after nearer each voice's own centroid?): **24 confirmed, 15 rejected, 8 unclear**. Good on two-person dialogue
+- **Speaker changes** (pyannote community-1, exclusive mode). 56 sampled changes re-checked with TitaNet (is the audio
+  before/after nearer each voice's own centroid?): **28 confirmed, 19 rejected, 9 unclear**. Good on two-person dialogue
   (01-فلوق: 8/10 confirmed; by transcript + frames 7/10 plausible, 3 unclear); poor in crowds and noise (02: 2/8, 03:
   2/9 — 03's S2/S3 are 5–6 s fragments, probably over-segmentation of S1). Passing `--num-speakers` should help.
-- **Voice ↔ face.** Right in 01 (S1 says «أنا مضطر» → the man, S2 «انت واعدني» → the woman) and 05 (the cook who
-  explains); in 02 the TV's Fusha football commentary is correctly off-screen. Before the coverage rule two links were
-  certainly wrong (03: the narrator → a toddler seen for 3 % of her speech; 02: the TV → a girl seen for 8 %) and one
-  weak (06: 10 %); the right links had the face on screen for 75–100 % of the voice's speech, so a link now needs ≥ 25 %
-  coverage. The remaining links in 02/06 are unverified.
+- **The interview (04, the main speaker test).** Two people, and two face identities and two voices came out — right.
+  9 speaker changes: from the transcript's meaning (question → answer, interjections) 5 plausible, 2 probably wrong
+  (58–60 s: a sentence given to the student while only the host is on screen), 2 unclear; TitaNet confirmed 4. The 9
+  overlap regions all sit at short interjections («بالظبط», «الوحدة يعني؟»), which is where they belong. LR-ASD
+  over-fires on the student's side view (97 % of his frames > 0, even while the host talks).
+- **Voice ↔ face.** Now right in 04 (S2 → the host, who talks alone on screen for the first 58 s; S1 → the student),
+  01 (S1 «أنا مضطر» → the man, S2 «انت واعدني» → the woman), 03 (the cook who talks throughout) and 05 (the cook who
+  explains); in 02 the TV's Fusha football commentary is correctly off-screen. 02-S1 and 06-S2 are unverified, 05-S2
+  plausible. Three fixes came from these files: (1) a link needs the face on screen for ≥ 25 % of the voice's speech —
+  the wrong links had 3–10 %, the right ones 75–100 %; (2) the contrast uses the **mean ASD score** (clipped logit)
+  while the voice talks vs while it does not, instead of the share of frames > 0 — the interview's student scored
+  "speaking" 97 % of the time but 3.2 vs 1.2 on average; (3) pairs that cannot link count 0 in the Hungarian
+  assignment, not a large negative (a −9 sentinel had pushed 03's narrator off her own face).
 - **Faces.** Tracks split when the ArcFace identity changes inside them (crowds made boxes slide between people);
   tracks whose median detector score is < 0.6 (ears, back of heads) are dropped. Identities in the crowd video still
-  over-split (14 for ~12 people, plausible) — not measured.
-- **Shots.** All five raws are single continuous phone takes; TransNetV2 found no false cut. (Real cut detection is
-  untested here: needs edited or multi-clip material.)
+  over-split (14 for ~12 people, plausible) — not measured; the interview gives exactly 2 (right).
+- **Shots.** The five phone raws are single continuous takes; TransNetV2 found no false cut there. The edited
+  interview gave 25 shots (fast cuts in the host's intro, then long two-shots), consistent with a contact sheet of it;
+  not checked cut by cut.
 - **Shot log (Qwen3.6).** Compared by eye with frames of 02 and 06: places, people, clothing, actions and objects are
   right (bubble gun, plastic chairs, van at night, crying baby with a bottle); one invented detail seen ("TV on a
   stand" in an early window where a ring light stands). `summary_ar` Egyptian is understandable but clumsy.
@@ -178,5 +189,5 @@ page. The Python workers were exercised end-to-end on all five cases (not in `np
   labelled reactions (plan phase 0) — no model re-run needed.
 - The ASR engine is the current NeMo; when the coordinator picks QwenCleo/Cohere, add it to `ASR_ENGINES` (or feed its
   transcript with `--asr file --asr-file …`); the alignment stays.
-- Needs from others: the 04-مقابلة raw (multi-speaker interview — the hardest diarization case, untested); a practical
+- Needs from others: a raw (unedited) multi-person interview or prank with overlapping talk — 04 is already edited; a practical
   test of `windowCheck` once Qwen3-Omni is downloaded; an in-app set-up step for `runtime\perception` + models.
