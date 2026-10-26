@@ -421,6 +421,9 @@ export function registerIpc({ getServices, getAgents = () => null, getWindow, ap
     "musicbed.place": (tid, o) => S().music.bed.place(id(tid), obj(o)),
     "musicbed.autoLevel": (tid, sid) => S().music.bed.autoLevel(id(tid), id(sid)),
     "musicbed.setDuck": (tid, sid, db) => S().music.bed.setDuck(id(tid), id(sid), db === null || db === undefined ? null : Math.max(0, Math.min(40, Number(db) || 0))),
+    // ---------------------------------------------------------------- director (Phase 7): the verifier on an export, the planner models
+    "director.verify": async (tid, file) => (await import("../agent/director.js")).verifyExport(A().userContext(), id(tid), str(file, "file")),
+    "director.planners": async () => (await import("../services/directorLLM.js")).plannerModels(S().perception.runtime).map(({ id: i, name }) => ({ id: i, name })),
   };
   // The VFX library service of this window's services (created on first use).
   let vfxLibInstance = null;

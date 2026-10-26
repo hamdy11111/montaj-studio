@@ -21,7 +21,8 @@ function decisionText(d) {
   switch (d.k) {
     case "graphic": return t("dec.graphic", { at: d.at, tpl: tplName(d.template), what: d.emoji ? EMOJI_CHAR[d.emoji] || d.emoji : `«${d.text || ""}»` });
     case "retention": return t("dec.retention", { at: d.at, tpl: tplName(d.template), text: d.text, gap: d.gap });
-    case "kept": case "ending": case "cta": case "silenced": case "noPersonModel": case "personOff": case "noSpeech": return t(`dec.${d.k}`, d);
+    case "kept": case "ending": case "cta": case "silenced": case "noPersonModel": case "personOff": case "noSpeech": case "noPerception": return t(`dec.${d.k}`, d);
+    case "retakes": case "jl": case "clips": case "treatment": case "hook": return t(`dec.${d.k}`, d);
     default: return null;
   }
 }
@@ -33,12 +34,26 @@ function summary(r) {
   const lines = [t("dir.sumLength", { before: before.toFixed(1), after: after.toFixed(1), pct: Math.round(100 - (100 * after) / Math.max(0.1, before)) })];
   const reel = (r.decisions || []).find((d) => d.k === "reel");
   if (reel) lines.push(t("dir.sumReel", reel));
-  lines.push(t("dir.sumParts", { cuts: (plan.cuts || []).length, angles: zooms.filter((z) => /^angle/.test(z.reason || "")).length, punches: zooms.filter((z) => /^(punch|push)/.test(z.reason || "")).length,
+  // A v2 plan has no cut list: the pacing decision counts them.
+  const pacing = (r.decisions || []).find((d) => d.k === "pacing");
+  lines.push(t("dir.sumParts", { cuts: pacing?.cuts ?? (plan.cuts || []).length, angles: zooms.filter((z) => /^angle/.test(z.reason || "")).length, punches: zooms.filter((z) => /^(punch|push)/.test(z.reason || "")).length,
     graphics: gfx.filter((g) => g.template !== "head-emoji").length, emoji: gfx.filter((g) => g.template === "head-emoji").length, sfx: sounds }));
-  const removed = (r.decisions || []).find((d) => d.k === "pacing")?.removed || {};
+  const removed = pacing?.removed || {};
   const parts = Object.entries(removed).filter(([k]) => k !== "reel").map(([k, n]) => `${n} ${has(`dir.rm.${k}`) ? t(`dir.rm.${k}`) : k}`);
   if (parts.length) lines.push(t("dir.sumRemoved", { list: parts.join("، ") }));
   return lines;
+}
+
+const HOOK_AR = { result: ["result first", "النتيجة الأول"], question: ["a question", "سؤال"], reaction: ["the reaction first", "رد الفعل الأول"], action: ["straight into the action", "من وسط الأحداث"], none: ["none", "بدون"] };
+const hookName = (k) => (HOOK_AR[k] ? HOOK_AR[k][getLang() === "ar" ? 1 : 0] : k || "—");
+/** The cut sheet: the chosen treatment, its alternatives side by side, the links to check. */
+function sheetLines(s) {
+  if (!s?.chosen) return [];
+  const c = s.chosen, out = [t("dir.sheetChosen", { title: c.title, len: c.lengthS, hook: hookName(c.hook), score: c.total })];
+  out.push(t("dir.sheetOrder", { list: (s.order || []).map((o) => o.n).join(" ← ") }));
+  for (const a of s.alternatives || []) out.push(t("dir.sheetAlt", { title: a.title, len: a.lengthS, hook: hookName(a.hook), score: a.total }));
+  if (s.unsureLinks?.length) out.push(t("dir.sheetUnsure", { list: s.unsureLinks.map((u) => `${u.cause} ← ${u.reaction}`).join("، ") }));
+  return out;
 }
 
 /** «about 12 minutes» / «less than a minute». */
@@ -54,7 +69,12 @@ export function openDirector(ed) {
   const style = h("select", {}, [["energetic", t("dir.energetic")], ["explain", t("dir.explain")], ["calm", t("dir.calm")]].map(([v, l]) => h("option", { value: v }, l)));
   const tplSel = h("select", {}, Object.entries(CAPTION_TEMPLATES).map(([id, tp]) => h("option", { value: id, selected: id === "clean-pro" }, t(`cap.${id}`) || tp.name)));
   const length = h("select", {}, [["", t("dir.lenFull")], ["60", t("dir.lenReel", { n: 60 })], ["90", t("dir.lenReel", { n: 90 })]].map(([v, l]) => h("option", { value: v }, l)));
-  const opts = { stabilize: true, person: true };
+  const opts = { stabilize: true, person: true, perceive: "cached" };
+  const perceiveBox = check({ checked: false, label: t("dir.optPerceive"), onChange: (v) => { opts.perceive = v ? "run" : "cached"; refresh(); } });
+  const planner = h("select", {}, [["rules", t("dir.plannerRules")], ["local", t("dir.plannerLocal")], ["claude", t("dir.plannerClaude")]].map(([v, l]) => h("option", { value: v }, l)));
+  // The key is read from this field for one run and never saved (not in settings, not in the project).
+  const claudeKey = h("input", { type: "password", autocomplete: "off", maxlength: 300, placeholder: t("dir.claudeKeyPh"), style: { display: "none" } });
+  planner.onchange = () => { claudeKey.style.display = planner.value === "claude" ? "" : "none"; opts.planner = planner.value; refresh(); };
   const stabBox = check({ checked: true, label: t("dir.optStab"), onChange: (v) => { opts.stabilize = v; refresh(); } });
   const personBox = check({ checked: true, label: t("dir.optPerson"), onChange: (v) => { opts.person = v; refresh(); } });
   const cta = h("input", { type: "text", maxlength: 80, placeholder: t("dir.ctaPh") });
@@ -100,7 +120,8 @@ export function openDirector(ed) {
     });
     try {
       const r = await call("director.run", ed.timelineId(), {
-        style: style.value, captionTemplate: tplSel.value, cta: cta.value.trim(), ...opts,
+        style: style.value, captionTemplate: tplSel.value, cta: cta.value.trim(), ...opts, planner: planner.value,
+        ...(planner.value === "claude" && claudeKey.value.trim() ? { claudeKey: claudeKey.value.trim() } : {}),
         ...(length.value ? { targetSec: Number(length.value) } : {}),
         keywords: keywords.value.split(/[,،]/).map((x) => x.trim()).filter(Boolean),
         corrections: fixes.value.split(/\r?\n/).map((l) => l.split("=")).filter((p) => p.length === 2 && p[0].trim()).map(([from, to]) => ({ from: from.trim(), to: to.trim() })),
@@ -116,16 +137,18 @@ export function openDirector(ed) {
           h("div", { class: "muted small" }, t("dir.qaStats", { cpm: r.qa.stats.cutsPerMin, median: r.qa.stats.medianShot, epm: r.qa.stats.elementsPerMin })),
           ...[...fails, ...warns].map((c) => h("div", { class: "small", style: { color: c.level === "fail" ? "var(--danger)" : "inherit" } }, `${c.level === "fail" ? "✗" : "!"} ${qaText(c)}`))));
       }
+      const sheet = sheetLines(r.cutSheet);
+      if (sheet.length) log.append(h("details", { class: "pilot-msg bot", open: true }, h("summary", { style: { cursor: "pointer", fontWeight: 700 } }, t("dir.sheet")), ...sheet.map((l) => h("div", { class: "small" }, l))));
       const lines = (r.decisions || []).map(decisionText).filter(Boolean);
       if (lines.length) log.append(h("details", { class: "pilot-msg bot" }, h("summary", { style: { cursor: "pointer" } }, t("dir.decisions", { n: lines.length })), ...lines.map((l) => h("div", { class: "small" }, l))));
     } catch (err) {
       status.textContent = errorText(err);
       if (err?.messageKey === "err.whisperNotConfigured") import("../dialogs/asrSetup.js").then((m) => m.openAsrSetup());
-    } finally { off(); go.disabled = false; }
+    } finally { off(); go.disabled = false; claudeKey.value = ""; }
   };
   return modal({ title: t("dir.title"), width: 540, className: "pilot-modal",
     body: h("div", { class: "col" }, h("p", { class: "muted small" }, t("dir.hint")),
-      row(t("dir.style"), style), row(t("dir.length"), length), row(t("lib.animatedCaptions"), tplSel), row(t("dir.cta"), cta), keywords, fixes,
-      h("div", { class: "row", style: { gap: "16px", flexWrap: "wrap" } }, stabBox, personBox),
+      row(t("dir.style"), style), row(t("dir.length"), length), row(t("dir.planner"), planner), claudeKey, row(t("lib.animatedCaptions"), tplSel), row(t("dir.cta"), cta), keywords, fixes,
+      h("div", { class: "row", style: { gap: "16px", flexWrap: "wrap" } }, stabBox, personBox, perceiveBox),
       estimate, h("div", { class: "row" }, go, status), progress, log) });
 }

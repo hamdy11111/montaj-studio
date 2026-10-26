@@ -101,9 +101,13 @@ export function soundEvents(plan, cuts) {
 }
 
 const QUESTION_START = /^(ليه|ازاي|إزاي|هل|مين|ايه|إيه|فين|امتى|إمتى|كام|تفتكر)$/;
-/** Edit times that give a reason to keep watching (the skill's retention reasons). */
-export function reasonsToWatch(plan, { words, cuts, numbers = [] }) {
+/**
+ * Edit times that give a reason to keep watching (the skill's retention reasons). actionAt: source times where kept
+ * wordless action happens (a treatment's action moments and their reactions) — the action itself holds attention.
+ */
+export function reasonsToWatch(plan, { words, cuts, numbers = [], actionAt = [] }) {
   const R = [];
+  for (const a of actionAt || []) { const t = editTime(cuts, a); if (t !== null) R.push({ t, why: "action" }); }
   for (const g of plan.graphics || []) if (g.template !== "progress-bar") R.push({ t: editAt(cuts, g.fromUs), why: g.template });
   const zs = [...(plan.zooms || [])].sort((a, b) => a.fromUs - b.fromUs);
   // A punch-in counts; an angle change counts when the framing changes by 0.2 or more (a jump cut at the same angle
@@ -144,7 +148,7 @@ const sameWord = (a, b) => { const x = stripPrefix(a), y = stripPrefix(b); retur
  * All guards on a plan. ctx: { words (all, source time), removed (Map of removed word indices), durationUs, track,
  * style, numbers, fit: { dx, dy } }. Returns { checks: [{ id, level: "fail"|"warn", message, atUs? }], passed: [ids], stats }.
  */
-export function qaPlan(plan, { words = [], removed = new Map(), durationUs, track = [], style = "energetic", numbers = [], fit = {} } = {}) {
+export function qaPlan(plan, { words = [], removed = new Map(), durationUs, track = [], style = "energetic", numbers = [], fit = {}, actionAt = [] } = {}) {
   const P = POLICY, checks = [], passed = [];
   // message: English (agents); args: the values, for the app to say it in its own language (qa.<id>).
   const sec = (us) => Math.round(us / 1e5) / 10;
@@ -164,7 +168,7 @@ export function qaPlan(plan, { words = [], removed = new Map(), durationUs, trac
   pass("speech.lostWord", !lost.length);
 
   // 2. A reason to keep watching at least every 6 s.
-  const dead = deadSpans(reasonsToWatch(plan, { words: kept.map((x) => x.w), cuts, numbers }), total);
+  const dead = deadSpans(reasonsToWatch(plan, { words: kept.map((x) => x.w), cuts, numbers, actionAt }), total);
   for (const [a, b] of dead) add("retention.dead", "fail", `${fmt(b - a)} with nothing new on screen (${fmt(a)}–${fmt(b)} of the edit)`, undefined, { len: sec(b - a), from: sec(a), to: sec(b) });
   pass("retention.dead", !dead.length);
 

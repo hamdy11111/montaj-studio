@@ -375,12 +375,17 @@ test("the director on two clips: one story in timeline order, each file's words 
   await call("timeline_add_clip", { timelineId: tid, mediaId: red });
   await call("timeline_add_clip", { timelineId: tid, mediaId: blue });
   const depth = T.get(tid).history.depth;
-  const r = await autoEdit(hub.userContext(), tid, { apply: true, stabilize: false, person: false, title: "auto two" });
+  // No render measurement or sound-library worker here (they start a headless browser / a CLAP process that outlive the test).
+  const r = await autoEdit(hub.userContext(), tid, { apply: true, stabilize: false, person: false, title: "auto two", measureGraphics: false, sounds: "bundled" });
   assert.equal(r.undoLabel, "plan:auto two");
   assert.equal(T.get(tid).history.depth, depth + 1, "one undo step");
   assert.equal(r.plan.schema, "montaj.editplan/2");
-  const order = mainPieces(T.get(tid).timeline).map((p) => p.mediaId);
+  // The body keeps the timeline order; a treatment may open with a flash-forward hook (phase 7), also kept in place.
+  const order = r.plan.segments.filter((s) => s.role !== "hook").map((s) => s.mediaId);
   assert.deepEqual([...new Set(order)], [red, blue], "timeline order kept");
+  assert.equal(r.plan.segments.find((s) => s.role !== "hook").mediaId, red, "after the hook, the story starts with the first clip");
+  const hookUs = r.plan.segments.filter((s) => s.role === "hook").reduce((n, s) => n + s.toUs - s.fromUs, 0);
+  assert.equal(mainPieces(T.get(tid).timeline).find((p) => p.start >= hookUs - 1000).mediaId, red, "and so does the timeline");
   assert.ok(T.get(tid).timeline.tracks.find((t) => t.isMain).segments.some((s) => s.mediaId === blue && s.jlUs === -200_000), "a J lead into the second clip");
   assert.ok(r.qa.passed.includes("speech.lostWord") && r.qa.passed.includes("speech.cutInsideWord"));
   assert.ok(r.notes.some((n) => /2 clips planned as one story/.test(n)));

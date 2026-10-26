@@ -5,6 +5,8 @@
 // window never freezes. A v1 plan cuts the clips already on the main track; a v2 plan lays the main track out as its
 // ordered segments (several files, any order, J/L joints), then both place the same zooms, texts, graphics, sounds…
 // — a v2 overlay lands on its natural place (not a hook copy) unless it is pinned to a segment.
+import fs from "node:fs";
+import path from "node:path";
 import { AppError } from "../core/validation.js";
 import { US } from "../core/util.js";
 import { DEFAULT_TEXT, newSegment } from "../core/model.js";
@@ -199,6 +201,13 @@ export async function applyPlan(ctx, timelineId, plan, { expectedRevision, job }
     for (const [i, x] of (plan.sfx || []).entries()) {
       const t = mapPoint(on(x), x.mediaId, x.atUs);
       if (t === null || (v2 && !on(x).some((p) => x.atUs >= p.srcStart - 1 && x.atUs <= p.srcEnd + 1))) { skipped.push(`sfx/${i}: moment cut out`); continue; }
+      // A library sound (the director's pick by meaning) when its file is there; else the bundled one.
+      // Only a file inside the sound library's own folder (a plan cannot pull in any file of the disk this way).
+      const libDir = ctx.services.sfxLib?.dir ? path.resolve(ctx.services.sfxLib.dir) + path.sep : null;
+      if (x.library?.file && libDir && path.resolve(x.library.file).startsWith(libDir) && fs.existsSync(x.library.file)) {
+        const m = (await ctx.services.media.importFiles(ctx.services.timelines.get(timelineId).timeline.projectId, [x.library.file], { origin: "sfx" })).imported[0];
+        if (m) { await commit("sfx", (tt) => ops.addSegment(tt, newSegment("audio", { mediaId: m.id, name: `SFX: ${x.library.title || x.library.id}`.slice(0, 120), start: Math.max(0, Math.round(t - (x.library.leadUs || 0))), duration: m.durationUs || 1_000_000, sourceStart: 0, sourceDuration: m.durationUs || 1_000_000, volumeDb: x.volumeDb ?? -6 })).id); sounds++; continue; }
+      }
       await addSfx(ctx, timelineId, x.sound, t, { volumeDb: x.volumeDb });
       sounds++;
     }
