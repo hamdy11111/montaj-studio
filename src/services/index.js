@@ -1,4 +1,5 @@
 // Composition root: builds every service over one Realm instance. Used by the Electron main process and tests.
+import path from "node:path";
 import { openDatabase } from "../db/realmClient.js";
 import { createRepositories } from "../db/repositories.js";
 import { makePaths } from "./paths.js";
@@ -23,6 +24,10 @@ import { MusicService } from "./musicService.js";
 import { BackupService } from "./backupService.js";
 import { PackageService } from "./packageService.js";
 import { setBinaries } from "./ffmpeg.js";
+// Phase 9 media
+import { SfxLibraryService } from "./sfxLibrary.js";
+import { BrollService } from "./brollService.js";
+import { ImagegenService } from "./imagegenService.js";
 import { defaultBindings } from "../core/shortcuts.js";
 
 export async function createServices({ root, appVersion = "1.0.0", notify = () => {}, log = () => {} }) {
@@ -64,7 +69,14 @@ export async function createServices({ root, appVersion = "1.0.0", notify = () =
     onReopen: (r) => { Object.assign(repos, createRepositories(r)); timelines.open.clear(); },
   });
   const packages = new PackageService({ repos, paths, media });
+  // Phase 9 media: the sound library and the B-roll index live in the library folder (settings media.libraryDir);
+  // image tools in their own ComfyUI engine; every heavy job takes its turn on the GPU (gpu).
+  mattes.gpu = gpu;
+  const libDir = settings.get("media").libraryDir || path.join(paths.library, "assets-library");
+  const sfxLib = new SfxLibraryService({ dir: path.join(libDir, "sfx"), userData: paths.root, log });
+  const broll = new BrollService({ dir: path.join(libDir, "broll-index"), userData: paths.root, gpu, log });
+  const imagegen = new ImagegenService({ paths, gpu, log, notify });
   const purged = projects.purgeExpired();
   if (settings.get("draft").autoBackup) { try { backup.autoBackup(); } catch (e) { log("auto backup failed", e.message); } }
-  return { paths, repos, settings, media, analysis, timelines, exporter, projects, tts, captions, asrSetup, mattes, stabilizer, dubber, dubSetup, musicSetup, music, videoSetup, video, gpu, backup, packages, startup: { purged } };
+  return { paths, repos, settings, media, analysis, timelines, exporter, projects, tts, captions, asrSetup, mattes, stabilizer, dubber, dubSetup, musicSetup, music, videoSetup, video, gpu, backup, packages, sfxLib, broll, imagegen, startup: { purged } };
 }

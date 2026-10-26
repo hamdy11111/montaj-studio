@@ -585,6 +585,16 @@ const D = {
   "dec.retakes": ["{lines} line(s) said more than once: kept the last complete take ({left} take(s) left out)", "{lines} جملة اتقالت أكتر من مرة: سبت آخر إعادة كاملة (شلت {left} إعادة)"],
   "dec.jl": ["{n} J cut(s) of {ms} ms where the scene changes: the next sound starts before its picture", "{n} قطع J ({ms} ملي ثانية) عند تغيير المشهد: الصوت الجاي بيبدأ قبل صورته"],
   "dec.clips": ["{n} clips edited as one story, in their timeline order", "{n} كليب اتمنتجوا كحكاية واحدة بترتيبهم في التايملاين"],
+  // Phase 9 media
+  "err.mediaRuntime": ["The media tools failed: {message}", "أدوات الميديا فشلت: {message}"],
+  "err.mediaModelMissing": ["A model is missing: {model}.", "فيه موديل ناقص: {model}."],
+  "err.imagegenFailed": ["Making the image failed: {message}", "عمل الصورة فشل: {message}"],
+  "err.imagegenAlphaQwenOnly": ["Only Qwen-Image makes transparent images.", "Qwen-Image بس هو اللي بيعمل صور شفافة."],
+  "err.imagegenRefs": ["Give 1 to 10 reference images.", "اختار من صورة لـ10 صور مرجعية."],
+  "err.imagePromptEmpty": ["Describe the image in English words; Arabic text is added on top as real text, never drawn by the model.", "اوصف الصورة بكلام إنجليزي؛ الكتابة العربي بتتحط فوقها كنص حقيقي، الموديل عمره ما يرسمها."],
+  "set.matteQuality": ["Person cut-out", "قص الشخص"], "set.matteQuality.auto": ["Best available (SAM 3.1 + MatAnyone2 when installed)", "الأحسن المتاح (SAM 3.1 + MatAnyone2 لو متسطّبين)"],
+  "set.matteQuality.pro": ["Professional (GPU)", "احترافي (كارت الشاشة)"], "set.matteQuality.fast": ["Fast (CPU)", "سريع (المعالج)"],
+  "set.libraryDir": ["Sound and B-roll library folder", "فولدر مكتبة الأصوات والبي-رول"],
 };
 
 let lang = "ar";

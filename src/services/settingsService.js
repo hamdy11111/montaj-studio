@@ -24,6 +24,9 @@ export function defaultSettings(paths) {
     // Video studio: where its models are kept ("" = the app's data folder) and whether they stay in memory after a job.
     video: { modelsDir: "", keepLoaded: false },
     agents: { enabled: false },
+    // Phase 9 media (sound library, B-roll index, image tools, person matte): where the sound/B-roll libraries live
+    // ("" = the app's data folder › library) and the person-matte recipe ("auto": SAM 3.1 + MatAnyone2 when installed).
+    media: { libraryDir: "", matteQuality: "auto" },
     ui: { lastShortcutPreset: 1, recentColors: [], presets: [] }, // presets: JSON strings {name, attrs} from "Save preset"
   };
 }
@@ -51,6 +54,8 @@ const RULES = {
   "music.keepLoaded": (v) => !!v,
   "video.modelsDir": (v) => String(v || "").slice(0, 500),
   "video.keepLoaded": (v) => !!v,
+  "media.libraryDir": (v) => String(v || "").slice(0, 500),
+  "media.matteQuality": (v) => validateEnum(v, ["auto", "pro", "fast"], "matteQuality"),
   "providers.asrEngine": (v) => validateEnum(v, ["auto", "nemo", "whispercpp", "fasterwhisper"], "asrEngine"),
   "providers.pythonPath": (v) => String(v).slice(0, 500),
   "providers.fwModel": (v) => { if (!/^[A-Za-z0-9._/-]{1,120}$/.test(String(v))) throw new AppError("VALIDATION", "err.enum", { field: "fwModel" }); return String(v); },
