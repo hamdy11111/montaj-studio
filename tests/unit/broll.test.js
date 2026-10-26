@@ -71,6 +71,13 @@ test("VLM lookup: Qwen3.6 from perception first, else Qwen3.5 + its mmproj", () 
   assert.equal(findVlm(rt).name, "Qwen3.5-35B-A3B", "no mmproj for 3.6 yet → stays on 3.5");
   fs.writeFileSync(path.join(rt, "models", "perception", "mmproj-F16.gguf"), "");
   assert.equal(findVlm(rt).name, "Qwen3.6-35B-A3B");
+  // perception's own layout: a folder of its own
+  fs.rmSync(path.join(rt, "models", "perception"), { recursive: true });
+  const sub = path.join(rt, "models", "perception", "qwen3.6-35b-a3b");
+  fs.mkdirSync(sub, { recursive: true });
+  fs.writeFileSync(path.join(sub, "Qwen3.6-35B-A3B-UD-IQ4_XS.gguf"), "");
+  fs.writeFileSync(path.join(sub, "mmproj-F16.gguf"), "");
+  assert.equal(findVlm(rt).model, path.join(sub, "Qwen3.6-35B-A3B-UD-IQ4_XS.gguf"));
 });
 
 test("index bookkeeping: a stable media key, status counts", () => {

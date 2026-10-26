@@ -37,8 +37,9 @@ Results, A/B images and measurements: `D:\capcut new\montaj-bench\النتائج
   `broll.py serve`: per-index top-100 and Qwen3-VL-Reranker-2B on the top 30.
 - Captions by the local VLM (`broll/llm.js`): llama-server + **Qwen3.5-35B-A3B Q4_K_M (the dubbing translator) + its
   mmproj** (0.9 GB, the only addition) — English sentence, Arabic sentence, English and Arabic keywords, shot size.
-  Perception has not installed Qwen3.6 (`runtime\models\perception` has no Qwen3.6 GGUF): `findVlm()` switches to it
-  automatically when `Qwen3.6-35B-A3B*.gguf` + `mmproj*.gguf` appear there.
+  The 228 test captions were made with Qwen3.5. Perception has since installed **Qwen3.6-35B-A3B** (UD-IQ4_XS, 17.7 GB,
+  + mmproj) in `runtime\models\perception\qwen3.6-35b-a3b`: `findVlm()` now picks it (that folder or the top level),
+  so new captions use it; the existing ones are kept (delete a shot's `caption` to redo it). Not re-measured with 3.6.
 - `broll/fusion.js`: RRF (k = 60, Qwen3-VL weight 1.2), reranker blend (0.7 reranker / 0.3 fused rank), diversity
   (neighbouring slices of one take ×0.5) and "used recently" penalty (shot or whole video ×0.65), `evaluate()` (R@k, MRR).
 - Test library: the 6 cases read in place → `D:\capcut new\assets-library\broll-index\` (228 shots, 67 MB of keyframes
