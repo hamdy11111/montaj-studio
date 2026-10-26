@@ -354,6 +354,26 @@ export function registerIpc({ getServices, getAgents = () => null, getWindow, ap
       for (const m of r.imported) S().media.generateDerivatives(m.id).then((x) => notifyAll("media:updated", x)).catch(() => {});
       return r.imported[0] || null;
     },
+
+    // ---------------------------------------------------------------- phase 9 media: sounds, B-roll, images, tracks
+    "sfxlib.status": () => S().sfxLib.status(),
+    "sfxlib.search": (q, o) => S().sfxLib.search(str(q, "query"), obj(o)),
+    "sfxlib.checkPlan": (events, o) => S().sfxLib.checkPlan(arr(events, "events"), obj(o)),
+    "sfxlib.fetch": () => S().sfxLib.fetch(),
+    "sfxlib.importFolder": (dir, o) => S().sfxLib.importFolder(str(dir, "dir"), obj(o)),
+    "sfxlib.index": () => S().sfxLib.index({ device: "cpu" }),
+    "broll.status": () => S().broll.status(),
+    "broll.addVideos": (paths) => S().broll.addVideos(arr(paths, "paths").map((p) => str(p, "path"))),
+    "broll.caption": () => S().broll.caption(),
+    "broll.embed": () => S().broll.embed(),
+    "broll.search": (q, o) => S().broll.search(str(q, "query"), obj(o)),
+    "imagegen.status": () => S().imagegen.status(),
+    "imagegen.generate": (o) => S().imagegen.generate(obj(o)),
+    "imagegen.edit": (o) => S().imagegen.edit(obj(o)),
+    "imagegen.removeBackground": (file, o) => S().imagegen.removeBackground(str(file, "file"), obj(o)),
+    "imagegen.stop": () => S().imagegen.stop(),
+    "mattes.pointTracks": (mid, points, o) => S().mattes.pointTracks(id(mid), arr(points, "points"), obj(o)),
+    "mattes.objectTrack": (mid, concept, o) => S().mattes.objectTrack(id(mid), str(concept, "concept"), obj(o)),
   };
 
   function notifyAll(event, payload) {

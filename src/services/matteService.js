@@ -1,6 +1,13 @@
-// Person matte ("text behind the person"): a grayscale mask video per media file (white = the person), made
-// locally with MediaPipe Selfie Multiclass (src/services/vision/person_matte.py) and cached in cache/mattes.
-// The media is cut into chunks that run in parallel (the model costs ~70 ms a frame on the CPU; 8 chunks on 32 cores: ~0.4× real time for 4K); each chunk is
+// Person matte ("text behind the person"): a grayscale mask video per media file (white = the person), cached in
+// cache/mattes. Two recipes:
+//   pro   SAM 3.1 finds the person (again after every cut, and whenever the matte drifts from SAM's mask) and
+//         MatAnyone2 mattes them — hair, hands, motion blur (vision/pro_matte.py, the media runtime, on the GPU in its
+//         turn, 720 px on the short side). Used when its runtime and models are installed (settings
+//         media.matteQuality "auto", the default); "pro" insists, "fast" keeps the MediaPipe recipe.
+//   fast  MediaPipe Selfie Multiclass (src/services/vision/person_matte.py), 360 px on the CPU — the fallback.
+// Also: point tracks (CoTracker3, vision/track_points.py) and object tracks (SAM 3.1 by concept,
+// vision/track_object.py, smoothed here) as JSON, for graphics that follow something.
+// Fast recipe: the media is cut into chunks that run in parallel (the model costs ~70 ms a frame on the CPU; 8 chunks on 32 cores: ~0.4× real time for 4K); each chunk is
 // FFmpeg decode → python → FFmpeg encode, and the chunks are joined without re-encoding. The mask has the
 // media's timing from its first frame, so the export and the preview open it exactly like the media itself.
 import { spawn } from "node:child_process";
@@ -12,6 +19,8 @@ import { AppError } from "../core/validation.js";
 import { US } from "../core/util.js";
 import { binaries, run } from "./ffmpeg.js";
 import { decodeRecipe } from "./fastDecode.js";
+import { mediaRuntime, modelDir, runPy } from "./sfxLibrary/mediaRuntime.js";
+import { engineRuntime } from "./engineSetupService.js";
 
 const VISION_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), "vision").replace(/app\.asar([\\/])/, "app.asar.unpacked$1");
 const SCRIPT = path.join(VISION_DIR, "person_matte.py");
@@ -20,9 +29,35 @@ const VERSION = "v2"; // part of the file name: a new mask recipe makes new file
 const SHORT_SIDE = 360;   // the model sees 256×256; a larger mask only costs time
 const CHUNK_MIN_S = 4;
 const GPU_PARTS = 4;
+const PRO_VERSION = "pro1";
+const PRO_SHORT_SIDE = 720;
+const SAM_CKPT = "sam3.1_multiplex_fp16.safetensors";
+
+/**
+ * One-euro smoothing of an object track (frames [tS, x0, y0, x1, y1, cx, cy, area]): steady while the thing is still,
+ * quick when it moves; frames where it is not seen hold the last position. Pure (tests).
+ */
+export function smoothTrack(frames, { minCutoff = 1.2, beta = 0.4, dCutoff = 1.0 } = {}) {
+  const alpha = (cut, dt) => 1 / (1 + 1 / (2 * Math.PI * cut * dt));
+  const out = [];
+  let prev = null, dprev = null, tPrev = null;
+  for (const f of frames) {
+    if (!(f[7] > 0)) { out.push(prev ? [f[0], ...prev, 0] : [...f]); continue; }
+    const x = f.slice(1, 7);
+    if (!prev) { prev = x; dprev = x.map(() => 0); tPrev = f[0]; out.push([...f]); continue; }
+    const dt = Math.max(1e-3, f[0] - tPrev);
+    const ad = alpha(dCutoff, dt);
+    const dx = x.map((v, i) => ad * ((v - prev[i]) / dt) + (1 - ad) * dprev[i]);
+    const y = x.map((v, i) => { const a = alpha(minCutoff + beta * Math.abs(dx[i]), dt); return a * v + (1 - a) * prev[i]; });
+    prev = y; dprev = dx; tPrev = f[0];
+    out.push([f[0], ...y.map((v) => Math.round(v * 10000) / 10000), f[7]]);
+  }
+  return out;
+}
 
 export class MatteService {
-  constructor({ repos, paths, settings, log = () => {}, notify = () => {} }) {
+  constructor({ repos, paths, settings, log = () => {}, notify = () => {}, gpu = null }) {
+    this.gpu = gpu; // the app's GpuQueue (the composition root sets it): the pro recipe takes its turn on the GPU
     this.repos = repos;
     this.paths = paths;
     this.settings = settings;
@@ -36,8 +71,33 @@ export class MatteService {
 
   pythonCmd() { return this.settings.get("providers").pythonPath || "python"; }
   // variant "stab": the matte of the stabilized copy (StabilizeService), so a stabilized cutout lines up.
-  file(mediaId, variant = "") { return path.join(this.dir, `${mediaId}${variant ? `-${variant}` : ""}-${VERSION}.mp4`); }
+  fastFile(mediaId, variant = "") { return path.join(this.dir, `${mediaId}${variant ? `-${variant}` : ""}-${VERSION}.mp4`); }
+  proFile(mediaId, variant = "") { return path.join(this.dir, `${mediaId}${variant ? `-${variant}` : ""}-${PRO_VERSION}.mp4`); }
+  /** The matte file the app uses: the pro one when that recipe is wanted, else the fast one. */
+  file(mediaId, variant = "") { return this.wantPro() ? this.proFile(mediaId, variant) : this.fastFile(mediaId, variant); }
   ready(mediaId, variant = "") { return fs.existsSync(this.file(mediaId, variant)); }
+
+  /** "auto" (pro when installed), "pro" or "fast": settings media.matteQuality. */
+  quality() { try { return this.settings.get("media").matteQuality || "auto"; } catch { return "auto"; } }
+
+  /** What the pro recipe needs, or null: the media runtime, MatAnyone2, SAM 3.1 (a video model) and ComfyUI's code. */
+  proRuntime() {
+    const rt = mediaRuntime(this.paths.root);
+    const video = rt && engineRuntime("video", this.paths.root);
+    if (!rt || !video) return null;
+    const matanyone = modelDir(rt, "PeiqingYang/MatAnyone2");
+    const sam = path.join(path.dirname(rt.models), "video", "checkpoints", SAM_CKPT);
+    if (!matanyone || !fs.existsSync(sam)) return null;
+    return { rt, comfy: video.comfy, sam, matanyone, cotracker: path.join(rt.models, "facebook__cotracker3", "scaled_offline.pth") };
+  }
+
+  wantPro() {
+    const q = this.quality();
+    if (q !== "auto") return q === "pro";
+    // asked on every preview request: the file checks are kept for 30 s
+    if (!this.proCheck || Date.now() - this.proCheck.at > 30_000) this.proCheck = { at: Date.now(), ok: !!this.proRuntime() };
+    return this.proCheck.ok;
+  }
 
   /** Whether python with mediapipe + opencv is available (cached per python path). */
   async status(force = false) {
@@ -49,7 +109,9 @@ export class MatteService {
     } catch (e) {
       this.checked = { python: py, available: false, error: (e.details?.stderr || e.message || "").slice(-300) };
     }
-    return this.checked;
+    // available: either recipe can make a matte; fast: the MediaPipe one; pro: SAM 3.1 → MatAnyone2.
+    const pro = !!this.proRuntime();
+    return { ...this.checked, fast: this.checked.available, available: this.checked.available || pro, pro, quality: this.quality(), recipe: this.wantPro() ? "pro" : "fast" };
   }
 
   /**
@@ -66,11 +128,77 @@ export class MatteService {
     return this.jobs.get(key);
   }
 
-  async make(mediaId, { onProgress, signal, variant = "", source = null }) {
+  async make(mediaId, opts) {
+    if (!this.wantPro()) return this.makeFast(mediaId, opts);
+    try { return await this.makePro(mediaId, opts); } catch (e) {
+      if (opts.signal?.aborted || this.quality() === "pro") throw e;
+      this.log("matte: pro recipe failed, fast recipe instead", String(e.details?.stderr || e.message).slice(-400));
+      const f = await this.makeFast(mediaId, opts);
+      fs.copyFileSync(f, this.proFile(mediaId, opts.variant)); // this media keeps the fast matte under the pro name
+      return this.proFile(mediaId, opts.variant);
+    }
+  }
+
+  /** Run a media-runtime job in the GPU's turn (the app's queue), or at once without one (tests, tools). */
+  async onGpu(id, job) {
+    if (!this.gpu) return job();
+    const release = await this.gpu.acquire("matte", id);
+    try { return await job(); } finally { release(); }
+  }
+
+  /** SAM 3.1 → MatAnyone2 over the whole media (vision/pro_matte.py). */
+  async makePro(mediaId, { onProgress, signal, variant = "", source = null }) {
+    const m = this.repos.media.get(mediaId);
+    if (m.type !== "video") throw new AppError("VALIDATION", "err.matteVideoOnly", { mediaId });
+    const pr = this.proRuntime();
+    if (!pr) throw new AppError("PROVIDER", "err.matteUnavailable", { error: "pro matte runtime/models missing" });
+    const src = source || m.path; // the original, not the proxy: hair and edges need the detail
+    if (!fs.existsSync(src)) throw new AppError("IO", "err.fileNotFound", { file: src });
+    const fps = Math.min(30, Math.round(m.fps) || 30);
+    const out = this.proFile(mediaId, variant), tmp = `${out}.part.mp4`;
+    const t0 = Date.now();
+    const r = await this.onGpu(`matte-${mediaId}`, () => runPy(pr.rt, path.join(VISION_DIR, "pro_matte.py"), ["--video", src, "--out", tmp,
+      "--ffmpeg", binaries().ffmpeg, "--ffprobe", binaries().ffprobe, "--comfy", pr.comfy, "--sam", pr.sam, "--matanyone", pr.matanyone,
+      "--short", String(PRO_SHORT_SIDE), "--fps", String(fps), "--stats", `${out}.stats.json`], { signal, onLine: (l) => l.progress != null && onProgress?.(l.progress) }));
+    fs.renameSync(tmp, out);
+    this.log("pro matte ready", mediaId + (variant ? ` (${variant})` : ""), `${r?.frames} frames, ${r?.fps} fps, ${r?.restarts} restarts, ${((Date.now() - t0) / 1000).toFixed(1)} s`);
+    onProgress?.(1);
+    this.notify("matte:ready", { mediaIds: [mediaId] });
+    return out;
+  }
+
+  /** CoTracker3 tracks of points ([{ id, x, y, t }]: fractions, seconds from startS) over a window, as JSON. */
+  async pointTracks(mediaId, points, { startS = 0, durS = 10, fps = 15 } = {}) {
+    const pr = this.proRuntime();
+    if (!pr || !fs.existsSync(pr.cotracker)) throw new AppError("PROVIDER", "err.matteUnavailable", { error: "CoTracker3 missing" });
+    const m = this.repos.media.get(mediaId);
+    const out = path.join(this.dir, `${mediaId}-points-${Date.now()}.json`);
+    await this.onGpu(`points-${mediaId}`, () => runPy(pr.rt, path.join(VISION_DIR, "track_points.py"), ["--video", m.path, "--out", out, "--model", pr.cotracker,
+      "--ffmpeg", binaries().ffmpeg, "--ffprobe", binaries().ffprobe, "--points", JSON.stringify(points), "--start", String(startS), "--dur", String(durS), "--fps", String(fps)]));
+    return { file: out, ...JSON.parse(fs.readFileSync(out, "utf8")) };
+  }
+
+  /** Where a thing named by a concept is (SAM 3.1, 10 fps), smoothed for arrows and circles that follow it, as JSON. */
+  async objectTrack(mediaId, concept, { startS = 0, durS = 10, fps = 10 } = {}) {
+    const pr = this.proRuntime();
+    if (!pr) throw new AppError("PROVIDER", "err.matteUnavailable", { error: "SAM 3.1 missing" });
+    const m = this.repos.media.get(mediaId);
+    const out = path.join(this.dir, `${mediaId}-object-${Date.now()}.json`);
+    await this.onGpu(`object-${mediaId}`, () => runPy(pr.rt, path.join(VISION_DIR, "track_object.py"), ["--video", m.path, "--out", out,
+      "--ffmpeg", binaries().ffmpeg, "--ffprobe", binaries().ffprobe, "--comfy", pr.comfy, "--sam", pr.sam, "--concept", String(concept).slice(0, 60),
+      "--start", String(startS), "--dur", String(durS), "--fps", String(fps)]));
+    const raw = JSON.parse(fs.readFileSync(out, "utf8"));
+    const res = { ...raw, smoothed: smoothTrack(raw.frames) };
+    fs.writeFileSync(out, JSON.stringify(res));
+    return { file: out, ...res };
+  }
+
+  /** The MediaPipe recipe (CPU, 360 px), in parallel chunks. */
+  async makeFast(mediaId, { onProgress, signal, variant = "", source = null }) {
     const m = this.repos.media.get(mediaId);
     if (m.type !== "video") throw new AppError("VALIDATION", "err.matteVideoOnly", { mediaId });
     const st = await this.status();
-    if (!st.available) throw new AppError("PROVIDER", "err.matteUnavailable", { error: st.error });
+    if (!st.fast) throw new AppError("PROVIDER", "err.matteUnavailable", { error: st.error });
     const src = source || (m.proxyPath && fs.existsSync(m.proxyPath) ? m.proxyPath : m.path);
     if (!fs.existsSync(src)) throw new AppError("IO", "err.fileNotFound", { file: src });
     const fps = Math.min(30, Math.round(m.fps) || 30);
@@ -106,12 +234,12 @@ export class MatteService {
       await run(binaries().ffmpeg, ["-hide_banner", "-loglevel", "error", "-y", "-f", "concat", "-safe", "0", "-i", list, "-c", "copy", "-movflags", "+faststart", tmp], { timeoutMs: 5 * 60_000, signal });
       // Face/head boxes of every frame, in part order (written by the model next to each part).
       const boxes = parts.flatMap((p) => fs.readFileSync(`${p}.boxes.jsonl`, "utf8").split("\n").filter(Boolean).map((l) => JSON.parse(l)));
-      fs.writeFileSync(`${this.file(mediaId, variant)}.boxes.json`, JSON.stringify({ fps, boxes }));
-      fs.renameSync(tmp, this.file(mediaId, variant));
+      fs.writeFileSync(`${this.fastFile(mediaId, variant)}.boxes.json`, JSON.stringify({ fps, boxes }));
+      fs.renameSync(tmp, this.fastFile(mediaId, variant));
       this.log("matte ready", mediaId + (variant ? ` (${variant})` : ""), `${total} frames, ${workers} workers, ${dec.gpu ? "GPU" : "CPU"} decode, ${((Date.now() - t0) / 1000).toFixed(1)} s`);
       onProgress?.(1);
       this.notify("matte:ready", { mediaIds: [mediaId] });
-      return this.file(mediaId, variant);
+      return this.fastFile(mediaId, variant);
     } finally {
       try { fs.rmSync(work, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 }); } catch (e) { this.log("matte: temp folder kept", e.message); }
     }
@@ -132,7 +260,8 @@ export class MatteService {
     const { stdout } = await run(binaries().ffmpeg, ["-hide_banner", "-loglevel", "error", "-i", file, "-vf", `fps=10,scale=${W}:${H}:flags=area,format=gray`, "-f", "rawvideo", "-"], { timeoutMs: 60 * 60_000 }); // a long video's mask takes minutes to read
     const n = Math.floor(stdout.length / (W * H));
     let faces = null;
-    try { faces = JSON.parse(fs.readFileSync(`${file}.boxes.json`, "utf8")); } catch { /* an older matte: silhouette only */ }
+    // Face/head boxes come with the fast recipe; a pro matte borrows them when the fast matte exists too.
+    for (const f of [`${file}.boxes.json`, `${this.fastFile(mediaId, variant)}.boxes.json`]) { try { faces = JSON.parse(fs.readFileSync(f, "utf8")); break; } catch { /* silhouette only */ } }
     const headAt = (i) => { const b = faces?.boxes[Math.min(faces.boxes.length - 1, Math.round((i / 10) * faces.fps))]; return b?.[1] || null; };
     const frames = [];
     let last = [0.3, 0.1, 0.7, 1, 0.5, 0.3, 0.2, 0.25];
@@ -169,7 +298,7 @@ export class MatteService {
     return new Promise((resolve, reject) => {
       const dec = spawn(ffmpeg, ["-hide_banner", "-loglevel", "error", ...how.pre, "-ss", (startFrame / fps).toFixed(6), "-i", src, "-an", "-vf", `${how.vf},fps=${fps}`,
         "-frames:v", String(frames), "-f", "rawvideo", "-pix_fmt", "rgb24", "-"], { windowsHide: true });
-      const py = spawn(this.pythonCmd(), ["-X", "utf8", SCRIPT, "--width", String(W), "--height", String(H), "--fps", String(fps), "--step", "2", "--boxes", `${out}.boxes.jsonl`, "--model", MODEL], { windowsHide: true });
+      const py = spawn(this.pythonCmd(), ["-X", "utf8", SCRIPT, "--width", String(W), "--height", String(H), "--fps", String(fps), "--step", "2", "--boxes", `${out}.boxes.jsonl`, "--model", MODEL], { windowsHide: true, cwd: VISION_DIR }); // MediaPipe aborts when the working folder has non-ASCII letters
       const enc = spawn(ffmpeg, ["-hide_banner", "-loglevel", "error", "-y", "-f", "rawvideo", "-pix_fmt", "gray", "-s", `${W}x${H}`, "-r", String(fps), "-i", "-",
         "-c:v", "libx264", "-preset", "veryfast", "-crf", "14", "-g", String(fps), "-pix_fmt", "yuv420p", out], { windowsHide: true });
       const procs = [dec, py, enc];

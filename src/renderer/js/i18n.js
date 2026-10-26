@@ -577,6 +577,16 @@ const D = {
   "err.musicVram": ["The graphics card has only {free} GB free. Close what uses it (or stop other engines) and try again.", "كارت الشاشة فاضي فيه {free} جيجا بس. اقفل اللي شاغله وجرّب تاني."],
   "err.diskLow": ["Not enough disk space ({free} GB free).", "المساحة على القرص مش كفاية ({free} جيجا فاضية)."], "err.musicFormat": ["The saved file {file} is not in the format of its extension; it was removed.", "الملف {file} اتحفظ بصيغة غير امتداده، فاتمسح."],
   "err.musicSource": ["This file has no readable sound.", "الملف ده مفيهوش صوت يتقري."],
+  // Phase 9 media
+  "err.mediaRuntime": ["The media tools failed: {message}", "أدوات الميديا فشلت: {message}"],
+  "err.mediaModelMissing": ["A model is missing: {model}.", "فيه موديل ناقص: {model}."],
+  "err.imagegenFailed": ["Making the image failed: {message}", "عمل الصورة فشل: {message}"],
+  "err.imagegenAlphaQwenOnly": ["Only Qwen-Image makes transparent images.", "Qwen-Image بس هو اللي بيعمل صور شفافة."],
+  "err.imagegenRefs": ["Give 1 to 10 reference images.", "اختار من صورة لـ10 صور مرجعية."],
+  "err.imagePromptEmpty": ["Describe the image in English words; Arabic text is added on top as real text, never drawn by the model.", "اوصف الصورة بكلام إنجليزي؛ الكتابة العربي بتتحط فوقها كنص حقيقي، الموديل عمره ما يرسمها."],
+  "set.matteQuality": ["Person cut-out", "قص الشخص"], "set.matteQuality.auto": ["Best available (SAM 3.1 + MatAnyone2 when installed)", "الأحسن المتاح (SAM 3.1 + MatAnyone2 لو متسطّبين)"],
+  "set.matteQuality.pro": ["Professional (GPU)", "احترافي (كارت الشاشة)"], "set.matteQuality.fast": ["Fast (CPU)", "سريع (المعالج)"],
+  "set.libraryDir": ["Sound and B-roll library folder", "فولدر مكتبة الأصوات والبي-رول"],
 };
 
 let lang = "ar";
