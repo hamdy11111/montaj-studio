@@ -534,8 +534,12 @@ export function executionSpec(treatment, moments, words, { angleEveryUs = 2_500_
   const actionUs = moments.filter((m) => m.kind === "action").reduce((n, m) => n + m.e - m.s, 0);
   const actionVideo = D > 0 && speechUs / D < 0.45 && actionUs >= 20 * US;
   const CORE0 = !actionVideo ? { core: 1_800_000, lead: 1_200_000, tail: 600_000 } : ({ full: { core: 5_000_000, lead: 3_000_000 }, medium: { core: 4_000_000, lead: 2_500_000 }, short: { core: 3_000_000, lead: 2_000_000 } }[treatment.length] || { core: 5_000_000, lead: 3_000_000 });
-  const heard = (m) => ambience && (m.kind === "action" || m.reactions.length > 0); // its own sound is kept: never dead air
-  const coreOf = (m) => (!actionVideo && heard(m) ? AMBIENT_CORE : CORE0);
+  // Its own sound is kept under the clean-up (keepAmbience)… but only a moment with a heard reaction (laughter,
+  // applause, a loudness burst) is longer than a beat: a vlog's walking shots are action by their picture and quiet by
+  // their sound — kept 3.5 s they read as dead air again (01: two gaps of 2–4 s, a 7.8 s shot).
+  const heard = (m) => ambience && (m.kind === "action" || m.reactions.length > 0);
+  const loud = (m) => heard(m) && m.reactions.length > 0;
+  const coreOf = (m) => (!actionVideo && loud(m) ? AMBIENT_CORE : CORE0);
   const keepSound = [];
   let lastKept = null;
   for (const m of moments) {
@@ -543,8 +547,8 @@ export function executionSpec(treatment, moments, words, { angleEveryUs = 2_500_
     if (m.kind === "speech") { if (!kept.has(m.n)) { for (let i = m.w0; i <= m.w1; i++) dropWords.set(i, "treatment"); cutSpans.push({ fromUs: m.s, toUs: m.e, reason: `treatment: moment ${m.n} (speech)` }); } else lastKept = "speech"; continue; }
     if (!kept.has(m.n)) { cutSpans.push({ fromUs: m.s, toUs: m.e, reason: `treatment: moment ${m.n} (${m.kind})` }); continue; }
     // In a talking video one beat per wordless run: two beats side by side are 3–4 s of near silence (05's dead air).
-    if (!actionVideo && lastKept === "wordless" && !m.reactions.some((x) => BIG.has(x.type)) && !m.protected && !heard(m)) { cutSpans.push({ fromUs: m.s, toUs: m.e, reason: `treatment: one beat per quiet stretch (moment ${m.n})` }); continue; }
-    lastKept = heard(m) ? "heard" : "wordless";
+    if (!actionVideo && lastKept === "wordless" && !m.reactions.some((x) => BIG.has(x.type)) && !m.protected && !loud(m)) { cutSpans.push({ fromUs: m.s, toUs: m.e, reason: `treatment: one beat per quiet stretch (moment ${m.n})` }); continue; }
+    lastKept = loud(m) ? "heard" : "wordless";
     const CORE = coreOf(m);
     let a = m.s, b = m.e;
     const r = m.reactions.find((x) => BIG.has(x.type));
@@ -591,7 +595,7 @@ export function executionSpec(treatment, moments, words, { angleEveryUs = 2_500_
   return { dropWords, cutSpans, keepSpans, angleBreaks, order, hook, actionAt, reactionSfx, actionVideo, ambience: keepSound, ...(audio ? { audio } : {}) };
 }
 
-/** A talking video's kept action beat when its sound is kept (ambience): up to 3.5 s, the reaction with 2 s before it. */
+/** A talking video's kept action beat with a heard reaction when its sound is kept (ambience): up to 3.5 s, 2 s before it. */
 export const AMBIENT_CORE = { core: 3_500_000, lead: 2_000_000, tail: 1_200_000 };
 
 /** Do two lines say the same thing? (≥ 70 % of the shorter one aligns) — the critic's repetition check. */

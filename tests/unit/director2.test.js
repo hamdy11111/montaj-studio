@@ -212,21 +212,29 @@ test("no spoiler: no result or reaction flash-forward from the ending; a planner
 const TALK = Array.from({ length: 40 }, (_, i) => W(`كلمة${i}`, i * 1.4, i * 1.4 + 1.2));
 // Ten words, 8 s of action without words (two shots), then the rest of the talk.
 const TW = [...TALK.slice(0, 10), ...TALK.slice(10).map((w) => ({ ...w, startUs: w.startUs + 8 * US, endUs: w.endUs + 8 * US }))];
-const TE = onAxis([EV("shot_log", 13.2, 17.6, { extra: { energy: 4, action: "kicks a ball" } }), EV("shot_log", 17.6, 22, { extra: { energy: 4, action: "runs" } })], 66);
+const SHOTS = [EV("shot_log", 13.2, 17.6, { extra: { energy: 4, action: "kicks a ball" } }), EV("shot_log", 17.6, 22, { extra: { energy: 4, action: "runs" } })];
+// The same two shots with a heard reaction in each (laughter) — and without (a picture-only action, quiet).
+const TE = onAxis([...SHOTS, EV("laughter", 15.0, 16.0), EV("laughter", 19.5, 20.5)], 66), TQ = onAxis(SHOTS, 66);
 
 test("keepAmbience: with the export honouring it a talking video keeps longer action beats, one after another, and marks their sound", () => {
   const { moments } = momentsWithLinks({ words: TW, events: TE, durationUs: 66 * US });
   const act = moments.filter((m) => m.kind === "action");
-  assert.ok(act.length >= 2, `${act.length} action moments`);
+  assert.ok(act.length >= 1 && act.every((m) => m.reactions.length), JSON.stringify(act.map((m) => [m.s / US, m.e / US, m.reactions.map((r) => r.type)])));
   const t = { order: moments.map((m) => m.n), hook: null, length: "full" };
   const old = executionSpec(t, moments, TW);
-  assert.ok(old.keepSpans.every(([a, b]) => b - a <= 2_000_000), "before: short beats");
-  assert.ok(old.cutSpans.some((c) => /one beat per quiet stretch/.test(c.reason)), "before: one beat per quiet stretch");
+  const longest = (sp) => Math.max(...sp.keepSpans.map(([a, b]) => b - a));
+  assert.ok(longest(old) <= 3_000_000, "before: short beats (the clean-up would make a longer one dead air)");
   assert.deepEqual(old.ambience, []);
   const spec = executionSpec(t, moments, TW, { ambience: true });
-  assert.ok(spec.keepSpans.some(([a, b]) => b - a > 2_000_000 && b - a <= AMBIENT_CORE.core + 1), JSON.stringify(spec.keepSpans));
-  assert.ok(!spec.cutSpans.some((c) => /one beat per quiet stretch/.test(c.reason)), "both action beats kept");
-  assert.equal(spec.ambience.length, act.length);
+  assert.ok(longest(spec) > longest(old) && longest(spec) <= AMBIENT_CORE.lead + 1_000_000 + AMBIENT_CORE.tail + 1, JSON.stringify([old.keepSpans, spec.keepSpans]));
+  assert.ok(act.every((m) => !spec.cutSpans.some((c) => c.fromUs === m.s && c.toUs === m.e)), "the heard action beats, one after another");
+  assert.ok(spec.ambience.length >= act.length);
+  // A quiet action shot (picture only) stays a short beat: kept long it would be dead air again (01's vlog) — its
+  // sound is still kept under the clean-up.
+  const q = momentsWithLinks({ words: TW, events: TQ, durationUs: 66 * US });
+  const qs = executionSpec({ order: q.moments.map((m) => m.n), hook: null, length: "full" }, q.moments, TW, { ambience: true });
+  assert.ok(qs.keepSpans.every(([a, b]) => b - a <= 2_000_000), JSON.stringify(qs.keepSpans));
+  assert.ok(qs.ambience.length >= 1);
   assert.equal(spec.audio, undefined, "a talking video keeps its clean-up");
   // In the plan: SOURCE spans of the real file, under the clean-up — and the plan validates.
   const r = directPlan({ mediaId: "media-1", words: TW, wordsCorrected: true, durationUs: 66 * US, track: [], spec });
