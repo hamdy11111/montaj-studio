@@ -132,7 +132,7 @@ Read, never edited: `src/core/speech.js` (retakeGroups, fillers), `src/core/poli
 opensmile 2.6.0, mediapipe 1.1.1, onnxruntime-gpu 1.31, opencv-python-headless 5.0, librosa, soundfile, scipy,
 transformers 5.20.2, accelerate, safetensors.
 
-`runtime\models\takes\` (≈ 190 MB):
+`runtime\models\takes\` (183 MB):
 
 | model | source (official) | licence | size |
 |---|---|---|---|
@@ -207,19 +207,19 @@ For the installed app the venv and models must be reachable from `%APPDATA%\Mont
 Removed (nothing in `src/`, `bench/` or `scripts/` uses them; no links inside; all mine):
 - the session scratchpad: the synthetic test media (`synthetic05.mp4` + its clean/degraded parts, two "published"
   WAVs cut from 01's raw audio), worker/judge job and output files, debug crops, logs — 48 MB;
-- `runtime	akes-cache\` — the feature and fingerprint cache of the test runs (21 KB; recreated on demand);
-- `runtime\models	akes\dnsmos\model_v8.onnx` (DNSMOS P.808, not used) and `dnsmos_local.py` (reference script) — 0.2 MB;
-- the empty bench pick store `النتائجest-take\picks\` and the `gdown` package in `runtime	akes` (only used for a
+- `runtime\takes-cache\` — the feature and fingerprint cache of the test runs (21 KB; recreated on demand);
+- `runtime\models\takes\dnsmos\model_v8.onnx` (DNSMOS P.808, not used) and `dnsmos_local.py` (reference script) — 0.2 MB;
+- the empty bench pick store `النتائج\best-take\picks\` and the `gdown` package in `runtime\takes` (only used for a
   failed L2CS download attempt);
 - `src/services/takes/workers/__pycache__` in the worktree.
 
 Kept (used by the code or meant for the user):
-- `runtime	akes` — the venv the workers run in: 4.1 GB;
-- `runtime\models	akes` — DNSMOS, MediaPipe, LibreFace, L2CS, YuNet: 183 MB;
-- `montaj-bench\النتائجest-take\` — the six `*.takes.json`, the pick page, `measure.json`, `judge-check.json`,
+- `runtime\takes` — the venv the workers run in: 4.1 GB;
+- `runtime\models\takes` — DNSMOS, MediaPipe, LibreFace, L2CS, YuNet: 183 MB;
+- `montaj-bench\النتائج\best-take\` — the six `*.takes.json`, the pick page, `measure.json`, `judge-check.json`,
   `اقرأني.md`: ~60 KB;
-- the worktree `D:\capcut new\worktreesest-take` (branch not merged yet) with its junctions `runtime`,
-  `node_modules`, `src\servicessr\models` and the git-ignored `npm run build:graphics` output the tests need.
+- the worktree `D:\capcut new\worktrees\best-take` (branch not merged yet) with its junctions `runtime`,
+  `node_modules`, `src\services\asr\models` and the git-ignored `npm run build:graphics` output the tests need.
   When the branch is merged: unlink the three junctions first (`rmdir`), then remove the worktree.
 
 Shared caches, reported only (not deleted): the pip cache (`%LOCALAPPDATA%\pip\cache`, 14 GB in total; this phase
