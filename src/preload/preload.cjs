@@ -8,6 +8,7 @@ const EVENTS = new Set(["export:progress", "export:done", "export:error", "media
   "director:progress", "derived:progress", "matte:ready", "stab:ready", "asr:setup", "dub:progress", "dub:setup", "update:status", "music:setup", "music:job", "music:engine", "video:setup", "video:job", "video:engine",
   "imagegen:engine"]);
 EVENTS.add("perception:progress"); // perception (Phase 4)
+EVENTS.add("links:progress"); // cause ↔ reaction links (Phase 6)
 
 contextBridge.exposeInMainWorld("api", {
   async call(method, ...args) {
