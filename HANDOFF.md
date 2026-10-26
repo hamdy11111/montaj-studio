@@ -234,6 +234,39 @@ its question ("the exact moment") is partly covered here by the grounded frame c
 cause timing turns out to be the bottleneck once the user's labels exist. No new venv: the worker runs in
 `runtime\perception`.
 
+## Disk
+
+Cleaned up on 2026-10-26, following `D:\capcut new\CLAUDE.md`. Before deleting anything I checked the code reads only
+`answers.<engine>.json` and `links*.json` from the cache, that no links or junctions sit inside it, and that no
+other session uses it.
+
+**Removed:**
+- `runtime\links-cache\<hash>\frames\` (448-px keyframes and ≤ 12 s WAV clips, which the worker extracts again when
+  it needs them).
+- The worker's intermediate `*-frames-*.json` / `*-verify-*.json` / `*.job.json` files.
+- The answer caches in the old per-run format (`answers.<12 hex>.json`), which no code reads any more.
+
+That is 2,612 files, 80.4 MB. Afterwards I re-scored all six cases from the cache with the same results and no GPU.
+
+My own scratch files went the same way: the 2 fps contact sheets, the frame strips and the decoded frames, which were
+derived from the raws (the raws themselves were never copied).
+
+The download temp files (`.part`, `.done`) were consumed: each file was renamed into place once its SHA-256 matched.
+
+**Kept:**
+
+| What | Where | Size | Why |
+|---|---|---|---|
+| Qwen3-Omni-30B-A3B Q4_K_M + mmproj | `D:\capcut new\montaj-studio\runtime\models\perception\qwen3-omni-30b-a3b\` | 19.9 GB (18.56 + 1.33) | Wired into the code: `verify_links.py` engine `qwen3-omni` / `both`, and perception's `window_check.py` |
+| Answers + documents cache | `runtime\links-cache\` | 1.9 MB | `analyze()` re-scores from it and `cached()` reads it |
+| Results for the user | `montaj-bench\النتائج\links\` | 2.4 MB | `index.html`, the labelling pages, the documents, my labels, the v1 / no-check / both comparisons the HANDOFF numbers come from |
+| Graphics build of this worktree | `src\graphics\build`, `src\renderer\assets\graphics` | 26 MB, git-ignored | Needed to run the app here; it goes when the merged worktree is removed (`cleanup.mjs --worktrees`) |
+
+The worktree's `runtime`, `node_modules` and `src\services\asr\models` are junctions to the main checkout. Unlink
+them first if the worktree folder is deleted by hand.
+
+Qwen3.6-35B-A3B (17.3 GB) is perception's copy and was only reused, never copied.
+
 ## Open risks / needs
 
 - **The measurement is tiny and mine, not the user's**: 8 real reactions / 3 visible causes on 2 files, labelled from
