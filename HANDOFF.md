@@ -120,7 +120,7 @@ Results: `D:\capcut new\montaj-bench\النتائج\director2\` (Arabic summary 
 - No npm packages, no models, no downloads. `align.py` and `fuse.js` (perception) are used as they are.
 
 ## Tests
-- `npm test` in the worktree: **260 / 260** (397ac7b: 245).
+- `npm test` in the worktree: **260 / 260** before merging `main` (397ac7b: 245), **281 / 281** after.
 - The combination with `r4-audio-export` (merged uncommitted in a throwaway worktree): **267 / 267**. The only merge
   conflict is the i18n append blocks (keep both).
 - `director2.test.js` covers:
@@ -148,6 +148,11 @@ All in `D:\capcut new\montaj-bench\النتائج\director2\` (Arabic: `اقرأ
   - `rules\` is this branch alone. The export has no `setKeepAmbience`, so the old work-arounds apply.
   - `keep-ambience\` is this branch with `r4-audio-export` merged uncommitted in a throwaway worktree (since deleted).
 - **Re-verified:** `reverify2.mjs` ran the final verifier on every export, with the bench profile's own words.
+- **After merging `main` into this branch** (`fd03abe`: audio-export, asr-ab, ai-setup; 281 / 281 tests), 02 and 05
+  were run once more on the merged code (`merged\`). The numbers match `keep-ambience\` exactly:
+  - 02: 5/6, −14.47 LUFS, 0 dead air, 15 spans;
+  - 05: 6/6, 0 dead air, opens at 44 %, 32 spans, «action sound kept (32)» in the applied steps.
+  - The old work-arounds are off by themselves, since `setKeepAmbience` exists now.
 
 | case | phase 7 | rules | + keepAmbience |
 |---|---|---|---|
@@ -199,12 +204,12 @@ All in `D:\capcut new\montaj-bench\النتائج\director2\` (Arabic: `اقرأ
   notes list the pairs)?
 
 ## Needs from other phases / the coordinator
-- **audio-export:** nothing more. The hand-over is wired, and with their branch merged the director uses it at once
-  (measured above).
+- **audio-export:** nothing more. Their branch is in `main` and merged into this one; the hand-over is measured above.
 - **perception (`ai-setup` owns it now):**
   - per-identity face embeddings (above);
   - a public `runWorker` (or `align(audioFile, asr)`) would let `alignExport` drop its own small runner.
-- **Merge note:** `i18n.js` conflicts only as two appended blocks.
+- **Merge note:** `main` is already merged into this branch (the i18n append blocks kept, no key defined twice), so
+  merging it back should be clean.
 
 ## Open risks
 - **The verifier catches cut word endings, not cut beginnings:**
@@ -230,6 +235,8 @@ junctions or links inside, no reference in `src/`, `bench/`, `scripts/`.
 - Intermediate exports whose numbers equal phase 7's: `rules\02/03/04/06.mp4` (~597 MB) and
   `keep-ambience\03/04.mp4` (~355 MB). Phase 7's own videos stay in `director\rules\`.
 - My first, stopped bench run's partial files (01's export and plan).
+- The merged-code check's two exports (same numbers as `keep-ambience` / `05`, which are kept) and its profile
+  `%TEMP%\montaj-director2-merged-ud`.
 
 **Kept** (`montaj-bench\النتائج\director2\`, 0.93 GB):
 - `rules\` 332 MB: `01-فلوق.mp4` (the line to listen to), `05-شرح.mp4` (no spoiler), and the plans, verify and quality
