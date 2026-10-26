@@ -112,3 +112,31 @@ Local speech recognition and the person cut-out ("text behind the person") run w
 (Settings › Providers). These packages are not part of the installer: faster-whisper (MIT) and its Whisper models
 (MIT), MediaPipe (Apache 2.0), OpenCV (`opencv-python`, Apache 2.0) and NumPy (BSD-3-Clause).
 
+
+## Graphics layer (phase 3: Remotion graphics, VFX library)
+
+Bundled in the installer (the prebuilt graphics bundle `src/graphics/build/remotion`, the editor's Player module
+`src/renderer/js/editor/graphicsPlayer.js`, and the renderer):
+
+| Component | Version | License | Where | Source |
+|---|---|---|---|---|
+| Remotion (`remotion`, `@remotion/renderer`, `@remotion/player`, `@remotion/bundler` at build time, `@remotion/gsap`, `@remotion/rough-notation`, `@remotion/motion-blur`, `@remotion/transitions`, `@remotion/paths`, `@remotion/shapes`, `@remotion/lottie`, `@remotion/animated-emoji`, `@remotion/fonts`, `@remotion/layout-utils`, `@remotion/noise`) | 4.0.538 | **Remotion License** — free for individuals and companies of up to 3 people (this app is for personal use); larger companies need a company license | `node_modules/@remotion/*`, the bundles above | https://www.remotion.dev/license |
+| Remotion compositor (`@remotion/compositor-win32-x64-msvc`, includes an FFmpeg build) | 4.0.538 | Remotion License; its FFmpeg under the LGPL/GPL terms stated in the package | `resources/app.asar.unpacked/node_modules/@remotion/compositor-win32-x64-msvc` | https://github.com/remotion-dev/remotion |
+| React, React DOM | 18.3.1 | MIT | inside the bundles | https://react.dev |
+| GSAP | 3.15.0 | GSAP Standard "no charge" License (free, including commercial use) | inside the bundles | https://gsap.com/standard-license |
+| lottie-web | 5.13.0 | MIT | inside the bundles | https://github.com/airbnb/lottie-web |
+| Rough.js (via `@remotion/rough-notation`) | 4.6.6 | MIT | inside the bundles | https://github.com/rough-stuff/rough |
+
+Downloaded on request, not in the installer (`npm run setup:graphics` or the app's graphics setup):
+
+| Item | License | Where | Source |
+|---|---|---|---|
+| Chrome Headless Shell 157.0.8080.0 (win64, ~280 MB unpacked) — the browser Remotion renders with | Chromium / Chrome for Testing terms (BSD-style, third-party notices inside its folder) | `runtime/remotion/chrome-headless-shell-157.0.8080.0/` | https://storage.googleapis.com/chrome-for-testing-public/ |
+
+The asset library lives outside the app and git (`D:\capcut new\assets-library`):
+
+| Item | License | Where | Source |
+|---|---|---|---|
+| Noto Animated Emoji, 80 Lottie files | CC BY 4.0 (Google) — credit "Animated emoji: Noto Emoji Animation by Google, CC BY 4.0" | `assets-library/emoji/noto-lottie/` | https://googlefonts.github.io/noto-emoji-animation/ |
+| Noto Animated Emoji as transparent video, 30 files | CC BY 4.0 (Google) | `assets-library/emoji/animated-webm/` | https://github.com/remotion-dev/animated-emoji |
+| VFX/overlay clips (smoke, fire, sparks, light leaks, ink, bubbles…), 46 clips | Mixkit Stock Video Free License (each clip's licence — Free or Restricted — is in `vfx/index.json`) | `assets-library/vfx/<category>/` | https://mixkit.co/license/#videoFree |

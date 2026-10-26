@@ -3,6 +3,7 @@
 // segment with text.graphic = { template, params } drawn full-frame (W×H, transparent) at its local time, so
 // positions are part of the template parameters rather than the segment transform.
 import { US } from "./util.js";
+import { KIT_TEMPLATES } from "./graphicsKit.js";
 
 const str = (title, def = "", max = 120) => ({ type: "string", maxLength: max, default: def, title });
 const color = (title, def) => ({ type: "string", pattern: "^#[0-9A-Fa-f]{6}$", default: def, title });
@@ -149,6 +150,10 @@ export const GRAPHIC_TEMPLATES = {
   },
 };
 
+// The Remotion kit (core/graphicsKit.js): same template shape, engine "remotion" — drawn by React components and
+// rendered to a transparent clip at export (src/graphics), not by the canvas rasterizer below.
+Object.assign(GRAPHIC_TEMPLATES, KIT_TEMPLATES);
+
 export const GRAPHIC_TEMPLATE_IDS = Object.keys(GRAPHIC_TEMPLATES);
 
 /** Emoji characters → bundled 3D emoji (assets/emoji/<id>.png). */
@@ -198,6 +203,8 @@ export function graphicStates(g, durationUs, fps = 30) {
   const FRAME = US / fps;
   const n = Math.max(1, Math.round(durationUs / FRAME));
   if (!tpl) return [{ fromUs: 0, toUs: durationUs, key: "none", tUs: 0 }];
+  // Remotion graphics are not drawn state by state: one state (the editor shows the Player, the export a clip).
+  if (tpl.engine === "remotion") return [{ fromUs: 0, toUs: durationUs, key: "remotion", tUs: 0 }];
   const inN = Math.ceil(Math.min(tpl.inUs, durationUs / 2) / FRAME), outN = Math.ceil(Math.min(tpl.outUs, durationUs / 2) / FRAME);
   const states = [];
   for (let i = 0; i < n; i++) {

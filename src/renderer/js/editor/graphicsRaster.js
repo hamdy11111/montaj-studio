@@ -5,6 +5,7 @@
 import { GRAPHIC_TEMPLATES, EMOJI_ALIASES, graphicParams, graphicStates, prog, EASE, clamp01, subjectAt, freeSide } from "../../core/graphics.js";
 import { fontStack } from "../../core/fonts.js";
 import { US } from "../../core/util.js";
+import { layerState, NUM } from "../../core/layerMath.js";
 
 const AR = /[؀-ۿ]/;
 const assets = new Map(); // key → HTMLImageElement (loaded) | Promise
@@ -18,6 +19,13 @@ const iconKey = (name, color) => `icon:${name}:${color}`;
 
 /** Load the emoji/icon images a graphic needs (resolves when ready; missing assets are skipped). */
 export async function preloadGraphic(g) {
+  if (GRAPHIC_TEMPLATES[g?.template]?.engine === "remotion") { // drawn by the Remotion Player layer below; its poster for tiles
+    const k = `poster:${g.template}`;
+    if (!assets.has(k)) assets.set(k, loadImage(`assets/graphics/${g.template}.png`).then((im) => { assets.set(k, im); }, () => { assets.set(k, null); }));
+    const v = assets.get(k);
+    if (v && typeof v.then === "function") await v;
+    return;
+  }
   const p = graphicParams(g);
   const want = (k, make) => {
     if (!assets.has(k)) assets.set(k, make().then((im) => { assets.set(k, im); }, () => { assets.set(k, null); }));
@@ -587,6 +595,16 @@ export function graphicCanvas(graphic, W, H, tUs, durationUs) {
   const c = document.createElement("canvas");
   c.width = Math.max(2, Math.round(W)); c.height = Math.max(2, Math.round(H));
   const tpl = GRAPHIC_TEMPLATES[graphic?.template];
+  if (tpl?.engine === "remotion") {
+    // On the preview canvas (one state, tUs 0) a Remotion graphic is transparent — the Player layer shows it. A tile
+    // asks for a moment inside it (tUs > 0): the template's prerendered poster, or its name when there is none.
+    if (tUs > 0) {
+      const g = c.getContext("2d"), im = asset(`poster:${graphic.template}`);
+      if (im) { const s = Math.min(c.width / im.width, c.height / im.height); g.drawImage(im, (c.width - im.width * s) / 2, (c.height - im.height * s) / 2, im.width * s, im.height * s); }
+      else { g.fillStyle = "#FFD60A"; g.font = `700 ${Math.round(c.height * 0.14)}px ${fontStack("Cairo")}`; g.textAlign = "center"; g.textBaseline = "middle"; g.direction = "rtl"; g.fillText(tpl.ar, c.width / 2, c.height / 2); }
+    }
+    return c;
+  }
   const draw = DRAW[graphic?.template];
   if (!tpl || !draw) return c;
   const g = c.getContext("2d");
@@ -597,6 +615,8 @@ export function graphicCanvas(graphic, W, H, tUs, durationUs) {
 
 /** Export: every distinct frame state as a PNG plus the timed sequence ({ caption: true, images, frames }). */
 export async function graphicFrames(graphic, W, H, durationUs, fps) {
+  // Remotion graphics are rendered by the main process into a transparent clip (src/graphics/render.js), not here.
+  if (GRAPHIC_TEMPLATES[graphic?.template]?.engine === "remotion") return { remotion: true };
   await preloadGraphic(graphic);
   const states = graphicStates(graphic, durationUs, fps);
   const index = new Map(), images = [], frames = [];
@@ -612,3 +632,92 @@ export function graphicStateAt(graphic, durationUs, fps, tUs) {
   const states = graphicStates(graphic, durationUs, fps);
   return states.find((s) => tUs >= s.fromUs && tUs < s.toUs) || states[states.length - 1];
 }
+
+// ------------------------------------------------------------------ Remotion graphics in the preview
+// Kit graphics (engine "remotion", core/graphicsKit.js) are not drawn on the canvas: each visible one is a Remotion
+// Player (graphicsPlayer.js, built from src/graphics/preview) laid over the preview canvas and seeked to the playhead
+// on every preview frame — the same React component the export renders, so the preview is the export. The layer
+// follows the segment's transform (position, scale, rotation, opacity, blend mode). Approximation: these graphics
+// show above every canvas layer (a clip on a higher track does not cover them in the preview; it does in the export).
+// The layer attaches itself to the editor's Player (installRemotionPreview, called once below) after each render.
+
+let playerModule = null, playerModuleFailed = false;
+function loadPlayerModule() {
+  if (playerModule || playerModuleFailed) return playerModule;
+  playerModule = import("./graphicsPlayer.js").catch((e) => { playerModuleFailed = true; console.warn("graphics Player module missing (npm run build:graphics)", e); return null; });
+  return playerModule;
+}
+
+class RemotionLayer {
+  constructor(player) {
+    this.player = player;
+    this.root = document.createElement("div");
+    this.root.className = "remotion-layer";
+    Object.assign(this.root.style, { position: "absolute", left: "0", top: "0", pointerEvents: "none", overflow: "hidden" });
+    player.stage.insertBefore(this.root, player.overlay); // above the picture, under the selection handles
+    this.items = new Map(); // segId → { host, ctl, key, lastUsed }
+    this.mod = null;
+    loadPlayerModule()?.then((m) => { this.mod = m; if (m) player.invalidate(); });
+  }
+
+  sync() {
+    const p = this.player, tl = p.ed.tl();
+    const cw = p.canvas.offsetWidth, ch = p.canvas.offsetHeight;
+    Object.assign(this.root.style, { left: `${p.canvas.offsetLeft}px`, top: `${p.canvas.offsetTop}px`, width: `${cw}px`, height: `${ch}px` });
+    const seen = new Set();
+    if (tl && this.mod) {
+      const fps = tl.fps || 30, t = p.timeUs, k = cw / Math.max(1, p.W);
+      const tracks = [...tl.tracks].sort((a, b) => a.order - b.order);
+      let z = 0;
+      for (const track of tracks) {
+        if (track.hidden) continue;
+        for (const seg of track.segments) {
+          const gr = seg.kind === "text" && !seg.disabled ? seg.text?.graphic : null;
+          if (!gr || GRAPHIC_TEMPLATES[gr.template]?.engine !== "remotion" || t < seg.start || t >= seg.start + seg.duration) continue;
+          seen.add(seg.id);
+          const g = { template: gr.template, params: gr.params || {}, pack: gr.pack || "punchy", width: tl.canvas.width, height: tl.canvas.height, fps, durationInFrames: Math.max(1, Math.round((seg.duration / US) * fps)) };
+          const key = JSON.stringify(g);
+          let it = this.items.get(seg.id);
+          if (!it) {
+            const host = document.createElement("div");
+            Object.assign(host.style, { position: "absolute", inset: "0", transformOrigin: "50% 50%" });
+            this.root.append(host);
+            it = { host, ctl: this.mod.mountGraphic(host, g), key };
+            this.items.set(seg.id, it);
+          } else if (it.key !== key) { it.ctl.update(g); it.key = key; }
+          // The segment's own transform, in CSS pixels (layerMath gives canvas pixels).
+          const st = layerState(NUM, seg, (t - seg.start) / US, { W: p.W, H: p.H });
+          Object.assign(it.host.style, {
+            display: "block", zIndex: String(++z), opacity: String(st.opacity),
+            transform: `translate(${st.x * k}px, ${st.y * k}px) rotate(${st.rotation}deg) scale(${st.scaleX}, ${st.scaleY})`,
+            mixBlendMode: { add: "plus-lighter", normal: "normal" }[seg.transform?.blend] || seg.transform?.blend || "normal",
+          });
+          it.ctl.seek(Math.floor(((t - seg.start) / US) * fps + 1e-6));
+          it.lastUsed = performance.now();
+        }
+      }
+    }
+    for (const [id, it] of this.items) {
+      if (seen.has(id)) continue;
+      it.host.style.display = "none";
+      if (performance.now() - (it.lastUsed || 0) > 20_000) { it.ctl.destroy(); it.host.remove(); this.items.delete(id); } // unused for a while
+    }
+  }
+
+  destroy() { for (const it of this.items.values()) it.ctl.destroy(); this.root.remove(); this.items.clear(); }
+}
+
+/** Attach the Remotion layer to the editor's Player class: after each canvas render, the layer follows. */
+export function installRemotionPreview(PlayerClass) {
+  if (!PlayerClass || PlayerClass.prototype.__remotionLayer) return;
+  const render = PlayerClass.prototype.render, destroy = PlayerClass.prototype.destroy;
+  PlayerClass.prototype.__remotionLayer = true;
+  PlayerClass.prototype.render = function (...a) {
+    const r = render.apply(this, a);
+    try { (this.remotionLayer ||= new RemotionLayer(this)).sync(); } catch (e) { console.error("remotion layer", e); }
+    return r;
+  };
+  PlayerClass.prototype.destroy = function (...a) { this.remotionLayer?.destroy(); this.remotionLayer = null; return destroy.apply(this, a); };
+}
+// player.js imports this module, so the Player class exists once that import has finished.
+if (typeof document !== "undefined") import("./player.js").then((m) => installRemotionPreview(m.Player)).catch(() => {});

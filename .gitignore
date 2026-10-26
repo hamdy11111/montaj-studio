@@ -9,3 +9,9 @@ src/services/asr/models/*.nemo
 runtime/
 __pycache__/
 *.pyc
+
+# Graphics layer (phase 3): build outputs of npm run build:graphics
+src/graphics/build/
+src/renderer/js/editor/graphicsPlayer.js
+src/renderer/js/editor/graphicsPlayer.js.LEGAL.txt
+src/renderer/assets/graphics/
