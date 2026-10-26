@@ -84,7 +84,7 @@ export class ImagegenService {
     const llm = new LlamaServer({ runtime: path.dirname(mediaRuntime(this.paths.root).dir), log: this.log, ctx: 4096 });
     try {
       await llm.start();
-      const ask = `Rewrite this request as ONE detailed English paragraph (60-120 words) describing the finished photo for an image generator: subject, setting, light, lens, composition, colours. ${transparent ? "The subject is isolated on a transparent background (a sticker)." : ""} Never include any written text, letters or signs in the image. Request: «${prompt}». Answer with the paragraph only.`;
+      const ask = `Rewrite this request as ONE detailed English paragraph (60-120 words) describing the finished photo for an image generator: subject, setting, light, lens, composition, colours. ${transparent ? "The subject is isolated on a transparent background (a sticker)." : ""} Never mention writing, letters, words, calligraphy, logos or what a sign says: any sign or label in the scene is blank. Request: «${prompt}». Answer with the paragraph only.`;
       return (await llm.chat(ask, { maxTokens: 300, temperature: 0.4 })).trim().replace(/^["']|["']$/g, "");
     } finally { llm.stop(); }
   }
@@ -122,7 +122,7 @@ export class ImagegenService {
     // An Arabic request goes through the upsampler, which writes it in English (a model never sees Arabic letters).
     if (/[؀-ۿ]/.test(prompt)) upsample = true;
     if (upsample) { upsampled = await this.withGpu("imagegen-upsample", () => this.upsample(prompt, { transparent })); text = upsampled; }
-    const clean = cleanPrompt(text, { transparent });
+    const clean = cleanPrompt(text, { transparent, blankSigns: /[؀-ۿ]/.test(prompt) });
     const size = sizeFor(width, height, megapixels);
     const prefix = `montaj/${model}-${Date.now()}`;
     const g = model === "zimage" ? zimageGraph({ prompt: clean, ...size, seed, prefix }) : qwenGraph({ prompt: clean, ...size, seed, prefix });

@@ -24,6 +24,9 @@ test("prompts: Arabic script is removed (no model writes it), 'no text' is asked
   const sign = cleanPrompt("A shop sign that says «مطبخ ماما» above a door");
   assert.ok(!/says/.test(sign), "the words introducing the writing go too (the model would write them)");
   assert.match(sign, /^A shop sign above a door\. Every sign, label, screen and surface is blank/);
+  const up = cleanPrompt("A street with a small restaurant. Above the door hangs a sign displaying Arabic calligraphy in gold. Warm light.", { blankSigns: true });
+  assert.ok(!/calligraphy/.test(up), "a sentence about writing is dropped");
+  assert.match(up, /^A street with a small restaurant\. Warm light\. Every sign/);
 });
 
 test("sizes: multiples of 32 near the aspect at ~1 MP; portrait stays portrait", () => {

@@ -21,12 +21,18 @@ const AR = /[؀-ۿݐ-ݿࢠ-ࣿﭐ-﷿ﹰ-﻿]/;
 const AR_RUN = /(?:\s*(?:that|which)?\s*(?:says|reads|saying|reading|written|with the (?:text|words?)|labell?ed|titled|showing)\s*)?["«“']?\s*[؀-ۿݐ-ݿࢠ-ࣿﭐ-﷿ﹰ-﻿][؀-ۿݐ-ݿࢠ-ࣿﭐ-﷿ﹰ-﻿\s.,!؟?،]*["»”']?/g;
 
 /** A prompt the models may receive: no Arabic script (it would come out as fake letters), "no text" asked for. */
-export function cleanPrompt(prompt, { transparent = false, allowText = false } = {}) {
-  const raw = String(prompt || "");
-  const hadArabic = AR.test(raw);
-  let p = raw.replace(AR_RUN, " ").replace(/["«»“”']\s*["«»“”']/g, " ").replace(/\s+/g, " ").replace(/\s+([,.])/g, "$1").replace(/^[\s,.]+/, "").trim();
+const WRITING = /\b(calligraph\w*|letter(?:s|ing)|inscri\w*|typograph\w*|script|text|words?|writing|written|reads|reading|says|saying|caption\w*|logo|slogan|title)\b/i;
+
+export function cleanPrompt(prompt, { transparent = false, allowText = false, blankSigns = false } = {}) {
+  let raw = String(prompt || "");
+  const hadArabic = AR.test(raw) || blankSigns;
+  // Arabic runs go first (AR_RUN); then any sentence about writing in the picture is dropped — an upsampler's "a sign
+  // displaying Arabic calligraphy" made the model draw fake Arabic letters (tested). "No text" is asked below.
+  raw = raw.replace(AR_RUN, " ").replace(/["«»“”']\s*["«»“”']/g, " ").replace(/\s+/g, " ").replace(/\s+([,.])/g, "$1").trim();
+  if (!allowText) raw = raw.split(/(?<=[.!?])\s+/).filter((x) => !WRITING.test(x) || /\b(?:no|without) (?:any )?(?:text|letters|words|writing)\b/i.test(x)).join(" ");
+  let p = raw.replace(/^[\s,.]+/, "").trim();
   if (!p) throw Object.assign(new Error("empty prompt after removing Arabic text"), { code: "err.imagePromptEmpty" });
-  if (hadArabic) p = `${p}. Every sign, label, screen and surface is blank, with no writing at all.`;
+  if (hadArabic) p = `${p.replace(/[.\s]+$/, "")}. Every sign, label, screen and surface is blank, with no writing at all.`;
   if (transparent && !/alpha channel|transparent background/i.test(p)) p = `${p} ${RGBA_PHRASE}`;
   if (!allowText && !/no text/i.test(p)) p = `${p} ${NO_TEXT}.`;
   return p;

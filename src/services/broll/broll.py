@@ -12,7 +12,7 @@
          {"op": "search", "en": [...], "ar": [...], "k": 100}  -> {"lists": {model: [[shot, score], ...]}}
              SigLIP2 gets the English texts; MetaCLIP 2, Qwen3-VL and bge-m3 get the English and the Arabic ones; a
              shot's score is its best keyframe/text pair.
-         {"op": "rerank", "query": "...", "shots": [ids], "frames": 2} -> {"scores": [...]}   (Qwen3-VL-Reranker)
+         {"op": "rerank", "query": "...", "shots": [ids]} -> {"scores": [...]}   (Qwen3-VL-Reranker, keyframe + caption)
          {"op": "reload"} re-reads the index files.
 """
 import argparse, gc, io, json, os, subprocess, sys, time
@@ -315,13 +315,14 @@ def cmd_serve(a):
             if req["op"] == "rerank":
                 idx = {s["id"]: s for s in read_index(a.index)["shots"]}
                 rr = model("reranker")["rr"]
-                nf = int(req.get("frames", 2))
+                nf = int(req.get("frames", 1))
                 docs = []
                 for sid in req["shots"]:
                     s = idx[sid]
                     fr = [os.path.join(a.index, f) for f in s["frames"]]
-                    pick = fr[1:3] if nf == 2 else fr
-                    d = {"video": pick} if len(pick) > 1 else {"image": pick[0]}
+                    # One keyframe (+ the caption): the published reranker script fails on video documents with
+                    # transformers 5.8 (token-type indexing in Qwen3VL.forward); "frames": 4 asks for the video anyway.
+                    d = {"video": fr} if nf == 4 else {"image": fr[1 if nf != 3 else 2]}
                     if s.get("caption", {}).get("en"):
                         d["text"] = s["caption"]["en"]
                     docs.append(d)
