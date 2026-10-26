@@ -44,7 +44,9 @@ test("catalog: gated and locally made sets are import-only; the layers borrow wh
   const links = layerSets("links");
   assert.deepEqual(links.map((s) => s.key), ["perception/vision", "perception/omni"]);
   assert.ok(links.every((s) => s.borrowed));
-  assert.ok(layerSets("broll").some((s) => s.key === "perception/vision" && s.borrowed));
+  // B-roll captions: Qwen3.5 (the dubbing translator + this projector), measured better than Qwen3.6 in round 4
+  assert.ok(layerSets("broll").some((s) => s.key === "broll/captioner" && !s.borrowed));
+  assert.ok(LAYERS.find((l) => l.id === "broll").depends.includes("translator"));
   for (const L of LAYERS) assert.ok(ENVS[L.env], L.id);
   for (const e of Object.values(ENVS)) assert.ok(fs.existsSync(path.join(AI_SETUP_DIR, e.requirements)), e.requirements);
   assert.ok(CATALOG.generated);

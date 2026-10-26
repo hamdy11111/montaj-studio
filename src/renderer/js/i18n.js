@@ -734,6 +734,8 @@ const D = {
   "ai.dep.asr": ["The Egyptian speech engine", "محرك الكلام المصري"],
   "ai.dep.video": ["The video studio engine", "محرك استوديو توليد الفيديو"],
   "ai.depHow.video": ["Prepare it from «Video generation» › Models", "جهّزه من «توليد الفيديو» › الموديلات"],
+  "ai.dep.translator": ["The dubbing translator Qwen3.5 (writes the B-roll captions)", "مترجم الدبلجة Qwen3.5 (بيكتب وصف لقطات البي-رول)"],
+  "ai.depHow.translator": ["Prepare it from the dubbing studio set-up", "جهّزه من تجهيز استوديو الدبلجة"],
   "ai.install": ["Install", "سطّب"], "ai.openSetup": ["Prepare", "جهّز"],
   "ai.damaged": ["damaged", "تالفة"], "ai.optional": ["optional", "اختياري"], "ai.shared": ["shared", "مشتركة"],
   "ai.vram": ["needs ~{gb} GB of the graphics card", "محتاج ~{gb} جيجا من كارت الشاشة"],

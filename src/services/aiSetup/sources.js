@@ -76,6 +76,10 @@ export const SOURCES = [
         ["rerank", "Qwen3-VL-Reranker-2B (re-ranking the top 30)", "Qwen/Qwen3-VL-Reranker-2B", "4bd860ac4f15ad1897a214615cccc700f8f71818", "Apache-2.0", 7.2],
         ["bge", "bge-m3 (searching the captions)", "BAAI/bge-m3", "5617a9f61b028005a4858fdac845db406aefb181", "MIT", 1.2],
       ].map(([id, name, repo, rev, license, gpuGB]) => ({ id, name, license, gpuGB, src: [{ hf: repo, rev, dir: repo.replace("/", "__"), files: "all" }] })),
+      // The captions and the search expansion: the dubbing translator (Qwen3.5-35B-A3B Q4_K_M, installed by the dubbing
+      // set-up) sees through this projector — measured better than Qwen3.6 on the B-roll test questions (round 4).
+      { id: "captioner", name: "Qwen3.5-35B-A3B vision projector (captions, with the dubbing translator)", license: "Apache-2.0", gpuGB: 19,
+        src: [{ hf: "unsloth/Qwen3.5-35B-A3B-GGUF", rev: "bc014a17be43adabd7066b7a86075ff935c6a4e2", dir: "unsloth__Qwen3.5-35B-A3B-GGUF", files: ["mmproj-F16.gguf"] }] },
     ],
   },
 ];

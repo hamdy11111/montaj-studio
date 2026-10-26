@@ -36,6 +36,7 @@ export const DEPENDS = {
   llama: { what: "llama.cpp b11870 (MIT): runs the Qwen vision models", path: ["llama", process.platform === "win32" ? "llama-server.exe" : "llama-server"], installable: true },
   asr: { what: "the Egyptian speech engine (words for perception)", path: ["asr", process.platform === "win32" ? "Scripts/python.exe" : "bin/python"], setup: "asr" },
   video: { what: "the video studio's runtime (torch + transformers the B-roll index runs on)", path: ["video", process.platform === "win32" ? "Scripts/python.exe" : "bin/python"], setup: "video" },
+  translator: { what: "the dubbing translator Qwen3.5-35B-A3B (it writes the B-roll captions)", path: ["models", "translate", "Qwen3.5-35B-A3B-Q4_K_M.gguf"], setup: "dub" },
 };
 
 const sourceSet = (layer, id) => SOURCES.find((l) => l.layer === layer)?.sets.find((s) => s.id === id) || null;
@@ -49,7 +50,7 @@ export const LAYERS = [
     sets: ["align", "speakers", "audio", "emotion", "shots", "faces", "adaface", "asd", "vision", "omni"] },
   { id: "takes", env: "takes", root: "takes", depends: [], borrows: [], sets: ["voice", "face", "gaze", "judge"], after: ["perception"] },
   { id: "links", env: "perception", root: "perception", depends: ["llama"], borrows: ["perception/vision", "perception/omni"], sets: [], after: ["perception"] },
-  { id: "broll", env: "media", root: "media", depends: ["video", "llama"], borrows: ["perception/vision"], sets: ["siglip2", "metaclip2", "qwen3vlEmb", "rerank", "bge"] },
+  { id: "broll", env: "media", root: "media", depends: ["video", "llama", "translator"], borrows: [], sets: ["siglip2", "metaclip2", "qwen3vlEmb", "rerank", "bge", "captioner"] },
 ];
 export const layerDef = (id) => LAYERS.find((l) => l.id === id) || null;
 

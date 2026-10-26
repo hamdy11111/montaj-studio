@@ -1374,6 +1374,19 @@
       }
      ],
      "bytes": 2310417279
+    },
+    "captioner": {
+     "files": [
+      {
+       "file": "mmproj-F16.gguf",
+       "dir": "unsloth__Qwen3.5-35B-A3B-GGUF",
+       "size": 899283648,
+       "sha256": "a516ab92e8240da4734d68352bdfba84c16e830ee40010b8fac80d69c77272ff",
+       "url": "https://huggingface.co/unsloth/Qwen3.5-35B-A3B-GGUF/resolve/bc014a17be43adabd7066b7a86075ff935c6a4e2/mmproj-F16.gguf",
+       "source": "huggingface.co/unsloth/Qwen3.5-35B-A3B-GGUF@bc014a1"
+      }
+     ],
+     "bytes": 899283648
     }
    }
   }

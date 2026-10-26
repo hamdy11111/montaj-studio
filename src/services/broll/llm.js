@@ -23,9 +23,12 @@ export function findVlm(runtime) {
   const per = path.join(m, "perception");
   const dirs = [per, ...(() => { try { return fs.readdirSync(per).filter((n) => /qwen3\.6/i.test(n) && fs.statSync(path.join(per, n)).isDirectory()).map((n) => path.join(per, n)); } catch { return []; } })()];
   const q36 = dirs.map((d) => ({ name: "Qwen3.6-35B-A3B", model: pick(d, /^Qwen3\.6-35B-A3B.*Q4_K_M.*\.gguf$/i) || pick(d, /^Qwen3\.6-35B-A3B.*\.gguf$/i), mmproj: pick(d, /mmproj.*(3\.6|F16|BF16).*\.gguf$/i) }));
+  // Qwen3.5 (the dubbing translator + its vision projector) first: re-measured in round 4 on the 30 test questions,
+  // its captions and expansions find the right shot more often (R@1 0.90 vs 0.77 with Qwen3.6 doing both, 0.83 with
+  // Qwen3.6 captions only, 0.87 with Qwen3.6 expansions only). Qwen3.6 is the fallback when the translator is missing.
   const candidates = [
-    ...q36,
     { name: "Qwen3.5-35B-A3B", model: path.join(m, "translate", "Qwen3.5-35B-A3B-Q4_K_M.gguf"), mmproj: path.join(m, "media", "unsloth__Qwen3.5-35B-A3B-GGUF", "mmproj-F16.gguf") },
+    ...q36,
   ];
   return candidates.find((c) => c.model && c.mmproj && fs.existsSync(c.model) && fs.existsSync(c.mmproj)) || null;
 }
