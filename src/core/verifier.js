@@ -13,8 +13,8 @@ export const VERIFY = {
   action: { speechShareMax: 0.45, minActionS: 20, keptShareMin: 0.4 }, // a mostly wordless video keeps ≥ 40 % of its action
   tooShort: { minShare: 0.25, minActionS: 30 },                          // ≤ 25 % of the raw while ≥ 30 s of action happened
   hookSec: 3,
-  line: { coverage: 0.6, windowUs: 4_000_000 },
-  joint: { windowUs: 700_000 },
+  line: { coverage: 0.6, lost: 0.34, windowUs: 4_000_000, minAgreement: 0.5 },
+  joint: { windowUs: 700_000, margin: 0.3 },
   loudness: { target: -14, tol: 1.5, truePeakMax: -1 },
   black: { minS: 0.12 }, frozen: { minS: 2.0 },
 };
@@ -76,7 +76,7 @@ export function verifyPlan({ moments = [], links = [], cuts = [], durationUs, tr
  * important(word span) → bool marks lines that must survive (the punch / setup / reaction moments).
  */
 export function expectedSpeech(plan, wordsByMedia, { important = () => false } = {}) {
-  const lines = [], joints = [];
+  const lines = [], joints = [], words = [];
   let t = 0;
   for (const [k, sg] of (plan.segments || []).entries()) {
     const ws = (wordsByMedia[sg.mediaId] || []).filter((w) => (w.startUs + w.endUs) / 2 >= sg.fromUs && (w.startUs + w.endUs) / 2 < sg.toUs);
@@ -86,19 +86,20 @@ export function expectedSpeech(plan, wordsByMedia, { important = () => false } =
     const flush = () => { if (run.length) lines.push({ text: run.map((w) => w.text).join(" "), editFromUs: at(run[0].startUs), editToUs: at(run[run.length - 1].endUs), important: !!important(sg.mediaId, run[0].startUs, run[run.length - 1].endUs), segment: k }); run = []; };
     for (const w of ws) { if (run.length && w.startUs - run[run.length - 1].endUs >= 700_000) flush(); run.push(w); }
     flush();
+    ws.forEach((w, i) => words.push({ text: w.text, editUs: at(w.startUs), joint: (i === 0 && k > 0) || (i === ws.length - 1 && k < (plan.segments || []).length - 1) }));
     if (k) joints.push({ editUs: t, before: joints.pendingBefore ?? null, after: ws[0] ? { text: ws[0].text, editUs: at(ws[0].startUs) } : null, segment: k });
     joints.pendingBefore = ws.length ? { text: ws[ws.length - 1].text, editUs: at(ws[ws.length - 1].endUs) } : null;
     t += sg.toUs - sg.fromUs;
   }
   delete joints.pendingBefore;
-  return { lines, joints, editUs: t };
+  return { lines, joints, words, editUs: t };
 }
 
 /**
  * The output checks. input: { expected (expectedSpeech), outWords: [{ text, startUs, endUs }] (the export
  * re-transcribed, edit time), loudness: { i, tp } (LUFS, dBTP), black: [{ startS, endS }], frozen: [{ startS, endS }],
  * durationS, plannedS }. Returns { checks, passed, ok, stats: { lines, linesFound, important, importantFound,
- * joints, jointsOk } }.
+ * agreement (the share of words the speech model hears again), joints, jointRecall } }.
  */
 export function verifyOutput({ expected, outWords = [], loudness = null, black = [], frozen = [], durationS = null, plannedS = null }, V = VERIFY) {
   const checks = [], passed = [];
@@ -109,32 +110,34 @@ export function verifyOutput({ expected, outWords = [], loudness = null, black =
   const heard = toks.length > 0 || !expected.lines.some((l) => l.text.split(/\s+/).length >= 2);
   if (!heard) add("out.noTranscript", "warn", "the export could not be transcribed: lines and joints not checked", {});
   const near = (a, b) => toks.filter((x) => x.e >= a && x.s <= b).map((x) => x.t);
-  // 1. Every line still said (≥ 60 % of its words found around where it should be). Important ones must be.
+  // The speech model never hears a stretch the same way twice (short and mumbled words above all), so the checks are
+  // measured against its own agreement on this file: the share of all expected words heard again near their place.
+  const heardAt = (w) => { const t = alignToken(w.text); return near(w.editUs - V.joint.windowUs, w.editUs + V.joint.windowUs).some((g) => sameToken(g, t)); };
+  const content = (expected.words || []).filter((w) => alignToken(w.text).length >= 3);
+  const recallOf = (ws) => (ws.length ? ws.filter(heardAt).length / ws.length : null);
+  const agreement = heard ? recallOf(content.filter((w) => !w.joint)) : null;
+  const trusted = agreement !== null && agreement >= V.line.minAgreement;
+  if (heard && !trusted && content.length >= 10) add("out.lowAgreement", "warn", `the speech model hears only ${Math.round(100 * (agreement ?? 0))} % of the words again (noisy sound): lines and joints not judged`, { pct: Math.round(100 * (agreement ?? 0)) });
+  // 1. Every line still said: a line is heard when ≥ 60 % of its words come back near its place; an important line
+  // (≥ 4 words) under a third of its words is lost — that fails.
   let found = 0, impFound = 0;
   const imp = expected.lines.filter((l) => l.important);
   for (const l of heard ? expected.lines : []) {
     const want = l.text.split(/\s+/).map(alignToken).filter(Boolean);
-    if (want.length < 2) { found++; if (l.important) impFound++; continue; }
+    if (want.length < 3) { found++; if (l.important) impFound++; continue; } // a short fragment: not a fair test
     const got = near(l.editFromUs - V.line.windowUs, l.editToUs + V.line.windowUs);
-    const al = alignTokens(want, got);
-    const cov = (al?.matches ?? 0) / want.length;
+    const cov = (alignTokens(want, got)?.matches ?? 0) / want.length;
     if (cov >= V.line.coverage) { found++; if (l.important) impFound++; continue; }
-    add(l.important ? "out.lineMissing" : "out.lineWeak", l.important ? "fail" : "warn", `«${l.text.slice(0, 60)}» is not heard in the export around ${sec(l.editFromUs)} s (${Math.round(100 * cov)} % of its words)`, { text: l.text.slice(0, 60), at: sec(l.editFromUs), pct: Math.round(100 * cov) });
+    const lost = trusted && l.important && want.length >= 4 && cov < V.line.lost;
+    add(lost ? "out.lineMissing" : "out.lineWeak", lost ? "fail" : "warn", `«${l.text.slice(0, 60)}» is not heard in the export around ${sec(l.editFromUs)} s (${Math.round(100 * cov)} % of its words)`, { text: l.text.slice(0, 60), at: sec(l.editFromUs), pct: Math.round(100 * cov) });
   }
   if (!checks.some((c) => c.id === "out.lineMissing")) passed.push("out.lineMissing");
-  // 2. The words on both sides of every joint are heard whole (a cut inside a word loses or garbles it).
-  let jointsOk = 0, jointsChecked = 0;
-  for (const j of heard ? expected.joints : []) {
-    for (const w of [j.before, j.after]) {
-      if (!w || alignToken(w.text).length < 3) continue;
-      jointsChecked++;
-      const got = near(w.editUs - V.joint.windowUs, w.editUs + V.joint.windowUs);
-      if (got.some((g) => sameToken(g, alignToken(w.text)))) jointsOk++;
-      else add("out.jointWord", "warn", `the word «${w.text}» at the joint ${sec(j.editUs)} s is not heard whole`, { word: w.text, at: sec(j.editUs) });
-    }
-  }
-  // Recognition itself misses a word now and then: a joint check fails only when many joints lose their words.
-  if (jointsChecked >= 4 && jointsOk / jointsChecked < 0.6) add("out.cutWords", "fail", `only ${jointsOk} of ${jointsChecked} words at the joints are heard whole`, { ok: jointsOk, of: jointsChecked });
+  // 2. No word cut at a joint: the words on both sides of the joints come back about as often as the other words
+  // (a cut inside a word loses or garbles it, so joints would fall well below the file's own agreement).
+  const jointWords = content.filter((w) => w.joint);
+  const jointRecall = heard ? recallOf(jointWords) : null;
+  for (const w of jointWords.filter((x) => heard && !heardAt(x)).slice(0, 12)) add("out.jointWord", "warn", `the word «${w.text}» at a joint (${sec(w.editUs)} s) is not heard again`, { word: w.text, at: sec(w.editUs) });
+  if (trusted && jointWords.length >= 6 && jointRecall < agreement - V.joint.margin) add("out.cutWords", "fail", `words at the joints come back ${Math.round(100 * jointRecall)} % of the time, the other words ${Math.round(100 * agreement)} %: words are probably cut`, { joint: Math.round(100 * jointRecall), other: Math.round(100 * agreement) });
   else passed.push("out.cutWords");
   // 3. Loudness (the platforms' −14 LUFS) and the true peak.
   if (loudness && Number.isFinite(loudness.i)) {
@@ -150,7 +153,8 @@ export function verifyOutput({ expected, outWords = [], loudness = null, black =
   for (const f of frozenLong) add("out.frozen", "warn", `the picture does not move ${f.startS.toFixed(1)}–${f.endS.toFixed(1)} s (frozen or duplicated frames)`, { from: f.startS, to: f.endS });
   if (!frozenLong.length) passed.push("out.frozen");
   if (durationS !== null && plannedS !== null && Math.abs(durationS - plannedS) > 0.5) add("out.length", "warn", `the export is ${durationS.toFixed(1)} s, the plan ${plannedS.toFixed(1)} s`, { got: durationS, planned: plannedS });
-  return { checks, passed, ok: !checks.some((c) => c.level === "fail"), stats: { lines: expected.lines.length, linesFound: found, important: imp.length, importantFound: impFound, joints: jointsChecked, jointsOk } };
+  const r2 = (x) => (x === null ? null : Math.round(x * 100) / 100);
+  return { checks, passed, ok: !checks.some((c) => c.level === "fail"), stats: { lines: expected.lines.length, linesFound: found, important: imp.length, importantFound: impFound, agreement: r2(agreement), joints: jointWords.length, jointRecall: r2(jointRecall) } };
 }
 
 /** ffmpeg's blackdetect / freezedetect / ebur128 output → { black, frozen, loudness }. */

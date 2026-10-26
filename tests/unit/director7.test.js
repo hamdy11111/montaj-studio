@@ -225,3 +225,46 @@ test("the planner glue: the schema answer becomes treatments; the graphics ranke
   const saved = process.env.ANTHROPIC_API_KEY; delete process.env.ANTHROPIC_API_KEY;
   try { assert.throws(() => new ClaudeDirectorLLM({}), /claudeKeyMissing/); } finally { if (saved !== undefined) process.env.ANTHROPIC_API_KEY = saved; }
 });
+
+test("found on the 02 challenge: a mostly wordless video keeps its own sound (no voice clean-up) and its action gets cut and angle changes", () => {
+  const { moments, links } = momentsWithLinks(GAME);
+  const t = ruleTreatments(moments, { durationUs: GAME.durationUs, links }).find((x) => x.length === "full");
+  const spec = executionSpec(t, moments, GAME.words);
+  assert.equal(spec.actionVideo, true);
+  assert.deepEqual(spec.audio, { denoise: false, enhanceVoice: false, normalizeLufs: -14 }, "the voice clean-up lowers everything between words: never on a wordless video");
+  const r = directPlan({ mediaId: "media-1", words: GAME.words, wordsCorrected: true, durationUs: GAME.durationUs, track: [], spec });
+  assert.equal(r.plan.audio.denoise, false);
+  // Kept action: never longer than its core, an angle change every ~2.5 s inside it.
+  for (const [a, b] of spec.keepSpans) assert.ok(b - a <= 6.6 * US, `${(b - a) / US} s`);
+  assert.ok(spec.angleBreaks.length >= spec.keepSpans.length * 1.5, `${spec.angleBreaks.length} angle changes`);
+  const shots = shotLengths(r.plan).sort((x, y) => x - y);
+  assert.ok(shots[shots.length - 1] <= 6, `longest shot (the quality target: 6 s) ${shots[shots.length - 1]} s`);
+  // A talking video keeps the clean-up.
+  const talk = Array.from({ length: 40 }, (_, i) => W(`كلمة${i}`, i * 1.4, i * 1.4 + 1.2));
+  const tm = momentsWithLinks({ words: talk, events: [], durationUs: 58 * US });
+  const tt = ruleTreatments(tm.moments, { durationUs: 58 * US })[0];
+  assert.equal(executionSpec(tt, tm.moments, talk).audio, undefined);
+});
+
+test("the output check without a transcript says so (a warning) instead of failing every line", () => {
+  const plan = { segments: [{ mediaId: "a", fromUs: 0, toUs: 4 * US }] };
+  const exp = expectedSpeech(plan, { a: [W("النهارده", 0.2, 0.8), W("هنجرب", 0.9, 1.4), W("اكلة", 1.5, 2.0)] });
+  const v = verifyOutput({ expected: exp, outWords: [], loudness: { i: -14, tp: -2 } });
+  assert.ok(v.ok); assert.deepEqual(v.checks.map((c) => c.id), ["out.noTranscript"]);
+});
+
+test("the joint check is measured against the speech model's own agreement: words lost only at the joints fail", () => {
+  const seg = (k) => ({ mediaId: "a", fromUs: k * 10 * US, toUs: k * 10 * US + 6 * US });
+  const plan = { segments: [seg(0), seg(1), seg(2), seg(3)] };
+  const ws = [];
+  for (let k = 0; k < 4; k++) for (let i = 0; i < 5; i++) ws.push(W(["الجولة", "التانية", "كانت", "صعبة", "جدا"][i] + k, k * 10 + 0.3 + i * 1.1, k * 10 + 1.2 + i * 1.1));
+  const exp = expectedSpeech(plan, { a: ws });
+  const back = (keep) => exp.words.filter(keep).map((w) => ({ text: w.text, startUs: w.editUs, endUs: w.editUs + 500_000 }));
+  const fine = verifyOutput({ expected: exp, outWords: back(() => true) });
+  assert.ok(fine.ok && fine.stats.agreement === 1 && fine.stats.jointRecall === 1);
+  const cut = verifyOutput({ expected: exp, outWords: back((w) => !w.joint) });
+  assert.ok(cut.checks.some((c) => c.id === "out.cutWords" && c.level === "fail"), JSON.stringify(cut.checks.map((c) => c.id)));
+  // A noisy file (the model hears a third of the words again): nothing is judged, it says why.
+  const noisy = verifyOutput({ expected: exp, outWords: back((w, i) => exp.words.indexOf(w) % 3 === 0) });
+  assert.ok(noisy.ok && noisy.checks.some((c) => c.id === "out.lowAgreement"));
+});
