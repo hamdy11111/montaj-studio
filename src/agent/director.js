@@ -26,7 +26,7 @@ import { correctWords } from "../core/speech.js";
 import { US } from "../core/util.js";
 import { eventsOnAxis, momentsWithLinks, ruleTreatments, validateTreatment, executionSpec, takeScorer, reactionOf } from "../core/treatments.js";
 import { rubric, rankTreatments } from "../core/critic.js";
-import { verifyPlan, verifyOutput, expectedSpeech, parseFfmpegChecks, cutSheet } from "../core/verifier.js";
+import { verifyPlan, verifyOutput, expectedSpeech, parseFfmpegChecks, cutSheet, envelope, bestCorrelation, settleLine, soundWindow } from "../core/verifier.js";
 import { applyPlan } from "./editPlan.js";
 
 /** The main-track clips the director works on, laid on the virtual axis, or an error. */
@@ -412,6 +412,7 @@ async function meaningSounds(S, plan, { moments, clips, log, bundled = false }) 
  */
 export async function verifyExport(ctx, timelineId, file, { language = "auto" } = {}) {
   const S = ctx.services;
+  const log = (l) => (S.log ? S.log("director", l) : console.log(`[director] ${l}`));
   const last = LAST.get(timelineId);
   if (!last) throw new AppError("VALIDATION", "err.directorNoRun");
   if (!fs.existsSync(file)) throw new AppError("IO", "err.fileNotFound", { file: path.basename(file) });
@@ -431,5 +432,20 @@ export async function verifyExport(ctx, timelineId, file, { language = "auto" } 
   const expected = expectedSpeech(last.plan, last.wordsByMedia, { important });
   const durationS = om?.durationUs ? om.durationUs / US : null;
   const frozen = [...ff.frozen, ...(ff.openFreezeS !== null && durationS ? [{ startS: ff.openFreezeS, endS: durationS }] : [])];
-  return { ...verifyOutput({ expected, outWords, loudness: ff.loudness, black: ff.black, frozen, durationS, plannedS: expected.editUs / US }), measured: { loudness: ff.loudness, black: ff.black, frozen, words: outWords.length, transcriptError, imported: !!om } };
+  const v = verifyOutput({ expected, outWords, loudness: ff.loudness, black: ff.black, frozen, durationS, plannedS: expected.editUs / US });
+  // A line the model did not hear again: is its SOUND the source's? (the words can be there, heard differently)
+  const pcm = async (f, fromUs, durUs) => { const { stdout } = await run(binaries().ffmpeg, ["-v", "error", "-ss", (fromUs / US).toFixed(3), "-t", (durUs / US).toFixed(3), "-i", f, "-ac", "1", "-ar", "8000", "-f", "s16le", "-"], { timeoutMs: 60_000 }); return new Int16Array(stdout.buffer, stdout.byteOffset, Math.floor(stdout.length / 2)); };
+  let settled = 0;
+  for (const [i, c] of v.checks.entries()) {
+    if ((c.id !== "out.lineMissing" && c.id !== "out.lineWeak") || settled >= 20 || !c.args?.mediaId) continue;
+    try {
+      const src = S.repos.media.get(c.args.mediaId)?.path, w = soundWindow(c.args);
+      if (!src) continue;
+      const r = bestCorrelation(envelope(await pcm(file, w.editFromUs, w.durUs)), envelope(await pcm(src, w.srcFromUs, w.durUs))).r;
+      v.checks[i] = settleLine(c, r); settled++;
+    } catch (e) { log(`verify sound: ${e.message}`); }
+  }
+  v.ok = !v.checks.some((c) => c.level === "fail");
+  if (!v.checks.some((c) => c.id === "out.lineMissing") && !v.passed.includes("out.lineMissing")) v.passed.push("out.lineMissing");
+  return { ...v, measured: { loudness: ff.loudness, black: ff.black, frozen, words: outWords.length, transcriptError, imported: !!om, settledBySound: settled } };
 }

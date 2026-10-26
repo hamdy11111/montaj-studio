@@ -17,6 +17,7 @@ export const VERIFY = {
   joint: { windowUs: 700_000, margin: 0.3 },
   loudness: { target: -14, tol: 1.5, truePeakMax: -1 },
   black: { minS: 0.12 }, frozen: { minS: 2.0 },
+  sound: { same: 0.75, different: 0.6 }, // envelope correlation of an export stretch with its source span
 };
 const sec = (us) => Math.round(us / 1e5) / 10;
 const overlap = (a0, a1, b0, b1) => Math.max(0, Math.min(a1, b1) - Math.max(a0, b0));
@@ -83,7 +84,7 @@ export function expectedSpeech(plan, wordsByMedia, { important = () => false } =
     const at = (src) => t + (src - sg.fromUs);
     // Runs of words with no pause ≥ 0.7 s are one line.
     let run = [];
-    const flush = () => { if (run.length) lines.push({ text: run.map((w) => w.text).join(" "), editFromUs: at(run[0].startUs), editToUs: at(run[run.length - 1].endUs), important: !!important(sg.mediaId, run[0].startUs, run[run.length - 1].endUs), segment: k, first: run[0] === ws[0], last: run[run.length - 1] === ws[ws.length - 1] }); run = []; };
+    const flush = () => { if (run.length) lines.push({ text: run.map((w) => w.text).join(" "), editFromUs: at(run[0].startUs), editToUs: at(run[run.length - 1].endUs), mediaId: sg.mediaId, srcFromUs: run[0].startUs, srcToUs: run[run.length - 1].endUs, segFromUs: t, segToUs: t + (sg.toUs - sg.fromUs), important: !!important(sg.mediaId, run[0].startUs, run[run.length - 1].endUs), segment: k, first: run[0] === ws[0], last: run[run.length - 1] === ws[ws.length - 1] }); run = []; };
     // The sounds the plan adds over this segment (their accent time; a library sound up to ~1.6 s, a bundled one ~1 s).
     for (const x of plan.sfx || []) if (x.mediaId === sg.mediaId && x.atUs >= sg.fromUs && x.atUs < sg.toUs && !sounds.some((y) => y.editUs === at(x.atUs))) sounds.push({ editUs: at(x.atUs), what: x.library?.title || x.sound });
     for (const w of ws) { if (run.length && w.startUs - run[run.length - 1].endUs >= 700_000) flush(); run.push(w); }
@@ -141,7 +142,7 @@ export function verifyOutput({ expected, outWords = [], loudness = null, black =
     const could = l.atJoint === undefined || l.atJoint || l.masked?.length;
     const lost = trusted && l.important && want.length >= 4 && cov < V.line.lost && could;
     const why = l.masked?.length ? ` — under the sound «${l.masked[0]}»` : l.atJoint ? " — next to a cut" : "";
-    add(lost ? "out.lineMissing" : "out.lineWeak", lost ? "fail" : "warn", `«${l.text.slice(0, 60)}» is not heard in the export around ${sec(l.editFromUs)} s (${Math.round(100 * cov)} % of its words)${why}`, { text: l.text.slice(0, 60), at: sec(l.editFromUs), pct: Math.round(100 * cov) });
+    add(lost ? "out.lineMissing" : "out.lineWeak", lost ? "fail" : "warn", `«${l.text.slice(0, 60)}» is not heard in the export around ${sec(l.editFromUs)} s (${Math.round(100 * cov)} % of its words)${why}`, { text: l.text.slice(0, 60), at: sec(l.editFromUs), pct: Math.round(100 * cov), editFromUs: l.editFromUs, editToUs: l.editToUs, mediaId: l.mediaId, srcFromUs: l.srcFromUs, segFromUs: l.segFromUs, segToUs: l.segToUs, important: l.important });
   }
   if (!checks.some((c) => c.id === "out.lineMissing")) passed.push("out.lineMissing");
   // 2. No word cut at a joint: the words on both sides of the joints come back about as often as the other words
@@ -167,6 +168,49 @@ export function verifyOutput({ expected, outWords = [], loudness = null, black =
   if (durationS !== null && plannedS !== null && Math.abs(durationS - plannedS) > 0.5) add("out.length", "warn", `the export is ${durationS.toFixed(1)} s, the plan ${plannedS.toFixed(1)} s`, { got: durationS, planned: plannedS });
   const r2 = (x) => (x === null ? null : Math.round(x * 100) / 100);
   return { checks, passed, ok: !checks.some((c) => c.level === "fail"), stats: { lines: expected.lines.length, linesFound: found, important: imp.length, importantFound: impFound, agreement: r2(agreement), joints: jointWords.length, jointRecall: r2(jointRecall) } };
+}
+
+/** The loudness envelope of mono 16-bit PCM (an Int16Array): one RMS value per `winMs`. */
+export function envelope(pcm, rate = 8000, winMs = 10) {
+  const n = Math.max(1, Math.round((rate * winMs) / 1000)), out = new Float64Array(Math.floor(pcm.length / n));
+  for (let k = 0; k < out.length; k++) { let s = 0; for (let j = k * n; j < (k + 1) * n; j++) s += pcm[j] * pcm[j]; out[k] = Math.sqrt(s / n); }
+  return out;
+}
+
+/** The best Pearson correlation of two envelopes within ±maxLag windows: { r, lag } (r 1 = the same sound). */
+export function bestCorrelation(a, b, maxLag = 30) {
+  let best = { r: -1, lag: 0 };
+  for (let L = -maxLag; L <= maxLag; L++) {
+    let n = 0, sx = 0, sy = 0, sxx = 0, syy = 0, sxy = 0;
+    for (let i = 0; i < a.length; i++) { const j = i + L; if (j < 0 || j >= b.length) continue; const x = a[i], y = b[j]; n++; sx += x; sy += y; sxx += x * x; syy += y * y; sxy += x * y; }
+    const d = Math.sqrt((n * sxx - sx * sx) * (n * syy - sy * sy));
+    const r = d > 0 ? (n * sxy - sx * sy) / d : 0;
+    if (r > best.r) best = { r, lag: L };
+  }
+  return { r: Math.round(best.r * 1000) / 1000, lag: best.lag };
+}
+
+/**
+ * The stretch of an export to compare with the source for a line (args of its check): the line ± 0.1 s, never past
+ * its own segment (beyond the joint the export shows other footage). { editFromUs, srcFromUs, durUs }.
+ */
+export function soundWindow(a) {
+  const from = Math.max(a.segFromUs ?? -Infinity, a.editFromUs - 100_000), to = Math.min(a.segToUs ?? Infinity, a.editToUs + 100_000);
+  return { editFromUs: from, srcFromUs: a.srcFromUs + (from - a.editFromUs), durUs: Math.max(300_000, to - from) };
+}
+
+/**
+ * A line the speech model did not hear again, settled by its sound: the export's stretch against its source span.
+ * check: the out.lineMissing / out.lineWeak check; r: their envelope correlation. The same sound (r ≥ 0.75) means the
+ * words are there (the model heard them differently: a warning); a different sound (r < 0.6) means masked, cut or
+ * silent — an important line then fails, an ordinary one stays a warning with its r.
+ */
+export function settleLine(check, r, V = VERIFY) {
+  if (r >= V.sound.same) return { ...check, id: "out.lineHeardDifferently", level: "warn", message: `${check.message} — but its sound matches the source (r = ${r}): the speech model heard it differently`, args: { ...check.args, r } };
+  // Only an important line fails (the clean-up changes the sound's shape where it removes heavy noise — wind, a
+  // crowd: r 0.5–0.7 there — so a different sound alone is a warning for an ordinary line).
+  if (r < V.sound.different) return { ...check, id: check.args?.important ? "out.lineMissing" : "out.lineWeak", level: check.args?.important ? "fail" : "warn", message: `${check.message} — and its sound differs from the source (r = ${r})`, args: { ...check.args, r } };
+  return { ...check, args: { ...check.args, r } };
 }
 
 /** ffmpeg's blackdetect / freezedetect / ebur128 output → { black, frozen, loudness }. */

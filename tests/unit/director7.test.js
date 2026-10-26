@@ -7,7 +7,7 @@ import assert from "node:assert/strict";
 import Ajv from "ajv";
 import { buildMoments, momentsWithLinks, linkMoments, eventsOnAxis, ruleTreatments, validateTreatment, executionSpec, takeScorer, hookSpan, reactionOf, momentsTable, sameLine } from "../../src/core/treatments.js";
 import { rubric, rankTreatments, shotLengths, compareByRubric } from "../../src/core/critic.js";
-import { verifyPlan, verifyOutput, expectedSpeech, parseFfmpegChecks, cutSheet, keptIn } from "../../src/core/verifier.js";
+import { verifyPlan, verifyOutput, expectedSpeech, parseFfmpegChecks, cutSheet, keptIn, envelope, bestCorrelation, settleLine } from "../../src/core/verifier.js";
 import { directPlan, withSpans, toPlanV2 } from "../../src/core/director.js";
 import { retakeGroups } from "../../src/core/speech.js";
 import { EDIT_PLAN_SCHEMA } from "../../src/core/editPlan.js";
@@ -290,4 +290,20 @@ test("a long take is broken by an angle change at a word boundary (no long stati
   // (an angle piece that starts where a punch-in ends inherits the punch-in's time: not a split made here)
   const punchEnds = new Set((r.plan.zooms || []).filter((x) => /^punch/.test(x.reason)).map((x) => x.toUs));
   for (const z of (r.plan.zooms || []).filter((x) => /^angle/.test(x.reason) && !punchEnds.has(x.fromUs))) for (const w of talk) assert.ok(!(w.startUs < z.fromUs && w.endUs > z.fromUs + 1000) || z.fromUs <= 300_000, `an angle change inside «${w.text}» at ${z.fromUs}`);
+});
+
+test("a line the model did not hear again is settled by its sound: the same sound is a warning, a different one a fail", () => {
+  // A speech-like envelope (bursts) and the same at a lower gain with 20 ms of lag; noise for a masked / missing line.
+  const rate = 8000, len = rate * 3;
+  const burst = (i) => (Math.floor(i / 1200) % 3 === 0 ? 0 : Math.sin(i / 3) * (6000 + 4000 * Math.sin(i / 900)));
+  const src = Int16Array.from({ length: len }, (_, i) => burst(i));
+  const same = Int16Array.from({ length: len }, (_, i) => 0.6 * burst(i + 160));
+  let seed = 7; const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647 - 0.5);
+  const other = Int16Array.from({ length: len }, () => 9000 * rnd());
+  const r1 = bestCorrelation(envelope(same), envelope(src)).r, r2 = bestCorrelation(envelope(other), envelope(src)).r;
+  assert.ok(r1 > 0.9, `same sound r=${r1}`); assert.ok(r2 < 0.3, `other sound r=${r2}`);
+  const check = { id: "out.lineMissing", level: "fail", message: "«x» is not heard", args: {} };
+  assert.equal(settleLine(check, r1).level, "warn"); assert.equal(settleLine(check, r1).id, "out.lineHeardDifferently");
+  assert.equal(settleLine({ ...check, id: "out.lineWeak", level: "warn", args: { important: true } }, r2).level, "fail", "an important line with another sound");
+  assert.equal(settleLine({ ...check, id: "out.lineWeak", level: "warn", args: { important: false } }, r2).level, "warn", "an ordinary line stays a warning");
 });
