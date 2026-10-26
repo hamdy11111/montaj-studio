@@ -95,7 +95,7 @@ search over a fake index + import + director tools; RRF / rerank blend / diversi
 lookup / index bookkeeping; prompt cleaning, sizes, graph wiring, GPU sampler, matte recipe choice, track smoothing.
 
 ## Measured (RTX 4090, desktop already holding ~4.6 GB)
-**Person matte, 6 hard 10 s windows of the cases** (`النتائج\media\matting\<clip>b_*.jpg`: source | fast | pro;
+**Person matte, 6 hard 10 s windows of the cases** (`النتائج\media\matting\<clip>\ab_*.jpg`: source | fast | pro;
 the first run, everyone SAM finds, up to 4 people, is kept in `matting-v1`). Flicker = mean |alpha change| on pixels
 whose colour did not change (lower = steadier). Pro: 720 px short side, peak GPU **2.3 GB** (SAM 3.1 + MatAnyone2).
 
@@ -170,7 +170,7 @@ question as it is — SigLIP2 gets English only, so it has no raw row; expanded 
 
 - The expansion is worth ~20 points of R@1 (0.70 → 0.90 with the full pipeline); the reranker adds 10 points on top of RRF.
 - Time per query: search 634 ms (4 indexes, warm worker on the GPU), rerank 2998 ms
-  (top 30), expansion 2730 ms (the LLM already loaded; it takes ~40 s to load). Worker peak ≈ 15 GB.
+  (top 30), expansion 2730 ms (the LLM already loaded; it takes ~40 s to load). Worker memory not measured (≈ 15 GB by the models' sizes).
 - The published reranker script fails with transformers 5.8 (`mm_token_type_ids` left as lists; `_sample_frames`
   missing for videos); `broll.py` patches both at load. It reranks on one keyframe + the caption.
 
