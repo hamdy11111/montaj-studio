@@ -31,13 +31,18 @@ from asr_engines import ENGINES, make  # noqa: E402
 RUNTIME = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "runtime")
 
 
-def wavs(ffmpeg, folder, segments):
+def wavs(ffmpeg, folder, segments, tail_s=0.0):
     tmp = tempfile.mkdtemp(prefix="asr-bench-")
     files = []
-    for s in segments:
-        f = os.path.join(tmp, f"{s['id']:04d}.wav")
-        subprocess.run([ffmpeg, "-hide_banner", "-v", "error", "-y", "-i", os.path.join(folder, s["clip"]), "-ac", "1", "-ar", "16000", "-sample_fmt", "s16", f], check=True)
-        files.append(f)
+    try:
+        for s in segments:
+            f = os.path.join(tmp, f"{s['id']:04d}.wav")
+            pad = ["-af", f"apad=pad_dur={tail_s}"] if tail_s else []   # silence after the clip (streaming models)
+            subprocess.run([ffmpeg, "-hide_banner", "-v", "error", "-y", "-i", os.path.join(folder, s["clip"]), *pad, "-ac", "1", "-ar", "16000", "-sample_fmt", "s16", f], check=True)
+            files.append(f)
+    except BaseException:
+        shutil.rmtree(tmp, ignore_errors=True)   # no temp audio left behind when ffmpeg fails
+        raise
     return tmp, files
 
 
@@ -81,7 +86,7 @@ class PeakGpu:
 def torch_peak_mb():
     try:
         import torch
-        return round(torch.cuda.max_memory_reserved() / 2 ** 20) if torch.cuda.is_available() else None
+        return (round(torch.cuda.max_memory_reserved() / 2 ** 20) or None) if torch.cuda.is_available() else None  # 0: torch unused
     except Exception:
         return None
 
@@ -108,13 +113,20 @@ def main():
     ap.add_argument("--dir", required=True)
     ap.add_argument("--name")
     ap.add_argument("--limit", type=int, help="first N clips only (a smoke test; not written to hyp/ unless --name is given)")
+    ap.add_argument("--ids", help="these clip ids only, e.g. 27,30,33 (a smoke test, like --limit)")
+    ap.add_argument("--tail-s", type=float, help="seconds of silence appended to every clip (default: the engine's own)")
     a = ap.parse_args()
     os.environ.setdefault("HF_HUB_OFFLINE", "1")          # weights come from the local cache only
     with open(os.path.join(a.dir, "segments.json"), encoding="utf-8") as f:
         segs = json.load(f)["segments"]
+    if a.ids:
+        keep = {int(x) for x in a.ids.split(",")}
+        segs = [s for s in segs if s["id"] in keep]
+        a.limit = a.limit or len(segs)
     if a.limit:
         segs = segs[: a.limit]
-    tmp, files = wavs(os.path.abspath(a.ffmpeg), a.dir, segs)
+    tail = ENGINES[a.engine].get("tail_s", 0.0) if a.tail_s is None else a.tail_s
+    tmp, files = wavs(os.path.abspath(a.ffmpeg), a.dir, segs, tail)
     try:
         eng = make(a.engine, RUNTIME, a.model)
         with PeakGpu() as gpu:
@@ -129,7 +141,7 @@ def main():
     name = a.name or (a.engine if not a.limit else f"_smoke-{a.engine}")
     out = {"model": name, "engine": a.engine, "label": ENGINES[a.engine]["label"], "plan": ENGINES[a.engine]["plan"],
            "source": source(a.engine, a.model), "device": getattr(eng, "device", None),
-           "rtf": round((t2 - t1) / max(audio, 1e-6), 3), "loadSeconds": round(t1 - t0, 1), "audioSeconds": round(audio, 1),
+           "tailSeconds": tail, "rtf": round((t2 - t1) / max(audio, 1e-6), 3), "loadSeconds": round(t1 - t0, 1), "audioSeconds": round(audio, 1),
            "vramMB": gpu.added(), "torchPeakMB": torch_peak_mb(), "ranAt": time.strftime("%Y-%m-%dT%H:%M:%S"),
            "segments": [{"id": s["id"], "text": t} for s, t in zip(segs, texts)]}
     folder = os.path.join(a.dir, "hyp") if not a.limit or a.name else tempfile.gettempdir()

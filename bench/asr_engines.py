@@ -191,7 +191,9 @@ class Cohere:
 
     def load(self):
         import torch
+        import logging
         from transformers import AutoProcessor, CohereAsrForConditionalGeneration
+        logging.getLogger("bitsandbytes").setLevel(logging.ERROR)   # "inputs will be cast…" on every int8 matmul
         path = _snapshot(self.repo)
         self.device, self.torch = _cuda(), torch
         self.processor = AutoProcessor.from_pretrained(path)
