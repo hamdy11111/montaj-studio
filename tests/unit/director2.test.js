@@ -139,6 +139,7 @@ test("alignExport: the export's sound laid out with silences, the job sent to th
     let job = null;
     const r = await alignExport({ perception: { runtime: dir } }, file, e, { runWorker: async (j) => { job = j; assert.ok(fs.existsSync(j.audio)); return { device: "test", words: j.asr.segments.flatMap((s) => s.words).map((w) => ({ ...w, align_conf: 0.9 })) }; } });
     assert.equal(job.minConf, 0);
+    assert.equal(job.device, "cpu", "the CPU by default: never waits for the shared card");
     assert.ok(job.maxShift >= 10, "every move allowed: the verifier judges");
     assert.ok(job.asr.segments.flatMap((s) => s.words).some((w) => w.word === "الجمل"), "the text the aligner reads (final ة left out)");
     assert.equal(r.judged, true);

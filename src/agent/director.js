@@ -531,7 +531,7 @@ async function meaningSounds(S, plan, { moments, clips, log, bundled = false }) 
  * The words the plan keeps force-aligned onto the export's sound (perception's wav2vec2 worker, align.py, in the
  * speech runtime) — verifyAligned's result, or null when the runtime or the model is not installed.
  */
-export async function alignExport(S, file, expected, { log = () => {}, runWorker = null } = {}) {
+export async function alignExport(S, file, expected, { log = () => {}, runWorker = null, device = process.env.DIRECTOR_VERIFY_DEVICE || "cpu" } = {}) {
   const runtime = S.perception?.runtime || path.join(process.cwd(), "runtime");
   const python = path.join(runtime, "asr", ...(process.platform === "win32" ? ["Scripts", "python.exe"] : ["bin", "python"]));
   const models = path.join(runtime, "models", "perception");
@@ -545,10 +545,13 @@ export async function alignExport(S, file, expected, { log = () => {}, runWorker
     const wav = path.join(work, "export.wav");
     fs.writeFileSync(wav, wavBytes(layoutAudio(new Int16Array(stdout.buffer, stdout.byteOffset, Math.floor(stdout.length / 2)), 16000, layout), 16000));
     // Every move allowed (maxShift) and every match kept (minConf 0): the verifier judges the letters, not the worker.
-    const job = { audio: wav, modelsDir: models, device: "auto", asr: layout.asr, pad: ALIGN.pad, maxShift: 30, maxShiftSure: 30, sureConf: 0.8, minConf: 0 };
+    // On the CPU by default: the same letters and times as on the card (measured: mean |Δconf| 0.0001, same times), ~15 s
+    // for a 3.5-min export plus ~30 s to load — and it never waits for the shared card. device "gpu" uses the card.
+    const job = { audio: wav, modelsDir: models, device: device === "gpu" ? "auto" : "cpu", asr: layout.asr, pad: ALIGN.pad, maxShift: 30, maxShiftSure: 30, sureConf: 0.8, minConf: 0 };
     const t = Date.now();
     let r;
     if (runWorker) r = await runWorker(job);
+    else if (job.device === "cpu") r = await alignWorker(python, job, path.join(work, "align.json"));
     else {
       // ~1.3 GB on the card: the app's GPU queue and the machine-wide lock, held for the worker only.
       const release = await (await directorGpuLock(S)).acquire("director-verify");
