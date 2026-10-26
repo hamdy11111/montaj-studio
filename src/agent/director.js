@@ -16,6 +16,12 @@
 //  5. the verifier's plan guards (the 02 failure: most of a wordless action video cut) join the quality guards, and
 //     the cut sheet lists the chosen treatment with its alternatives. After an export, verifyExport re-transcribes
 //     the file and measures loudness, black and frozen frames.
+//
+// Phase 8 — the story order (core/story.js): with several clips (or `story: "on"` for one long raw) the moments are
+// grouped into scenes, each gets its story beat, and the scenes are put in the order that tells the story (phase 6's
+// links and promises as hard rules; beats, the clips' recording times and continuity as soft ones; the planner model
+// proposes the order over scene numbers when there is one, the rules check and repair it). The treatments then start
+// from the story order; the shooting order stays on the cut sheet as an alternative.
 import fs from "node:fs";
 import path from "node:path";
 import { AppError } from "../core/validation.js";
@@ -24,7 +30,8 @@ import { directPlan, estimateWork, visualBeats, srcAt } from "../core/director.j
 import { editTime, editAt, srcAfter } from "../core/qa.js";
 import { correctWords } from "../core/speech.js";
 import { US } from "../core/util.js";
-import { eventsOnAxis, momentsWithLinks, ruleTreatments, validateTreatment, executionSpec, takeScorer, reactionOf } from "../core/treatments.js";
+import { eventsOnAxis, momentsWithLinks, ruleTreatments, validateTreatment, executionSpec, takeScorer, reactionOf, mediaSpanToAxis, phase6Shape } from "../core/treatments.js";
+import { storyPlan, repairOrder, expand, storySheet } from "../core/story.js";
 import { rubric, rankTreatments } from "../core/critic.js";
 import { verifyPlan, verifyOutput, expectedSpeech, parseFfmpegChecks, cutSheet, envelope, bestCorrelation, settleLine, soundWindow } from "../core/verifier.js";
 import { applyPlan } from "./editPlan.js";
@@ -117,9 +124,12 @@ const LAST = new Map();
  * that length), stabilize (default true), person (default true: graphics placed by the person), retakes (default true),
  * perceive ("cached" default | "run" | "off"), planner ("rules" default | "auto" | "local" | "claude"), plannerModel
  * ("auto" | "qwen3.8-27b" | "qwen3.6-35b-a3b"), claudeKey (this run only, never stored), judge (default true with a
- * planner), treatment (an id to force), links / takes (phase 6 / phase 5 results: one object for a single file, or
- * { [mediaId]: … }), graphics ("meaning" default | "words": the old key-word texts), measureGraphics (default true),
- * sounds ("library" default | "bundled") }.
+ * planner), treatment (an id to force; "shooting-order" = the clips as given), links / takes (phase 6 / phase 5
+ * results: one object for a single file, or { [mediaId]: … }), graphics ("meaning" default | "words": the old key-word
+ * texts), measureGraphics (default true), sounds ("library" default | "bundled"), story ("auto" default: on with two
+ * clips or more | "on" (one long raw too) | "off": the timeline order), storyHints ("auto" | "off": no recording
+ * times — the bench's shuffled pieces of one file), storyPlanner (the story order's model when `planner` is "rules":
+ * "rules" default | "local" | "claude") }.
  * The main track holds the clips to edit — one or several videos (and pictures), cut or not; the plan replaces it.
  */
 export async function autoEdit(ctx, timelineId, opts = {}, job = null) {
@@ -190,9 +200,11 @@ export async function autoEdit(ctx, timelineId, opts = {}, job = null) {
     cta: opts.cta || "", captionTemplate: opts.captionTemplate, corrections: opts.corrections || [], title: opts.title || "Auto edit",
     targetUs: opts.targetSec ? Math.round(opts.targetSec * US) : null, stabilize, retakes: opts.retakes !== false,
   };
-  // Phase 5 / phase 6 results (when given, or when their services are there) on the virtual axis (seconds).
-  const firstClipOf = (mid) => clips.find((c) => c.mediaId === mid) || clips[0];
-  const toAxisSec = (mid) => (sec) => toV(firstClipOf(mid), Math.round(sec * US)) / US;
+  // Phase 5 / phase 6 results (when given, or when their services are there) on the virtual axis (seconds), each span
+  // through the clip that shows it (a file cut into pieces placed apart maps each piece on its own; a span no clip
+  // shows is left out).
+  const spanAx = mediaSpanToAxis(clips);
+  const onAxis = (mid) => (o) => { if (!o) return o; const v = spanAx(mid, o.t0, o.t1 ?? o.t0); return v ? { ...o, t0: v.t0 / US, t1: v.t1 / US } : null; };
   const perMedia = (given, svc) => {
     const out = [];
     for (const m of videos) {
@@ -201,51 +213,72 @@ export async function autoEdit(ctx, timelineId, opts = {}, job = null) {
     }
     return out;
   };
-  const shift = (o, f) => (o ? { ...o, t0: f(o.t0), t1: f(o.t1 ?? o.t0) } : o);
-  const p6 = perMedia(opts.links, S.links);
-  const phase6 = p6.length ? { links: p6.flatMap(({ m, x }) => (x.links || []).map((l) => ({ ...l, cause: shift(l.cause, toAxisSec(m.id)), reaction: shift(l.reaction, toAxisSec(m.id)) }))), roles: p6.flatMap(({ m, x }) => (x.roles || []).map((r) => shift(r, toAxisSec(m.id)))), promises: p6.flatMap(({ m, x }) => (x.promises || []).map((p) => ({ ...shift(p, toAxisSec(m.id)), payoff: shift(p.payoff, toAxisSec(m.id)) }))) } : null;
+  // Phase 6's own document (`montaj.links/1`, what LinkService.cached returns) is read through its directorView.
+  const p6 = perMedia(opts.links, S.links).map(({ m, x }) => ({ m, x: phase6Shape(x) }));
+  const phase6 = p6.length ? {
+    links: p6.flatMap(({ m, x }) => (x.links || []).map((l) => ({ ...l, cause: onAxis(m.id)(l.cause), reaction: onAxis(m.id)(l.reaction) })).filter((l) => l.cause && l.reaction)),
+    roles: p6.flatMap(({ m, x }) => (x.roles || []).map(onAxis(m.id)).filter(Boolean)),
+    promises: p6.flatMap(({ m, x }) => (x.promises || []).map((p) => { const q = onAxis(m.id)(p); return q && { ...q, payoff: (p.payoff && onAxis(m.id)(p.payoff)) || undefined }; }).filter(Boolean)),
+  } : null;
   const p5 = perMedia(opts.takes, S.takes);
-  const takeScore = p5.length === 1 && typeof p5[0].x === "function" ? p5[0].x : p5.length ? takeScorer({ groups: p5.flatMap(({ m, x }) => (x.groups || []).map((g) => ({ ...g, takes: (g.takes || []).map((tk) => shift(tk, toAxisSec(m.id))) }))) }) : null;
+  const takeScore = p5.length === 1 && typeof p5[0].x === "function" ? p5[0].x : p5.length ? takeScorer({ groups: p5.flatMap(({ m, x }) => (x.groups || []).map((g) => ({ ...g, takes: (g.takes || []).map(onAxis(m.id)).filter(Boolean) }))) }) : null;
   if (takeScore) base.takeScore = takeScore;
 
   // 1. Moments, links, roles.
   const events = eventsOnAxis(timelines, clips);
   const beats = visualBeats(cWords, vTrack);
-  const { moments, links, promises } = momentsWithLinks({ words: cWords, events, durationUs, protect, beats, keywords: opts.keywords || [] }, phase6);
+  // Several clips: a moment never runs across a clip joint (the story order may move the clips apart).
+  const joints = clips.length > 1 ? clips.slice(1).map((c) => c.vStart) : [];
+  const { moments, links, promises } = momentsWithLinks({ words: cWords, events, durationUs, protect, beats, keywords: opts.keywords || [], joints }, phase6);
   reportPlan(0.1, "moments");
-  // 2. Treatments: the rules' and the planner's.
   const planner = await plannerFor(S, opts, log).catch((e) => { log(`planner unavailable: ${e.message}`); if (opts.planner === "local" || opts.planner === "claude") throw e; return null; });
   const notesExtra = [], decisionsExtra = [];
-  let treatments = ruleTreatments(moments, { durationUs, targetUs: base.targetUs, links, promises });
-  let plannerInfo = { planner: "rules" };
+  const kind = first.height > first.width ? "vertical phone video" : "horizontal video";
+  let story = null;
   try {
+    // 2. The story order (phase 8): scenes, beats, constraints; the planner model's order when there is one.
+    const storyMode = opts.story || "auto";
+    if (storyMode === "on" || (storyMode === "auto" && clips.length > 1)) {
+      reportPlan(0.12, "story");
+      // The story may have a model of its own (storyPlanner: "local" with the rules planner — one call, then stopped).
+      const own = !planner && opts.storyPlanner && opts.storyPlanner !== "rules" ? await plannerFor(S, { ...opts, planner: opts.storyPlanner }, log).catch((e) => { log(`story model unavailable: ${e.message}`); return null; }) : null;
+      try { story = await storyOrder({ moments, links, promises, events, clips, planner: planner || own, hints: opts.storyHints !== "off", kind, durationUs, log }); }
+      finally { await own?.stop?.(); }
+      decisionsExtra.push({ k: "story", segments: story.segments.length, source: story.source, same: story.sheet.same, order: story.sheet.order.map((o) => o.k).join(" ← ") });
+      notesExtra.push(`story order (${story.source}): ${story.segments.length} scene(s) ${story.sheet.same ? "— the same as the shooting order" : `→ ${story.sheet.order.map((o) => o.k).join(", ")}`}`);
+    }
+    // 3. Treatments: the rules' and the planner's.
+    const rank = story?.rank || null;
+    let treatments = ruleTreatments(moments, { durationUs, targetUs: base.targetUs, links, promises, story: rank ? { rank } : null });
+    let plannerInfo = { planner: "rules" };
     if (planner) {
       reportPlan(0.15, "planner");
       const { llmTreatments } = await import("../services/directorLLM.js");
-      const kind = first.height > first.width ? "vertical phone video" : "horizontal video";
-      const got = await llmTreatments(planner, { moments, links, durationS: durationUs / US, targetS: opts.targetSec || null, kind });
-      const valid = got.treatments.map((t) => { const v = validateTreatment(t, moments, links, promises); return { ...v.treatment, fixes: v.fixes, source: t.source }; }).filter((t) => t.order.length);
+      const got = await llmTreatments(planner, { moments, links, durationS: durationUs / US, targetS: opts.targetSec || null, kind, storyOrder: story?.momentsOrder || null });
+      const valid = got.treatments.map((t) => { const v = validateTreatment(t, moments, links, promises, { rank }); return { ...v.treatment, fixes: v.fixes, source: t.source }; }).filter((t) => t.order.length);
       plannerInfo = { planner: planner.info?.id || "local", model: planner.info?.name, loadMs: planner.info?.loadMs ?? null, ms: got.ms, tokens: got.tokens, proposed: got.treatments.length, valid: valid.length, raw: got.raw };
       treatments = [...valid, ...treatments];
       notesExtra.push(`planner ${plannerInfo.model}: ${valid.length} treatment(s) in ${(got.ms / 1000).toFixed(1)} s`);
     }
-    // 3. Execute each treatment, score it, compare them two by two.
+    // 4. Execute each treatment, score it, compare them two by two.
     const items = [];
     for (const t of treatments) {
-      const spec = executionSpec(t, moments, cWords);
+      const spec = { ...executionSpec(t, moments, cWords), story: !!rank && t.id !== "shooting-order" };
       const r = directPlan({ ...base, spec });
       const guards = verifyPlan({ moments, links, cuts: r.virtual.cuts, durationUs, treatment: t, targetUs: base.targetUs });
       items.push({ id: t.id, treatment: t, spec, plan: r.plan, qa: r.qa, out: r, guards, rubric: rubric({ treatment: t, plan: r.plan, qa: r.qa, moments, links, targetUs: base.targetUs }) });
     }
     reportPlan(0.4, "critic");
     const { llmJudge } = planner && opts.judge !== false ? await import("../services/directorLLM.js") : {};
-    // A treatment that fails a guard never wins over one that passes.
-    const passing = items.filter((x) => x.guards.ok && (x.qa?.ok ?? true));
-    const pool = passing.length ? passing : items;
+    // A treatment that fails a guard never wins over one that passes; the shooting-order alternative is listed, not
+    // a candidate (the user can still force it).
+    const candidates = items.filter((x) => !x.treatment.alternative);
+    const passing = candidates.filter((x) => x.guards.ok && (x.qa?.ok ?? true));
+    const pool = passing.length ? passing : candidates.length ? candidates : items;
     const ranked = await rankTreatments(pool, { judge: llmJudge ? llmJudge(planner, { durationS: durationUs / US, targetS: opts.targetSec || null }) : null, moments });
     const chosenId = opts.treatment && items.some((x) => x.id === opts.treatment) ? opts.treatment : ranked.ranking[0].id;
     const chosen = items.find((x) => x.id === chosenId);
-    // 4. Graphics and sounds by meaning on the winner (a second, deterministic pass of the executor).
+    // 5. Graphics and sounds by meaning on the winner (a second, deterministic pass of the executor).
     let final = chosen.out;
     const graphicsMode = opts.graphics || "meaning";
     let graphicsInfo = null;
@@ -265,6 +298,7 @@ export async function autoEdit(ctx, timelineId, opts = {}, job = null) {
     else qa = { checks: guards.checks, passed: guards.passed, ok: guards.ok, stats: {} };
     const sheet = cutSheet({ chosen: chosenId, items, ranking: ranked.ranking.concat(items.filter((x) => !pool.includes(x)).map((x) => ({ id: x.id, wins: 0, losses: 0, ties: 0, total: x.rubric.total }))), pairs: ranked.pairs, moments, links, planner: plannerInfo.planner, verify: guards });
     sheet.graphics = graphicsInfo; sheet.sounds = soundInfo; sheet.plannerInfo = plannerInfo;
+    if (story) { sheet.story = story.sheet; sheet.text = [...story.sheet.text, ...sheet.text]; }
     decisionsExtra.push({ k: "treatment", title: chosen.treatment.title, hook: chosen.treatment.hook?.kind || "none", moments: chosen.treatment.order.length, of: moments.length, alternatives: items.length - 1, planner: plannerInfo.planner, length: chosen.rubric.facts.editSec });
     if (chosen.spec.hook) decisionsExtra.push({ k: "hook", kind: chosen.spec.hook.kind, moment: chosen.spec.hook.moment, from: Math.round(chosen.spec.hook.fromUs / 1e5) / 10, to: Math.round(chosen.spec.hook.toUs / 1e5) / 10 });
     notesExtra.push(`treatment «${chosen.treatment.title}» (${chosen.treatment.source}): ${chosen.treatment.order.length} of ${moments.length} moments, hook ${chosen.treatment.hook?.kind || "none"}; ${items.length - 1} alternative(s) on the cut sheet`);
@@ -276,11 +310,43 @@ export async function autoEdit(ctx, timelineId, opts = {}, job = null) {
     const wordsByMedia = Object.fromEntries([...words.entries()]);
     const importantV = moments.filter((m) => m.kind === "speech" && chosen.treatment.order.includes(m.n) && (m.role === "punch" || m.role === "reaction" || m.role === "setup"));
     LAST.set(timelineId, { plan, wordsByMedia, importantV, clips: clips.map(({ m, ...c }) => c), at: Date.now() });
-    if (!opts.apply) return { plan, notes, qa, decisions, estimate: est, cutSheet: sheet, moments: momentsOut(moments), links };
+    const storyOut = story ? { segments: story.segments.map(({ tokens, place, looks, people, ...g }) => g), order: story.order, shooting: story.shooting, source: story.source, constraints: story.constraints } : null;
+    if (!opts.apply) return { plan, notes, qa, decisions, estimate: est, cutSheet: sheet, moments: momentsOut(moments), links, story: storyOut };
     const apply = stage("apply");
     const r = await applyPlan(ctx, timelineId, plan, { expectedRevision: opts.expectedRevision, job: { progress: (p, label) => apply(p, label) } });
-    return { ...r, notes, plan, qa, decisions, estimate: est, cutSheet: sheet, moments: momentsOut(moments), links };
+    return { ...r, notes, plan, qa, decisions, estimate: est, cutSheet: sheet, moments: momentsOut(moments), links, story: storyOut };
   } finally { await planner?.stop?.(); }
+}
+
+/**
+ * The story order of a run (phase 8): the rules' order (core/story.js storyPlan, with the clips' recording times when
+ * `hints`), or the planner model's over scene numbers, repaired by the same hard rules. Returns storyPlan's result
+ * with { order, rank, momentsOrder, source, why, fixes, sheet, llm }.
+ */
+export async function storyOrder({ moments, links, promises, events, clips, planner = null, hints = true, kind = null, durationUs, log = () => {} }) {
+  let times = null;
+  if (hints) {
+    try { const { mediaTimes } = await import("../services/story/clipTimes.js"); times = await mediaTimes(clips.map((c) => c.m?.path).filter(Boolean)); }
+    catch (e) { log(`story: no recording times (${e.message})`); }
+  }
+  const cl = clips.map((c) => { const t = times?.get(c.m?.path); return { mediaId: c.mediaId, vStart: c.vStart, srcStart: c.srcStart, speed: c.speed, ...(t ? { timeUs: Math.round(t.ms * 1000 + (c.srcStart || 0)), timeSource: t.source } : {}) }; });
+  const sp = storyPlan({ moments, links, promises, events, clips: cl }, { useTime: !!times });
+  let order = sp.order, source = "rules", why = "", fixes = [], beats = null, llm = null;
+  if (planner && sp.segments.length > 1) {
+    try {
+      const { llmStoryOrder } = await import("../services/directorLLM.js");
+      const got = await llmStoryOrder(planner, { segments: sp.segments, constraints: sp.constraints, kind, durationS: durationUs / US });
+      if (got.order.length) {
+        const rep = repairOrder(got.order, sp.segments, sp.constraints, sp.matrices);
+        ({ order, fixes } = rep);
+        source = planner.info?.name || "model"; why = got.why; beats = got.beats;
+      }
+      llm = { ms: got.ms, tokens: got.tokens, proposed: got.order, raw: got.raw };
+    } catch (e) { log(`story order by the model failed: ${e.message}`); llm = { error: String(e.message).slice(0, 200) }; }
+  }
+  const ex = expand(sp.segments, order);
+  const sheet = storySheet({ segments: sp.segments, order, shooting: sp.shooting, constraints: sp.constraints, source, why, fixes, beats });
+  return { ...sp, order, rank: ex.rank, momentsOrder: ex.moments, source, why, fixes, beats, sheet, llm };
 }
 
 /** Moments as the app shows them (no word indices). */

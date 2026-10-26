@@ -1,7 +1,8 @@
 // The director: turns what is said (word timings) and what is seen (where the person's head is, how it moves) into
 // a whole edit plan (montaj.editplan/2) — the decisions an editor makes, written as rules. The rules and their
 // numbers are the edit-hamdy editing skill's (core/policy.js):
-//  · several clips: planned as one story, in their timeline order (story ordering is a later stage); each clip's
+//  · several clips: planned as one story — in their timeline order, or in the story order (phase 8) that the agent
+//    passes through the treatment's spec; each clip's
 //    words and person track are laid on one "virtual" time axis, and the plan is mapped back to each file;
 //  · retakes: repeated attempts of a line grouped by their words (core/speech.js retakeGroups) — the last complete
 //    take is kept, the others and their asides go (the groups are in the plan for the cut sheet);
@@ -573,7 +574,7 @@ export function directPlan(input) {
   const out = toPlanV2(plan, { clips, durationUs, groups, order: spec?.order, hook: spec?.hook });
   const jl = out.segments.filter((x) => x.jl).length;
   if (jl) { notes.push(`${jl} J cut(s) of ${POLICY.jl.leadMs} ms where the scene changes (the next sound starts before its picture)`); decisions.push({ k: "jl", n: jl, ms: POLICY.jl.leadMs }); }
-  if (clips.length > 1) { notes.push(`${clips.length} clips planned as one story, in their timeline order`); decisions.unshift({ k: "clips", n: clips.length }); }
+  if (clips.length > 1) { notes.push(`${clips.length} clips planned as one story, ${spec?.story ? "in the story order (phase 8)" : "in their timeline order"}`); decisions.unshift({ k: "clips", n: clips.length }); }
   return { plan: out, notes, qa, decisions, virtual: { cuts, durationUs, kept, removed, total } };
 }
 

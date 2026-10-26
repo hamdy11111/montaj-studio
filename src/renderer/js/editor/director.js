@@ -2,7 +2,8 @@
 // the open timeline — pacing, framing, graphics, sound, captions — as one undo step, then lists what it decided
 // and why. Same code path as the agents' edit_auto operation. Before it starts, the dialog shows what the run will
 // cost (measured stage times); while it runs, a real progress bar per stage and the time left; for a long video it
-// suggests a reel or turning off the slow steps.
+// suggests a reel or turning off the slow steps. Phase 8: a folder of clips shot in any order goes on the main track
+// in one click, and the story order (on by itself with two clips or more) is shown on the cut sheet with the reasons.
 import { h } from "../dom.js";
 import { icon } from "../icons.js";
 import { t, has, errorText, getLang } from "../i18n.js";
@@ -23,6 +24,7 @@ function decisionText(d) {
     case "retention": return t("dec.retention", { at: d.at, tpl: tplName(d.template), text: d.text, gap: d.gap });
     case "kept": case "ending": case "cta": case "silenced": case "noPersonModel": case "personOff": case "noSpeech": case "noPerception": return t(`dec.${d.k}`, d);
     case "retakes": case "jl": case "clips": case "treatment": case "hook": return t(`dec.${d.k}`, d);
+    case "story": return t(d.same ? "dec.storySame" : "dec.story", d);
     default: return null;
   }
 }
@@ -46,10 +48,22 @@ function summary(r) {
 
 const HOOK_AR = { result: ["result first", "النتيجة الأول"], question: ["a question", "سؤال"], reaction: ["the reaction first", "رد الفعل الأول"], action: ["straight into the action", "من وسط الأحداث"], none: ["none", "بدون"] };
 const hookName = (k) => (HOOK_AR[k] ? HOOK_AR[k][getLang() === "ar" ? 1 : 0] : k || "—");
+const BEAT_EN = { setup: "setup", promise: "promise / question", build: "build-up", conflict: "conflict", payoff: "payoff", ending: "ending" };
+/** The story order (phase 8): the scenes in the proposed order with why, and the shooting order as the alternative. */
+function storyLines(st) {
+  if (!st?.order?.length) return [];
+  const ar = getLang() === "ar";
+  const out = [t("dir.sheetStory", { list: st.order.map((o) => o.k).join(" ← "), source: st.source === "rules" ? t("dir.plannerRules") : st.source })];
+  if (st.why) out.push(st.why);
+  for (const o of st.order) out.push(t("dir.sheetScene", { k: o.k, clip: o.clip, at: o.at, len: o.lengthS, why: ar ? o.whyAr : o.why.replace(o.beat, BEAT_EN[o.beat] || o.beat), text: o.text ? ` — «${o.text}»` : "" }));
+  out.push(st.same ? t("dir.sheetStorySame") : t("dir.sheetShooting", { list: st.shooting.join(" ← ") }));
+  for (const f of st.fixes || []) out.push(`! ${ar ? f.ar : f.en}`);
+  return out;
+}
 /** The cut sheet: the chosen treatment, its alternatives side by side, the links to check. */
 function sheetLines(s) {
   if (!s?.chosen) return [];
-  const c = s.chosen, out = [t("dir.sheetChosen", { title: c.title, len: c.lengthS, hook: hookName(c.hook), score: c.total })];
+  const c = s.chosen, out = [...storyLines(s.story), t("dir.sheetChosen", { title: c.title, len: c.lengthS, hook: hookName(c.hook), score: c.total })];
   out.push(t("dir.sheetOrder", { list: (s.order || []).map((o) => o.n).join(" ← ") }));
   for (const a of s.alternatives || []) out.push(t("dir.sheetAlt", { title: a.title, len: a.lengthS, hook: hookName(a.hook), score: a.total }));
   if (s.unsureLinks?.length) out.push(t("dir.sheetUnsure", { list: s.unsureLinks.map((u) => `${u.cause} ← ${u.reaction}`).join("، ") }));
@@ -72,6 +86,28 @@ export function openDirector(ed) {
   const opts = { stabilize: true, person: true, perceive: "cached" };
   const perceiveBox = check({ checked: false, label: t("dir.optPerceive"), onChange: (v) => { opts.perceive = v ? "run" : "cached"; refresh(); } });
   const planner = h("select", {}, [["rules", t("dir.plannerRules")], ["local", t("dir.plannerLocal")], ["claude", t("dir.plannerClaude")]].map(([v, l]) => h("option", { value: v }, l)));
+  // The story order (phase 8): automatic with two clips or more; "on" for one long raw shot out of order.
+  const storySel = h("select", {}, [["auto", t("dir.storyAuto")], ["on", t("dir.storyOn")], ["off", t("dir.storyOff")]].map(([v, l]) => h("option", { value: v }, l)));
+  storySel.onchange = () => { opts.story = storySel.value; };
+  // A folder of clips shot in any order: every video and picture in it goes on the main track (by file name — on a
+  // phone, the shooting order), then the story order puts them in the order of the story.
+  const folderBtn = h("button", { class: "btn", title: t("dir.folderHint") }, icon("folder"), t("dir.folder"));
+  folderBtn.onclick = async () => {
+    const dir = await call("dialog.openFolder", { title: t("dir.folder") }).catch(() => null);
+    if (!dir) return;
+    folderBtn.disabled = true; go.disabled = true;
+    status.textContent = t("dir.folderImporting");
+    try {
+      const r = await call("media.importFolder", ed.project().id, dir);
+      const clips = (r.imported || []).filter((m) => m.type === "video" || m.type === "image").sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));
+      for (const m of clips) await call("timeline.exec", ed.timelineId(), "addMedia", { mediaId: m.id, toMain: true });
+      await ed.reloadTimeline();
+      ed.refreshMedia?.();
+      if (clips.length > 1) { storySel.value = "on"; opts.story = "on"; }
+      status.textContent = t("dir.folderDone", { n: clips.length });
+      refresh();
+    } catch (err) { status.textContent = errorText(err); } finally { folderBtn.disabled = false; go.disabled = false; }
+  };
   // The key is read from this field for one run and never saved (not in settings, not in the project).
   const claudeKey = h("input", { type: "password", autocomplete: "off", maxlength: 300, placeholder: t("dir.claudeKeyPh"), style: { display: "none" } });
   planner.onchange = () => { claudeKey.style.display = planner.value === "claude" ? "" : "none"; opts.planner = planner.value; refresh(); };
@@ -148,7 +184,8 @@ export function openDirector(ed) {
   };
   return modal({ title: t("dir.title"), width: 540, className: "pilot-modal",
     body: h("div", { class: "col" }, h("p", { class: "muted small" }, t("dir.hint")),
-      row(t("dir.style"), style), row(t("dir.length"), length), row(t("dir.planner"), planner), claudeKey, row(t("lib.animatedCaptions"), tplSel), row(t("dir.cta"), cta), keywords, fixes,
+      h("div", { class: "row" }, folderBtn, h("span", { class: "muted small" }, t("dir.folderHint"))),
+      row(t("dir.style"), style), row(t("dir.length"), length), row(t("dir.planner"), planner), claudeKey, row(t("dir.story"), storySel), row(t("lib.animatedCaptions"), tplSel), row(t("dir.cta"), cta), keywords, fixes,
       h("div", { class: "row", style: { gap: "16px", flexWrap: "wrap" } }, stabBox, personBox, perceiveBox),
       estimate, h("div", { class: "row" }, go, status), progress, log) });
 }

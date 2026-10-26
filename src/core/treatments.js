@@ -15,6 +15,7 @@
 import { sentences, alignToken, alignTokens } from "./speech.js";
 import { detectMoments, isPunch, isReaction } from "./moments.js";
 import { storyRole, ROLE_VALUE } from "./reel.js";
+import { directorView } from "./causeLinks.js";
 import { US } from "./util.js";
 
 const S = (s) => Math.round(s * US);
@@ -56,19 +57,51 @@ export function eventsOnAxis(timelines, clips) {
   return out.sort((x, y) => x.t0 - y.t0);
 }
 
+/**
+ * A media time (seconds) on the virtual axis (µs) through the clip that holds it — a file cut into several clips
+ * (or pieces shot out of order) maps each time through its own piece; a time no clip shows → null.
+ * clips: [{ mediaId, srcStart, srcEnd, vStart, speed }] (µs).
+ */
+export function mediaToAxis(clips) {
+  return (mediaId, sec) => {
+    const t = S(sec);
+    const c = clips.find((k) => k.mediaId === mediaId && t >= (k.srcStart || 0) && t < (k.srcEnd ?? Infinity)) || clips.find((k) => k.mediaId === mediaId && t === k.srcEnd);
+    return c ? Math.round(c.vStart + (t - (c.srcStart || 0)) / (c.speed || 1)) : null;
+  };
+}
+
+/**
+ * A media span (seconds) on the virtual axis (µs): the part of it inside the clip that shows most of it (a span that
+ * runs across two pieces placed apart keeps its larger piece); null when no clip shows it. → { t0, t1 } (µs).
+ */
+export function mediaSpanToAxis(clips) {
+  return (mediaId, t0, t1 = t0) => {
+    const a = S(t0), b = S(Math.max(t0, t1));
+    let best = null, bo = -1;
+    for (const c of clips) {
+      if (c.mediaId !== mediaId) continue;
+      const x = Math.max(a, c.srcStart || 0), y = Math.min(b, c.srcEnd ?? Infinity);
+      if (y >= x && y - x > bo) { bo = y - x; best = { c, x, y }; }
+    }
+    if (!best) return null;
+    const v = (t) => Math.round(best.c.vStart + (t - (best.c.srcStart || 0)) / (best.c.speed || 1));
+    return { t0: v(best.x), t1: v(best.y) };
+  };
+}
+
 // ------------------------------------------------------------------ moments
 const MOOD_OF_EMOTION = { happy: "joy", sad: "sad", angry: "tense", fearful: "tense", surprised: "shock", disgusted: "tense" };
 const overlap = (a0, a1, b0, b1) => Math.max(0, Math.min(a1, b1) - Math.max(a0, b0));
 
 /**
- * The video as numbered moments that tile [0, durationUs). input: { words: [{ text, startUs, endUs }] (virtual axis),
+ * The video as numbered moments that tile [fromUs, durationUs). input: { words: [{ text, startUs, endUs }] (virtual axis),
  * events (eventsOnAxis), durationUs, protect: [[a, b]] (spans that must stay: clips without speech), beats: [[a, b]]
  * (wordless moments the person track found), keywords }. Options: minGapUs (a wordless stretch shorter than this
  * belongs to the moment before it), chunkUs (the longest wordless moment), peak window around a reaction.
  * Returns [{ n, kind: speech|action|still|gap, s, e, w0?, w1?, text, energy, reactions, role, strength, mood, lex,
  * story, question }] — `gap` = a wordless stretch with nothing known about it (no perception).
  */
-export function buildMoments({ words = [], events = [], durationUs, protect = [], beats = [], keywords = [] }, { minGapUs = 1_200_000, chunkUs = 6_000_000, before = 3_500_000, after = 1_500_000 } = {}) {
+export function buildMoments({ words = [], events = [], durationUs, protect = [], beats = [], keywords = [], fromUs = 0 }, { minGapUs = 1_200_000, chunkUs = 6_000_000, before = 3_500_000, after = 1_500_000 } = {}) {
   const D = durationUs ?? (words.length ? words[words.length - 1].endUs : 0);
   const perceived = events.length > 0;
   const logs = events.filter((e) => e.type === "shot_log");
@@ -83,7 +116,7 @@ export function buildMoments({ words = [], events = [], durationUs, protect = []
   }
   // 2. Spans: speech moments and the wordless stretches between them (a short stretch goes with the moment before).
   const spans = [];
-  let t = 0;
+  let t = fromUs;
   const wordless = (a, b) => {
     if (b - a <= 0) return;
     if (b - a < minGapUs) { if (spans.length) spans[spans.length - 1].e = b; return; } // (before the first sentence: it opens that one)
@@ -118,11 +151,11 @@ export function buildMoments({ words = [], events = [], durationUs, protect = []
     const s = Math.max(t, sn.s - 100_000);
     wordless(t, s);
     if (spans.length && s > spans[spans.length - 1].e) spans[spans.length - 1].e = s;
-    spans.push({ kind: "speech", s: spans.length ? spans[spans.length - 1].e : 0, e: sn.e, w0: sn.w0, w1: sn.w1 });
+    spans.push({ kind: "speech", s: spans.length ? spans[spans.length - 1].e : fromUs, e: sn.e, w0: sn.w0, w1: sn.w1 });
     t = sn.e;
   }
   wordless(t, D);
-  if (spans.length) { spans[0].s = 0; spans[spans.length - 1].e = Math.max(spans[spans.length - 1].e, D); }
+  if (spans.length) { spans[0].s = fromUs; spans[spans.length - 1].e = Math.max(spans[spans.length - 1].e, D); }
   for (let i = 1; i < spans.length; i++) spans[i].s = spans[i - 1].e; // a tiling: no holes, no overlaps
   // 3. What each moment is.
   const lex = detectMoments(words, { keywords });
@@ -149,6 +182,49 @@ export function buildMoments({ words = [], events = [], durationUs, protect = []
   });
   for (const m of out) m.role = defaultRole(m);
   return out;
+}
+
+/**
+ * The moments of several clips (phase 8: the story order moves clips apart, so a sentence or a wordless stretch never
+ * runs across a clip joint): built clip by clip, numbered once, each with `clip` (its piece's index). joints: the
+ * virtual times where one clip ends and the next begins. Word indices (w0, w1) stay indices of input.words.
+ */
+export function clipMoments(input, joints = [], opts = {}) {
+  const words = input.words || [];
+  const D = input.durationUs ?? (words.length ? words[words.length - 1].endUs : 0);
+  const edges = [0, ...[...new Set(joints)].filter((j) => j > 0 && j < D).sort((a, b) => a - b), D];
+  const out = [];
+  for (let k = 1; k < edges.length; k++) {
+    const a = edges[k - 1], b = edges[k];
+    if (b - a <= 0) continue;
+    const idx = [];
+    words.forEach((w, i) => { const mid = (w.startUs + w.endUs) / 2; if (mid >= a && mid < b) idx.push(i); });
+    const i0 = idx.length ? idx[0] : 0;
+    const slice = idx.map((i) => ({ ...words[i], startUs: Math.max(a, words[i].startUs), endUs: Math.min(b, words[i].endUs) }));
+    const inside = ([x, y]) => y > a && x < b;
+    const ms = buildMoments({ ...input, words: slice, events: (input.events || []).filter((e) => (e.t1 ?? e.t0) >= a && e.t0 < b), durationUs: b, fromUs: a, protect: (input.protect || []).filter(inside), beats: (input.beats || []).filter(inside) }, opts);
+    for (const m of ms) { if (m.w0 !== undefined) { m.w0 += i0; m.w1 += i0; } m.clip = k - 1; out.push(m); }
+  }
+  out.forEach((m, i) => { m.n = i + 1; });
+  return out;
+}
+
+/**
+ * Phase 6's document (`montaj.links/1`: links by id, roles on its own moments, promises among its causes) in the
+ * adapter's shape ({ links: [{ cause: { t0, t1, text }, reaction: { t0, t1, type }, direction, confidence, unsure,
+ * why }], roles, promises }, seconds of media time) through its `directorView`; anything else is returned as it is.
+ */
+export function phase6Shape(doc) {
+  if (!doc || doc.schema !== "montaj.links/1" || !Array.isArray(doc.reactions)) return doc;
+  const v = directorView(doc);
+  const why = new Map((doc.links || []).map((l) => [l.id, l.checks?.semantic?.reason || ""]));
+  const links = v.links.map((l) => ({ cause: { t0: l.cause.t0, t1: l.cause.t1, text: l.cause.text || "" }, reaction: { t0: l.reaction.t0, t1: l.reaction.t1, type: l.reaction.kind }, direction: l.direction, gapS: l.gap, confidence: l.confidence, unsure: l.status !== "sure" || l.reaction.real === false, why: why.get(l.id) || l.reaction.kind }));
+  const roles = v.moments.filter((m) => m.role).map((m) => ({ t0: m.t0, t1: m.t1, role: m.role === "build_up" ? "build" : m.role, confidence: m.roleConfidence }));
+  const promises = (doc.causes || []).filter((c) => c.kind === "promise").map((c) => {
+    const pay = v.links.filter((l) => l.cause.id === c.id && l.direction !== "before").sort((p, q) => q.confidence - p.confidence)[0];
+    return { t0: c.t0, t1: c.t1, text: c.text || "", ...(pay ? { payoff: { t0: pay.reaction.t0, t1: pay.reaction.t1 } } : {}) };
+  });
+  return { links, roles, promises };
 }
 
 /** Role of a moment from its own signals (phase 6 replaces it): setup · build · punch · reaction · filler. */
@@ -209,7 +285,7 @@ export function linkMoments(moments, phase6 = null, { toAxis = (sec) => S(sec) }
     const r = m.reactions.find((x) => BIG.has(x.type)); // a loudness or pitch spike alone is too weak to link
     if (!r) continue;
     const prev = moments[m.n - 2];
-    if (prev && r.t - m.s < 2_000_000 && prev.kind !== "still" && prev.kind !== "gap") links.push({ cause: prev.n, reaction: m.n, direction: "after", confidence: 0.4, unsure: true, source: "rules", why: r.type });
+    if (prev && r.t - m.s < 2_000_000 && prev.kind !== "still" && prev.kind !== "gap" && prev.clip === m.clip) links.push({ cause: prev.n, reaction: m.n, direction: "after", confidence: 0.4, unsure: true, source: "rules", why: r.type });
   }
   return { links: dedupeLinks(links), roles, promises };
 }
@@ -221,8 +297,8 @@ const dedupeLinks = (ls) => [...new Map(ls.filter((l) => l.cause !== l.reaction 
  * over the rules; a moment that causes a reaction is at least a punch.
  */
 export function momentsWithLinks(input, phase6 = null, opts = {}) {
-  const moments = buildMoments(input, opts);
-  const { links, roles, promises } = linkMoments(moments, phase6, opts);
+  const moments = input.joints?.length ? clipMoments(input, input.joints, opts) : buildMoments(input, opts);
+  const { links, roles, promises } = linkMoments(moments, phase6Shape(phase6), opts);
   for (const m of moments) {
     if (roles.has(m.n)) { m.role = roles.get(m.n); m.roleSource = "links"; } else m.roleSource = "rules";
     if (m.roleSource === "rules" && links.some((l) => l.cause === m.n && l.reaction !== m.n) && (m.role === "build" || m.role === "filler")) m.role = "punch";
@@ -259,8 +335,10 @@ const lenOf = (moments, ns) => ns.reduce((n, k) => n + (moments[k - 1].e - momen
  * (put right before it; a "before" link: right after), a promise its payoff, and the hook must be a moment. Returns
  * { treatment, fixes: [text] } — the fixes go on the cut sheet. Never adds a time that is not a moment.
  */
-export function validateTreatment(t, moments, links = [], promises = []) {
+export function validateTreatment(t, moments, links = [], promises = [], { rank = null } = {}) {
   const fixes = [], N = moments.length;
+  // Sorting puts moments in the story's order when there is one (phase 8), else in the footage's.
+  const byRank = (a, b) => (rank ? (rank.get(a) ?? 1e6 + a) - (rank.get(b) ?? 1e6 + b) : a - b);
   const ok = (n) => Number.isInteger(n) && n >= 1 && n <= N;
   let order = [];
   for (const n of t.order || []) { if (!ok(n)) { fixes.push(`moment ${n} does not exist`); continue; } if (order.includes(n)) { fixes.push(`moment ${n} twice`); continue; } order.push(n); }
@@ -281,29 +359,32 @@ export function validateTreatment(t, moments, links = [], promises = []) {
   if (!order.length) { order = moments.filter((m) => m.role !== "filler").map((m) => m.n); fixes.push("empty order: every non-filler moment"); }
   // What the user placed without speech (a picture, a silent clip) is never left out.
   for (const m of moments) if (m.protected && !order.includes(m.n)) { order.push(m.n); fixes.push(`moment ${m.n} kept: a clip without speech`); }
-  if (fixes.some((f) => f.endsWith("a clip without speech"))) order.sort((a, b) => a - b);
+  if (fixes.some((f) => f.endsWith("a clip without speech"))) order.sort(byRank);
   let hook = t.hook && ok(t.hook.moment) && HOOK_KINDS.includes(t.hook.kind) && t.hook.kind !== "none" ? { kind: t.hook.kind, moment: t.hook.moment } : null;
   if (t.hook?.moment && !hook) fixes.push(`hook moment ${t.hook.moment} is not valid`);
-  if (hook && !order.includes(hook.moment)) { order.push(hook.moment); order.sort((a, b) => a - b); fixes.push(`hook moment ${hook.moment} also kept in its place`); }
+  if (hook && !order.includes(hook.moment)) { order.push(hook.moment); order.sort(byRank); fixes.push(`hook moment ${hook.moment} also kept in its place`); }
   return { treatment: { ...t, order, hook }, fixes };
 }
 
 /** The strongest moment of a kind that is worth showing first (null when none). */
-function hookMoment(moments, kind, { durationUs }) {
+function hookMoment(moments, kind, { durationUs, pos = null }) {
+  // How far into the story a moment is (0–1): its place in the story order (phase 8), else its time.
+  const at = (m) => (pos ? pos(m.n) / Math.max(1, moments.length) : m.s / Math.max(1, durationUs));
   // A moment people react to (laughter, applause, a scream) opens better than a line alone.
   const pull = (m) => m.strength + (m.reactions.some((r) => BIG.has(r.type)) ? 1.5 : 0);
   const by = (list) => [...list].sort((a, b) => pull(b) - pull(a))[0] || null;
   if (kind === "reaction") return by(moments.filter((m) => m.reactions.some((r) => ["laughter", "applause", "scream", "gasp"].includes(r.type))));
-  if (kind === "question") return moments.find((m) => m.kind === "speech" && (m.question || m.story === "stakes") && m.s < 0.6 * durationUs) || null;
+  if (kind === "question") return [...moments].sort((a, b) => at(a) - at(b)).find((m) => m.kind === "speech" && (m.question || m.story === "stakes") && at(m) < 0.6) || null;
   if (kind === "result") {
-    const late = moments.filter((m) => m.s >= 0.35 * durationUs && (m.role === "punch" || m.role === "reaction"));
-    return by(late) || by(moments.filter((m) => m.n > 1 && m.role !== "filler"));
+    const late = moments.filter((m) => at(m) >= 0.35 && (m.role === "punch" || m.role === "reaction"));
+    const opening = [...moments].sort((a, b) => at(a) - at(b))[0];
+    return by(late) || by(moments.filter((m) => m !== opening && m.role !== "filler"));
   }
   return null;
 }
 
-/** Moments in time order that fit `budgetUs`: the strongest first (the opening setup and every hook kept). */
-function pickWithin(moments, budgetUs, must = []) {
+/** Moments in time (or story) order that fit `budgetUs`: the strongest first (the opening setup and every hook kept). */
+function pickWithin(moments, budgetUs, must = [], pos = (n) => n) {
   const cand = moments.filter((m) => m.role !== "filler" && m.kind !== "gap");
   const chosen = new Set(must.filter(Boolean));
   let used = lenOf(moments, [...chosen]);
@@ -313,44 +394,60 @@ function pickWithin(moments, budgetUs, must = []) {
     if (used + (m.e - m.s) > budgetUs) continue;
     chosen.add(m.n); used += m.e - m.s;
   }
-  return [...chosen].sort((a, b) => a - b);
+  return [...chosen].sort((a, b) => pos(a) - pos(b));
 }
 
 /**
  * 3–5 treatments by rules (the local or cloud planner proposes its own; both go to the critic). Each: { id, title,
  * hook: { kind, moment } | null, order, length: full|medium|short, why }. opts: { durationUs, targetUs (a reel's
- * length), links, promises }.
+ * length), links, promises, story }. story (phase 8, core/story.js): { rank: Map(moment → place in the story) } — the
+ * treatments then follow the story order instead of the footage's, the pure story is one of them, and the footage's
+ * own order comes last as an alternative (`alternative: true`: listed on the cut sheet, not a candidate).
  */
-export function ruleTreatments(moments, { durationUs, targetUs = null, links = [], promises = [] } = {}) {
+export function ruleTreatments(moments, { durationUs, targetUs = null, links = [], promises = [], story = null } = {}) {
   const D = durationUs ?? (moments.length ? moments[moments.length - 1].e : 0);
-  const useful = moments.filter((m) => m.role !== "filler" && m.kind !== "gap").map((m) => m.n);
+  const rank = story?.rank || null;
+  const pos = rank ? (n) => rank.get(n) ?? 1e6 + n : (n) => n;
+  const inStory = (ns) => [...ns].sort((a, b) => pos(a) - pos(b));
+  const useful = inStory(moments.filter((m) => m.role !== "filler" && m.kind !== "gap").map((m) => m.n));
   const fullUs = lenOf(moments, useful);
   const short = Math.min(targetUs || 60 * US, Math.max(15 * US, 0.45 * fullUs));
   const medium = targetUs ? Math.min(fullUs, targetUs * 1.4) : 0.68 * fullUs;
   const out = [];
-  const add = (t) => {
-    const v = validateTreatment(t, moments, links, promises);
+  const add = (t, r = rank) => {
+    const v = validateTreatment(t, moments, links, promises, { rank: r });
     const key = JSON.stringify([v.treatment.order, v.treatment.hook]);
     if (out.some((x) => x.key === key)) return;
     out.push({ ...v.treatment, fixes: v.fixes, source: "rules", key });
   };
-  const result = hookMoment(moments, "result", { durationUs: D }), reaction = hookMoment(moments, "reaction", { durationUs: D }), question = hookMoment(moments, "question", { durationUs: D });
+  const hp = { durationUs: D, pos: rank ? pos : null };
+  const result = hookMoment(moments, "result", hp), reaction = hookMoment(moments, "reaction", hp), question = hookMoment(moments, "question", hp);
   const first = useful[0];
+  const pick = (budget, must) => pickWithin(moments, budget, must, pos);
   if (targetUs) {
-    add({ id: "reel-result", title: "ريل: النتيجة الأول", length: "short", hook: result && { kind: "result", moment: result.n }, order: pickWithin(moments, targetUs, [first, result?.n]), why: `the strongest moments within ${Math.round(targetUs / US)} s, opened by the result`, whyAr: `أقوى اللحظات في ${Math.round(targetUs / US)} ث، وبتفتح بالنتيجة` });
-    if (reaction) add({ id: "reel-reaction", title: "ريل: رد الفعل الأول", length: "short", hook: { kind: "reaction", moment: reaction.n }, order: pickWithin(moments, targetUs, [reaction.n]), why: "the reaction first, then the moments that lead to it", whyAr: "رد الفعل الأول، وبعده اللحظات اللي وصّلت له" });
+    add({ id: "reel-result", title: "ريل: النتيجة الأول", length: "short", hook: result && { kind: "result", moment: result.n }, order: pick(targetUs, [first, result?.n]), why: `the strongest moments within ${Math.round(targetUs / US)} s, opened by the result`, whyAr: `أقوى اللحظات في ${Math.round(targetUs / US)} ث، وبتفتح بالنتيجة` });
+    if (reaction) add({ id: "reel-reaction", title: "ريل: رد الفعل الأول", length: "short", hook: { kind: "reaction", moment: reaction.n }, order: pick(targetUs, [reaction.n]), why: "the reaction first, then the moments that lead to it", whyAr: "رد الفعل الأول، وبعده اللحظات اللي وصّلت له" });
   }
-  add({ id: "result-full", title: "النتيجة الأول، الحكاية كاملة", length: "full", hook: result && { kind: "result", moment: result.n }, order: useful, why: "a flash-forward of the strongest late moment, then everything worth keeping in order", whyAr: "فلاش قدام من أقوى لحظة متأخرة، وبعده كل اللي يستاهل بالترتيب" });
-  if (reaction) add({ id: "reaction-medium", title: "رد الفعل الأول، نسخة متوسطة", length: "medium", hook: { kind: "reaction", moment: reaction.n }, order: pickWithin(moments, medium, [first, reaction.n]), why: "the biggest reaction as the cold open, the strongest two thirds of the story", whyAr: "أكبر رد فعل في الأول، وأقوى تلتين الحكاية" });
-  if (question) add({ id: "question-medium", title: "سؤال في الأول", length: "medium", hook: { kind: "question", moment: question.n }, order: pickWithin(moments, medium, [question.n]), why: `opens on «${question.text.slice(0, 40)}» — the question the video answers`, whyAr: `بيفتح بـ«${question.text.slice(0, 40)}»: السؤال اللي الفيديو بيجاوبه` });
+  add({ id: "result-full", title: "النتيجة الأول، الحكاية كاملة", length: "full", hook: result && { kind: "result", moment: result.n }, order: useful, why: `a flash-forward of the strongest late moment, then everything worth keeping in ${rank ? "story " : ""}order`, whyAr: `فلاش قدام من أقوى لحظة متأخرة، وبعده كل اللي يستاهل ${rank ? "بترتيب القصة" : "بالترتيب"}` });
+  if (rank) add({ id: "story-full", title: "ترتيب القصة", length: "full", hook: null, order: useful, why: "the story order (setup, promise, build-up, conflict, payoff, ending), no flash-forward", whyAr: "بترتيب الحكاية (تمهيد، وعد، تصاعد، مشكلة، نتيجة، نهاية) من غير فلاش قدام" });
+  if (reaction) add({ id: "reaction-medium", title: "رد الفعل الأول، نسخة متوسطة", length: "medium", hook: { kind: "reaction", moment: reaction.n }, order: pick(medium, [first, reaction.n]), why: "the biggest reaction as the cold open, the strongest two thirds of the story", whyAr: "أكبر رد فعل في الأول، وأقوى تلتين الحكاية" });
+  if (question) add({ id: "question-medium", title: "سؤال في الأول", length: "medium", hook: { kind: "question", moment: question.n }, order: pick(medium, [question.n]), why: `opens on «${question.text.slice(0, 40)}» — the question the video answers`, whyAr: `بيفتح بـ«${question.text.slice(0, 40)}»: السؤال اللي الفيديو بيجاوبه` });
   // Straight into the action: the slow opening goes (everything before the first build / punch / action moment).
-  const start = moments.find((m) => m.role === "punch" || m.role === "reaction" || m.kind === "action" || (m.role === "build" && m.kind === "speech" && m.n > 1));
-  if (start && start.n > 1) add({ id: "in-medias-res", title: "من وسط الأحداث", length: "full", hook: { kind: "action", moment: start.n }, order: useful.filter((n) => n >= start.n || moments[n - 1].role === "setup"), why: `starts at moment ${start.n}, the opening before it goes`, whyAr: `بيبدأ من لحظة ${start.n}، والبداية البطيئة قبلها بتتشال` });
-  add({ id: "short-result", title: "نسخة قصيرة", length: "short", hook: result && { kind: "result", moment: result.n }, order: pickWithin(moments, short, [result?.n]), why: `the strongest moments within ${Math.round(short / US)} s`, whyAr: `أقوى اللحظات في ${Math.round(short / US)} ث` });
+  const seq = inStory(moments.map((m) => m.n)).map((n) => moments[n - 1]);
+  const start = seq.find((m) => m.role === "punch" || m.role === "reaction" || m.kind === "action" || (m.role === "build" && m.kind === "speech" && m !== seq[0]));
+  if (start && start !== seq[0]) add({ id: "in-medias-res", title: "من وسط الأحداث", length: "full", hook: { kind: "action", moment: start.n }, order: useful.filter((n) => pos(n) >= pos(start.n) || moments[n - 1].role === "setup"), why: `starts at moment ${start.n}, the opening before it goes`, whyAr: `بيبدأ من لحظة ${start.n}، والبداية البطيئة قبلها بتتشال` });
+  add({ id: "short-result", title: "نسخة قصيرة", length: "short", hook: result && { kind: "result", moment: result.n }, order: pick(short, [result?.n]), why: `the strongest moments within ${Math.round(short / US)} s`, whyAr: `أقوى اللحظات في ${Math.round(short / US)} ث` });
   // At least three: lengths of the plain story.
-  if (out.length < 3) add({ id: "plain-medium", title: "الحكاية بترتيبها، متوسطة", length: "medium", hook: null, order: pickWithin(moments, medium, [first]), why: "in shooting order, the weakest third out", whyAr: "بترتيب التصوير، من غير أضعف تلت" });
-  if (out.length < 3) add({ id: "plain-full", title: "الحكاية بترتيبها", length: "full", hook: null, order: useful.length ? useful : moments.map((m) => m.n), why: "in shooting order, fillers out", whyAr: "بترتيب التصوير، من غير الحشو" });
-  return out.slice(0, 5).map(({ key, ...t }) => t);
+  if (out.length < 3) add({ id: "plain-medium", title: "الحكاية بترتيبها، متوسطة", length: "medium", hook: null, order: pick(medium, [first]), why: `in ${rank ? "story" : "shooting"} order, the weakest third out`, whyAr: `${rank ? "بترتيب القصة" : "بترتيب التصوير"}، من غير أضعف تلت` });
+  if (out.length < 3) add({ id: "plain-full", title: "الحكاية بترتيبها", length: "full", hook: null, order: useful.length ? useful : moments.map((m) => m.n), why: `in ${rank ? "story" : "shooting"} order, fillers out`, whyAr: `${rank ? "بترتيب القصة" : "بترتيب التصوير"}، من غير الحشو` });
+  const list = out.slice(0, 5);
+  // The footage as it was given (the shooting order), for the cut sheet: the user can pick it instead of the story.
+  if (rank) {
+    const n0 = out.length;
+    add({ id: "shooting-order", title: "بترتيب التصوير", length: "full", hook: null, order: [...useful].sort((a, b) => a - b), why: "the clips in the order they were given, fillers out (the alternative to the story order)", whyAr: "الكليبات بالترتيب اللي اتحطت بيه، من غير الحشو (البديل لترتيب القصة)" }, null);
+    if (out.length > n0) list.push({ ...out[out.length - 1], alternative: true });
+  }
+  return list.map(({ key, ...t }) => t);
 }
 
 // ------------------------------------------------------------------ the executor's spec
