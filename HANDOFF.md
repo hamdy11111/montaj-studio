@@ -50,7 +50,7 @@ Plan: `PLAN_editor_and_graphics.md` phase-table row 10 and §5 «ربط الاس
   per section.
 
 **Real tests** (GPU lock held for each run; song «عيون القلب», the one that failed before). Results are in
-`D:\capcut new\montaj-bench\النتائج\studio-links\cover\` (`preview.wav`, `long.wav`, reports, every section's takes).
+`D:\capcut new\montaj-bench\النتائج\studio-links\cover\` (`preview.wav`, `long.wav`, and their reports with every take's numbers).
 
 | Run | Result |
 |---|---|
@@ -201,3 +201,40 @@ LFS oids and the GitHub zip.
   transcribe first.
 - The cover's resource check asks for 12 GB of free GPU memory. Other engines (perception, director LLM) must be
   stopped first.
+
+## Disk
+
+Cleaned up after the tests (the standing rule in `D:\capcut new\CLAUDE.md`). Each item was proven unused first: no
+reference in `src/`, `bench/`, `scripts/` or `tests/`, and no junctions inside.
+
+**Removed (~158 MB):**
+
+| What | Size |
+|---|---|
+| `montaj-bench\النتائج\studio-links\cover\long-takes\`: the raw takes of the 4-minute run's sections (two takes of section 3). Only the finished song is for listening. `musiccover.e2e.test.mjs` no longer copies takes; their numbers stay in `long.report.json`. | 114 MB |
+| This session's scratch folder: the Plenio zip I downloaded and unpacked to compare it (a duplicate of the models-folder zip), the edit scripts and the test logs. | 40 MB |
+| `tests/e2e/artifacts/` in this worktree (screenshots from my UI runs; git-ignored). | 2 MB |
+| `__pycache__` that `py_compile` made in `montaj_music/`. | <1 MB |
+
+The temporary app profiles of every test run (`%TEMP%\montaj-cover-e2e-*`, `montaj-links-*`, `montaj-musicui-*`,
+`montaj-bed-*`) were removed by the tests themselves. None is left, and `cleanup.mjs` reports nothing of this phase.
+
+**Kept on disk:**
+
+| What | Size | Why |
+|---|---|---|
+| `montaj-bench\النتائج\studio-links\cover\`: `preview.wav`, `long.wav` and their two reports. | 75 MB | For the user to listen to. |
+| `runtime\models\music\checkpoints\yue2_3b_bf16.safetensors` | 7.8 GB | Wired into the code (`catalog.js` set `yue2cover`; `cover.py`). |
+| `runtime\models\musicudio_encoders\sheetsage2_bf16.safetensors` | 1.4 GB | Wired into the code (same set). |
+| `runtime\models\music\lorasr_lora_inst_v3abc_comfyui.safetensors` | 0.2 GB | Wired into the code (same set). |
+| `runtime\models\music\packages\plenio-0.7.0.zip` and its unpacked `plenio-0.7.0\` | 38 MB + 2 MB | The engine imports Plenio from here. |
+| This worktree | — | The branch is not merged yet. |
+
+**One duplicate to note:** the three model files above are copies of the user's old studio's files under
+`F:\AI_CREATIVE_STUDIO_PORTABLE_CLEAN\models\` (9.4 GB on each drive). The F: studio is read-only for us, and a
+junction cannot point at single files across drives, so both stay.
+
+**Option for the user:**
+- Point the music models folder at a folder on F: that holds these files (Settings in the model manager).
+- Then the D: copies could go, but only with the user's OK, because the program would then depend on the F: drive.
+

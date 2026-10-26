@@ -43,9 +43,7 @@ function keep(item, label) {
   if (!OUT) return;
   fs.mkdirSync(OUT, { recursive: true });
   fs.copyFileSync(item.path, path.join(OUT, `${label}.wav`));
-  fs.copyFileSync(item.meta.report, path.join(OUT, `${label}.report.json`));
-  const takes = path.join(path.dirname(item.path), "sections");
-  if (fs.existsSync(takes)) fs.cpSync(takes, path.join(OUT, `${label}-takes`), { recursive: true });
+  fs.copyFileSync(item.meta.report, path.join(OUT, `${label}.report.json`)); // every take's numbers; not its audio
 }
 const brief = (s) => ({ index: s.index, start: s.start, end: s.end, chosen: s.chosen_take, takes: s.takes.map((k) => ({ seconds: k.seconds, expected: k.expected_seconds, window: k.window, min_frames: k.min_frames, fit: k.fit_ratio, vocal: k.vocal.notes, melody: k.melody.pitch_class_sequence_ratio, contour: k.melody.contour_direction_ratio, shift: k.melody.matched_register_shift_semitones, notes: [k.melody.source_notes, k.melody.output_notes], failures: k.failures, warnings: k.warnings })) });
 
