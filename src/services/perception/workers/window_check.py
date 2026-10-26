@@ -2,9 +2,11 @@
 # cough?"): a yes/no answer with a confidence and a reason for a ≤ 30 s window, asked of a model that sees (and, for
 # Qwen3-Omni, hears) the window itself. Used by phase 6 (cause ↔ reaction) on its candidate pairs, not on whole files.
 #
+#   qwen3.6     Qwen3.6-35B-A3B (the vision stage's model): keyframes only — the default (round 4: 25/29 right on phase 6's
+#               labelled spans, against 21/29 for Qwen3-Omni).
 #   qwen3-omni  Qwen3-Omni-30B-A3B-Instruct (ggml-org GGUF; upstream llama.cpp ≥ b8769 takes audio and images):
-#               the window's sound (WAV) + keyframes with their times. Implemented; runs once its files exist in
-#               runtime/models/perception/qwen3-omni-30b-a3b/ (not downloaded yet — needs a practical test).
+#               the window's sound (WAV) + keyframes with their times. Tested in round 4: misses half the real
+#               reactions and says yes to wrong causes; with other apps on the card it spills out of VRAM (slow).
 #   keye        Keye-VL-2.0-30B-A3B ("the exact moment" specialist): needs Kwai's own llama.cpp fork
 #               (github.com/Kwai-Keye/llama.cpp, branch keye-vl-v2-30b-release-video, no prebuilt binaries), so it
 #               answers {available: false} until that build exists in runtime/llama-keye/.

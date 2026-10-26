@@ -33,6 +33,12 @@ const ASR_DIR = path.join(HERE, "..", "asr");
 const REPO = path.resolve(HERE, "..", "..", "..");
 
 const PERCEPTION_SETS = layerDef("perception").sets;
+/**
+ * windowCheck's default model. Round 4 measured both on phase 6's labelled spans (02, 06; 29 yes/no questions):
+ * Qwen3.6 (sees keyframes) 25/29, Qwen3-Omni (sees and hears) 21/29 — Omni missed 4 of 8 real reactions and called every
+ * wrong cause candidate the cause (0/3), though it rejected all 12 calm decoys. "qwen3-omni" stays selectable.
+ */
+export const WINDOW_CHECK_ENGINE = "qwen3.6";
 export const STAGES = Object.freeze(["words", "speakers", "audio", "emotion", "shots", "faces", "asd", "vision"]);
 // Which stages read which earlier ones (a re-run of one makes these re-run too).
 export const NEEDS = Object.freeze({ words: [], speakers: [], audio: [], emotion: ["words", "speakers"], shots: [], faces: ["shots"], asd: ["faces"], vision: ["shots", "words"] });
@@ -252,7 +258,7 @@ export class PerceptionService {
    * phase 6 (is this reaction caused by that event?). checks: [{t0, t1, question}]. engine: "qwen3-omni" | "keye".
    * Answers {available: false, reason} while that model is not installed.
    */
-  async windowCheck(file, checks, { engine = "qwen3-omni", signal } = {}) {
+  async windowCheck(file, checks, { engine = WINDOW_CHECK_ENGINE, signal } = {}) {
     const hash = fileHash(file);
     const dir = path.join(this.cacheDir, hash, "window-check");
     const release = await this.gpuLock.acquire(`perception-window-${hash.slice(0, 8)}`);
