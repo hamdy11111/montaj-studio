@@ -50,7 +50,7 @@ def main():
     os.makedirs(work, exist_ok=True)
     answers = {}
     pairs = job["pairs"]
-    with llama.Server(job["llama"], os.path.join(md, MODEL), os.path.join(md, MMPROJ), ctx=32768, log_path=os.path.join(work, "server.log")) as srv:
+    with llama.Server(job["llama"], os.path.join(md, MODEL), os.path.join(md, MMPROJ), ctx=8192, log_path=os.path.join(work, "server.log")) as srv:
         load = srv.wait()
         log(f"model loaded in {load} s")
 

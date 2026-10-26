@@ -48,7 +48,8 @@ const sourceSet = (layer, id) => SOURCES.find((l) => l.layer === layer)?.sets.fi
 export const LAYERS = [
   { id: "perception", env: "perception", root: "perception", depends: ["llama", "asr"], borrows: [],
     sets: ["align", "speakers", "audio", "emotion", "shots", "faces", "adaface", "asd", "vision", "omni"] },
-  { id: "takes", env: "takes", root: "takes", depends: [], borrows: [], sets: ["voice", "face", "gaze", "judge"], after: ["perception"] },
+  // The AI judge on close calls is perception's Qwen3-Omni (measured against Qwen2.5-Omni-7B in round 4): optional.
+  { id: "takes", env: "takes", root: "takes", depends: ["llama"], borrows: ["perception/omni"], sets: ["voice", "face", "gaze"], after: ["perception"] },
   { id: "links", env: "perception", root: "perception", depends: ["llama"], borrows: ["perception/vision", "perception/omni"], sets: [], after: ["perception"] },
   { id: "broll", env: "media", root: "media", depends: ["video", "llama", "translator"], borrows: [], sets: ["siglip2", "metaclip2", "qwen3vlEmb", "rerank", "bge", "captioner"] },
 ];

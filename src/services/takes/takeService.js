@@ -88,8 +88,12 @@ function runWorker(python, script, job, { outFile, onProgress, log = () => {}, s
   });
 }
 
-/** The AI judge used on close calls (measured in round 4, see HANDOFF): "qwen3-omni" | "qwen2.5-omni". */
-export const JUDGE_ENGINE = "qwen2.5-omni";
+/**
+ * The AI judge used on close calls: "qwen3-omni" | "qwen2.5-omni". Round 4 asked both the same 8 pairs in both orders
+ * (5 real sentences clean vs degraded, a false start vs the full take, two without a right answer): Qwen2.5-Omni-7B
+ * answered "B" 15 times of 16 (consistent 1/8, right 1/6); Qwen3-Omni-30B-A3B was consistent on 7/8 and right on 6/6.
+ */
+export const JUDGE_ENGINE = "qwen3-omni";
 
 /** The judge model folder: runtime/models/takes/qwen2.5-omni-7b, else the local Hugging Face cache (never downloaded). */
 export function judgeModelPath(models, home = process.env.USERPROFILE || process.env.HOME || "") {

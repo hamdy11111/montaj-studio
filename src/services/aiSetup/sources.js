@@ -62,8 +62,6 @@ export const SOURCES = [
         ] },
       { id: "gaze", name: "L2CS-Net Gaze360 (looking at the camera)", license: "code MIT; weights Gaze360 terms (non-commercial)", gpuGB: 0.5,
         src: [{ hf: "py-feat/l2cs", rev: "main", dir: "l2cs", files: ["l2cs_gaze360_resnet50.safetensors"] }] },
-      { id: "judge", name: "Qwen2.5-Omni-7B (AI tie-breaker, off by default)", optional: true, license: "Apache-2.0", gpuGB: 21,
-        src: [{ hf: "Qwen/Qwen2.5-Omni-7B", rev: "main", dir: "qwen2.5-omni-7b", files: "all", local: "hf-cache" }] },
     ],
   },
   // ------------------------------------------------------------------ B-roll index of the user's footage (phase 9)

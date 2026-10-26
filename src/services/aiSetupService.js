@@ -406,11 +406,14 @@ export class AiSetupService extends EngineSetupService {
       for (const c of x.cands || []) { if (x.ok) break; if (c !== x.path && (await sha256File(c)) === x.file.sha256) Object.assign(x, { path: c, ok: true }); }
       done += x.file.size;
     }
-    const tops = copy ? {} : linkableTops(set, located.filter((x) => x.ok));
+    // A file that is itself a link (the Hugging Face cache's snapshot files point at ../../blobs/…, relative) breaks when
+    // its folder is reached through a junction: such folders are never linked; their real files are hard-linked instead.
+    for (const x of located) if (x.ok) { x.real = fs.realpathSync(x.path); x.isLink = path.resolve(x.real) !== path.resolve(fs.realpathSync(path.dirname(x.path)), path.basename(x.path)); }
+    const tops = copy ? {} : linkableTops(set, located.filter((x) => x.ok && !x.isLink));
     for (const [top, src] of Object.entries(tops)) {
       const at = path.join(this.modelsDir(set.root), top);
       const mine = located.filter((x) => x.file.dir.split("/")[0] === top);
-      if (!mine.every((x) => x.ok)) continue;
+      if (!mine.every((x) => x.ok && !x.isLink)) continue;
       if (fs.existsSync(at) && !linkTarget(at)) {
         // A real folder is already there: link only when it holds none of this set's files (never replace data).
         if (fs.readdirSync(at).length) continue;
@@ -429,11 +432,11 @@ export class AiSetupService extends EngineSetupService {
       fs.mkdirSync(path.dirname(dest), { recursive: true });
       fs.rmSync(dest, { force: true });
       let how = "hardlinked";
-      try { if (copy) throw new Error("copy asked"); fs.linkSync(x.path, dest); } catch {
+      try { if (copy) throw new Error("copy asked"); fs.linkSync(x.real || x.path, dest); } catch {
         // Another drive: a copy. "Import everything" never copies (it reports the size instead): no data twice.
         if (noCopy) { report.push({ file: x.file.file, result: "copyNeeded", from: x.path, size: x.file.size }); continue; }
         how = "copied";
-        await new Promise((resolve, reject) => fs.createReadStream(x.path).pipe(fs.createWriteStream(`${dest}.part`)).on("finish", resolve).on("error", reject));
+        await new Promise((resolve, reject) => fs.createReadStream(x.real || x.path).pipe(fs.createWriteStream(`${dest}.part`)).on("finish", resolve).on("error", reject));
         fs.renameSync(`${dest}.part`, dest);
       }
       report.push({ file: x.file.file, result: how, from: x.path });
