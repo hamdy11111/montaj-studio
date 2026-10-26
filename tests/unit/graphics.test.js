@@ -286,7 +286,8 @@ test("render wiring: remotion segments of a timeline, their pictures, stable cac
   const kw = segmentJob({ seg: { duration: US }, template: "kinetic-word", params: {}, pack: "punchy" }, { width: 1080, height: 1920, fps: 30 });
   assert.ok(kw.crop && kw.crop.w === 1080 && kw.crop.h < 1920 * 0.8 && kw.crop.h % 2 === 0);
   assert.equal(segmentJob({ seg: { duration: US }, template: "tint-fx", params: {}, pack: "punchy" }, { width: 1080, height: 1920, fps: 30 }).crop, null);
-  const g = groupJobs([kw, { ...kw, crop: { ...kw.crop, h: 200 } }, { ...kw, crop: null }]);
+  const long = { ...kw, durationInFrames: 300 };
+  const g = groupJobs([long, { ...long, crop: { ...kw.crop, h: 200 } }, { ...long, crop: null }]);
   assert.equal(g.length, 3, "a whole frame, and two bands too different to share a render");
   assert.equal(groupJobs([kw, { ...kw, crop: { ...kw.crop, h: kw.crop.h - 10 } }]).length, 1, "close bands share one render");
   const b = bandOf({ ...kw, crop: { x: 0, y: 1800, w: 1080, h: 100 } }, 400);
