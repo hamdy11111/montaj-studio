@@ -98,6 +98,49 @@ export function betweenWords(regions, srcFromUs, speed, durUs) {
   return `${FLOOR}+${1 - FLOOR}*min(1,${terms.join("+")})`;
 }
 
+/**
+ * Kept action whose own sound the voice clean-up must leave alone (the edit plan's `audio.keepAmbience`, written by
+ * the director): `[{ mediaId, fromUs, toUs }]` in SOURCE time → `{ [mediaId]: [[fromUs, toUs], …] }`, sorted, with
+ * overlapping or touching spans merged and anything malformed dropped. Empty → null (the export is unchanged).
+ */
+export function ambienceByMedia(list) {
+  const by = {};
+  for (const x of Array.isArray(list) ? list : []) {
+    const a = Math.round(Number(x?.fromUs)), b = Math.round(Number(x?.toUs));
+    if (typeof x?.mediaId !== "string" || !x.mediaId || !Number.isFinite(a) || !Number.isFinite(b) || b - a < 1000) continue;
+    (by[x.mediaId] ||= []).push([Math.max(0, a), b]);
+  }
+  for (const id of Object.keys(by)) {
+    const merged = [];
+    for (const [a, b] of by[id].sort((p, q) => p[0] - q[0])) {
+      const last = merged[merged.length - 1];
+      if (last && a <= last[1]) last[1] = Math.max(last[1], b);
+      else merged.push([a, b]);
+    }
+    by[id] = merged;
+  }
+  return Object.keys(by).length ? by : null;
+}
+
+/** Hand-off between the cleaned voice and the kept action's own sound at a span's edges (s, outside the span). */
+export const AMBIENCE_RAMP_S = 0.3;
+
+/**
+ * Gain expression (0…1) for the kept action's own sound: 1 inside a kept span, ramping over AMBIENCE_RAMP_S outside
+ * its edges, 0 elsewhere — for audio that starts at source time `srcFromUs` and plays at `speed` for `durUs` (the same
+ * clock as betweenWords). The cleaned voice gets 1 − this, so the two cross-fade. Null when no span touches the piece.
+ */
+export function keepMask(spans, srcFromUs, speed, durUs) {
+  if (!spans?.length) return null;
+  const r = AMBIENCE_RAMP_S, rUs = r * US;
+  const from = srcFromUs, to = srcFromUs + durUs * speed;
+  const near = spans.filter(([a, b]) => b + rUs > from && a - rUs < to);
+  if (!near.length) return null;
+  const T = `(${s(from)}+if(isnan(t),0,t)*${Number(speed.toFixed(6))})`;
+  const terms = near.map(([a, b]) => `clip(min((${T}-${s(a - rUs)})/${r},(${s(b + rUs)}-${T})/${r}),0,1)`);
+  return `min(1,${terms.join("+")})`;
+}
+
 /** How much a dub's background is lowered under the dubbed voice (dB). */
 export const DUB_DUCK_DB = 6;
 
@@ -708,10 +751,22 @@ export function buildExport(tl, o) {
     if (a?.denoise?.enabled) {
       // Neural speech denoiser (RNNoise) when its model is available, else the FFT denoiser; then, when the words
       // of this file are known, everything between them (breaths, handling noise, room tone) is lowered smoothly.
-      if (o.rnnModel) fx.push(`highpass=f=70,arnndn=model='${o.rnnModel.replace(/\\/g, "/").replace(/:/g, "\\:")}'`);
-      else fx.push(AUDIO_CHAINS.denoise);
-      const duck = seg.speedMode === "curve" ? null : betweenWords(o.speech?.[seg.mediaId], seg.sourceStart + skip * (seg.speed || 1), seg.speed || 1, a1 - a0);
-      if (duck) fx.push(`volume='${duck}':eval=frame`);
+      const clean = [o.rnnModel ? `highpass=f=70,arnndn=model='${o.rnnModel.replace(/\\/g, "/").replace(/:/g, "\\:")}'` : AUDIO_CHAINS.denoise];
+      const srcFrom = seg.sourceStart + skip * (seg.speed || 1);
+      const duck = seg.speedMode === "curve" ? null : betweenWords(o.speech?.[seg.mediaId], srcFrom, seg.speed || 1, a1 - a0);
+      if (duck) clean.push(`volume='${duck}':eval=frame`);
+      // Kept wordless action (the plan's keepAmbience): RNNoise would gate a crowd or a game away and the between-words
+      // gain would lower it to −20 dB, so over those spans the clip's own sound is used instead, cross-faded with the
+      // cleaned voice over AMBIENCE_RAMP_S at each edge. Without spans the chain is exactly as before.
+      const keep = seg.speedMode === "curve" ? null : keepMask(o.keepAmbience?.[seg.mediaId], srcFrom, seg.speed || 1, a1 - a0);
+      if (keep) {
+        const toClean = L("ac"), toRaw = L("ar"), cleaned = L("ac"), raw = L("ar"), both = L("a");
+        chains.push(`[${head}]asplit=2[${toClean}][${toRaw}]`);
+        chains.push(`[${toClean}]${clean.join(",")},volume='1-${keep}':eval=frame[${cleaned}]`);
+        chains.push(`[${toRaw}]volume='${keep}':eval=frame[${raw}]`);
+        chains.push(`[${cleaned}][${raw}]amix=inputs=2:normalize=0:duration=longest:dropout_transition=0[${both}]`);
+        head = both;
+      } else fx.push(...clean);
     }
     if (a?.enhanceVoice?.enabled) fx.push(AUDIO_CHAINS.enhanceVoice);
     if (a?.isolate === "remove_vocal" || a?.isolate === "keep_vocal") fx.push(AUDIO_CHAINS[a.isolate]);

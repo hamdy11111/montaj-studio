@@ -684,6 +684,9 @@ const D = {
   "dir.stage.story": ["Story order", "ترتيب القصة"],
   "dec.story": ["Story order of {segments} scenes ({source}): {order}", "ترتيب القصة لـ{segments} مشهد ({source}): {order}"],
   "dec.storySame": ["{segments} scenes: the story order is the shooting order", "{segments} مشهد: ترتيب القصة هو نفسه ترتيب التصوير"],
+  // Round 4 — audio-export: previews in the library browsers
+  "lb.listen": ["Listen", "اسمع"], "lb.stopListen": ["Stop", "وقّف"], "lb.watchShot": ["Play this shot", "شغّل اللقطة"],
+  "lb.previewFailed": ["This file can't be previewed", "الملف ده مش بيتعرض"],
 };
 
 let lang = "ar";

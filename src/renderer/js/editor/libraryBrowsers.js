@@ -5,7 +5,9 @@
 //   accent on the playhead;
 // - «بحث البي-رول»: search the B-roll index by meaning (broll.search) and lay the shot's span on a track above, at the
 //   playhead.
-// Each addition is one undo step; files are imported into the project the first time they are used.
+// Each addition is one undo step; files are imported into the project the first time they are used. A sound can be
+// heard and a shot seen (its keyframe, then its span played) before it is added, through media://libfile, which serves
+// only the libraries' own files, read-only (main/libraryFiles.js).
 import { h, mount } from "../dom.js";
 import { icon } from "../icons.js";
 import { t } from "../i18n.js";
@@ -16,6 +18,38 @@ import { select, toggle } from "../ui/controls.js";
 import { US, formatDuration } from "../../core/util.js";
 
 const fmtS = (s) => formatDuration(Math.round((s || 0) * US));
+
+/** media://libfile URL of a library file (base64url of its UTF-8 path; main/libraryFiles.js decodes and checks it). */
+export function libFileUrl(file) {
+  let bin = "";
+  for (const b of new TextEncoder().encode(String(file))) bin += String.fromCharCode(b);
+  return `media://libfile/${btoa(bin).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "")}`;
+}
+
+/** One player for the rows of a browser: play(url, button, span?) toggles; the span [from, to] s stops itself. */
+function previewPlayer(el) {
+  let btn = null, stopAt = null;
+  const idle = () => { if (btn) { btn.classList.remove("active"); btn.title = t("lb.listen"); } btn = null; stopAt = null; };
+  el.addEventListener("timeupdate", () => { if (stopAt !== null && el.currentTime >= stopAt) { el.pause(); idle(); } });
+  el.addEventListener("ended", idle);
+  el.addEventListener("error", () => { if (btn) toast(t("lb.previewFailed"), "warning"); idle(); });
+  return {
+    el,
+    async play(url, button, span = null) {
+      const again = btn === button;
+      el.pause(); idle();
+      if (again) return; // the same row: stop
+      btn = button; button.classList.add("active"); button.title = t("lb.stopListen");
+      if (el.src !== url) el.src = url;
+      stopAt = span ? span[1] : null;
+      try {
+        if (span) { if (el.readyState < 1) await new Promise((r) => el.addEventListener("loadedmetadata", r, { once: true })); el.currentTime = span[0]; } else el.currentTime = 0;
+        await el.play();
+      } catch { if (btn === button) { toast(t("lb.previewFailed"), "warning"); idle(); } }
+    },
+    stop() { el.pause(); idle(); },
+  };
+}
 
 /** A file of the project for `file` (imported when it is not there yet). */
 async function projectMedia(ed, file) {
@@ -68,6 +102,7 @@ export function openSoundLibrary(ed) {
   const mood = select({ value: "neutral", options: ["neutral", "comic", "joy", "shock", "tense", "serious", "sad", "emotional"].map((v) => ({ value: v, label: t(`lb.mood.${v}`) })) });
   const out = h("div", { class: "col", style: { gap: "4px", maxHeight: "360px", overflowY: "auto" } });
   const status = h("div", { class: "muted small" });
+  const player = previewPlayer(new Audio());
   call("sfxlib.status").then((s) => { status.textContent = t("lb.sfxStatus", { n: s.sounds, idx: s.indexed }); }).catch(() => { status.textContent = t("lb.sfxNone"); });
   const search = async () => {
     const q = input.value.trim();
@@ -77,7 +112,8 @@ export function openSoundLibrary(ed) {
     if (!r) { mount(out); return; }
     if (r.blocked) { mount(out, h("div", { class: "empty" }, t("lb.sfxBlocked"))); return; }
     mount(out, ...(r.results.length ? r.results.map((x) => h("div", { class: "list-row" },
-      icon("volume"), h("div", { class: "col grow" }, h("b", { class: "nowrap" }, x.title), h("span", { class: "muted small" }, [x.tagsAr.slice(0, 4).join("، "), x.source, x.license].filter(Boolean).join(" · "))),
+      h("button", { class: "icon-btn", title: t("lb.listen"), "aria-label": t("lb.listen"), disabled: !x.file, onclick: (e) => player.play(libFileUrl(x.file), e.currentTarget) }, icon("play")),
+      h("div", { class: "col grow" }, h("b", { class: "nowrap" }, x.title), h("span", { class: "muted small" }, [x.tagsAr.slice(0, 4).join("، "), x.source, x.license].filter(Boolean).join(" · "))),
       h("span", { class: "muted small" }, fmtS(x.durationS)),
       h("button", { class: "btn small", title: t("lb.addAtPlayhead"), onclick: async () => {
         const m = await projectMedia(ed, x.file);
@@ -87,22 +123,31 @@ export function openSoundLibrary(ed) {
   input.addEventListener("keydown", (e) => { if (e.key === "Enter") search(); });
   const body = h("div", { class: "col", style: { gap: "8px" } },
     h("div", { class: "row", style: { gap: "8px" } }, input, mood, h("button", { class: "btn primary", onclick: search }, icon("search"), t("lb.search"))), status, out);
-  modal({ title: t("tl.sfxLib"), width: 600, body });
+  modal({ title: t("tl.sfxLib"), width: 600, body, onClose: () => player.stop() });
 }
 
-export function openBrollSearch(ed) {
+/** `search` (query → shots) is the B-roll index's search; a test may pass its own (the index's models need the GPU). */
+export function openBrollSearch(ed, { search: find = (q) => call("broll.search", q, { limit: 20 }) } = {}) {
   const input = h("input", { type: "search", class: "search grow", placeholder: t("lb.brollPh"), dir: "auto" });
   const out = h("div", { class: "col", style: { gap: "4px", maxHeight: "360px", overflowY: "auto" } });
   const status = h("div", { class: "muted small" });
+  const video = h("video", { class: "lb-preview", muted: false, playsInline: true, style: { display: "none", width: "100%", maxHeight: "240px", background: "#000", borderRadius: "6px" } });
+  const player = previewPlayer(video);
+  const watch = (x, button) => { video.style.display = ""; video.poster = x.frames?.[1] || x.frames?.[0] ? libFileUrl(x.frames[1] || x.frames[0]) : ""; player.play(libFileUrl(x.path), button, [x.startS, x.endS]); };
   call("broll.status").then((s) => { status.textContent = t("lb.brollStatus", { media: s.media, shots: s.shots }); }).catch(() => { status.textContent = t("lb.brollNone"); });
   const search = async () => {
     const q = input.value.trim();
     if (!q) return;
     mount(out, h("div", { class: "muted" }, t("lb.searching")));
-    const r = await guard(() => call("broll.search", q, { limit: 20 }));
+    const r = await guard(() => find(q));
     if (!r) { mount(out); return; }
+    player.stop(); video.style.display = "none";
     mount(out, ...(r.length ? r.map((x) => h("div", { class: "list-row" },
-      icon("video"), h("div", { class: "col grow" }, h("b", { class: "nowrap", title: x.path }, x.caption || x.path?.split(/[\\/]/).pop() || x.id), h("span", { class: "muted small ltr" }, `${x.path?.split(/[\\/]/).pop() || ""} · ${fmtS(x.startS)}–${fmtS(x.endS)}`)),
+      x.frames?.length && x.path
+        ? h("button", { class: "lb-thumb", title: t("lb.watchShot"), "aria-label": t("lb.watchShot"), style: { padding: 0, border: 0, background: "none", cursor: "pointer", flex: "none" }, onclick: (e) => watch(x, e.currentTarget) },
+          h("img", { src: libFileUrl(x.frames[1] || x.frames[0]), alt: "", loading: "lazy", style: { width: "96px", height: "54px", objectFit: "cover", borderRadius: "4px", display: "block" } }))
+        : icon("video"),
+      h("div", { class: "col grow" }, h("b", { class: "nowrap", title: x.path }, x.caption || x.path?.split(/[\\/]/).pop() || x.id), h("span", { class: "muted small ltr" }, `${x.path?.split(/[\\/]/).pop() || ""} · ${fmtS(x.startS)}–${fmtS(x.endS)}`)),
       h("button", { class: "btn small", title: t("lb.addAtPlayhead"), disabled: !x.path, onclick: async () => {
         const m = await projectMedia(ed, x.path);
         if (!m) return;
@@ -112,6 +157,6 @@ export function openBrollSearch(ed) {
   };
   input.addEventListener("keydown", (e) => { if (e.key === "Enter") search(); });
   const body = h("div", { class: "col", style: { gap: "8px" } },
-    h("div", { class: "row", style: { gap: "8px" } }, input, h("button", { class: "btn primary", onclick: search }, icon("search"), t("lb.search"))), status, out);
-  modal({ title: t("tl.broll"), width: 640, body });
+    h("div", { class: "row", style: { gap: "8px" } }, input, h("button", { class: "btn primary", onclick: search }, icon("search"), t("lb.search"))), status, video, out);
+  modal({ title: t("tl.broll"), width: 640, body, onClose: () => { player.stop(); video.removeAttribute("src"); video.load(); } });
 }
