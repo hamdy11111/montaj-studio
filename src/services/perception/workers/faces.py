@@ -22,6 +22,8 @@ MAX_GAP = 10             # frames a track may miss (blink, turn, hand) before it
 IOU_MATCH = 0.3
 CROP_SCALE = 0.40        # LR-ASD / TalkNet crop: the box widened so the mouth and chin are in
 SAME_ARC, SAME_ADA = 0.42, 0.40   # cosine similarity above which two tracks are one person
+SPLIT_SIM = 0.2                  # below this inside a track: the box moved to another face
+MIN_TRACK_DET = 0.6              # median detector score a track needs (lower: profile edges, ears, hair)
 
 
 def session(path, dev):
@@ -227,12 +229,34 @@ def main():
             pc.progress(min(0.9, 0.9 * t / dur))
     T.mark("detect+track")
 
+    # Finish the crops, then split a track where the face in it changes (in a crowd the box can slide from one person
+    # to the next): ArcFace of the 3 samples before vs the 3 after a point below SPLIT_SIM = another person.
+    pieces = []
+    for tr in tracks:
+        if not tr["emb"]:
+            continue
+        flush(tr, final=True)
+        e = arc(tr["emb"])
+        cuts = [0]
+        for k in range(3, len(e) - 2):
+            if k - cuts[-1] < 3:
+                continue
+            a_, b_ = e[max(cuts[-1], k - 3):k].mean(0), e[k:k + 3].mean(0)
+            if float(a_ @ b_) / max(1e-6, np.linalg.norm(a_) * np.linalg.norm(b_)) < SPLIT_SIM:
+                cuts.append(k)
+        cuts.append(len(e))
+        for p, (k0, k1) in enumerate(zip(cuts, cuts[1:])):
+            f0, f1 = k0 * EMBED_EVERY, (len(tr["frames"]) if k1 == len(e) else k1 * EMBED_EVERY)
+            pieces.append({"id": tr["id"] if len(cuts) == 2 else f"{tr['id']}{'abcdefghijklmnopqrstuvwxyz'[min(p, 25)]}",
+                           "frames": tr["frames"][f0:f1], "boxes": tr["boxes"][f0:f1], "scores": tr["scores"][f0:f1], "crops": tr["crops"][f0:f1],
+                           "emb": tr["emb"][k0:k1], "q": tr["q"][k0:k1], "e": e[k0:k1]})
+    # Drop short pieces and those the detector was unsure of all along (an ear, the back of a head).
     min_frames = int(float(job.get("minTrackS", 0.4)) * fps)
-    tracks = [tr for tr in tracks if len(tr["frames"]) >= min_frames and tr["emb"]]
+    tracks = [tr for tr in pieces if len(tr["frames"]) >= min_frames and np.median([s for s in tr["scores"] if s > 0] or [0]) >= MIN_TRACK_DET]
     W, H = size or (1, 1)
     res_tracks = []
     for tr in tracks:
-        e = arc(tr["emb"])
+        e = tr["e"]
         tr["arc"] = e.mean(0) / max(1e-6, np.linalg.norm(e.mean(0)))
         sharp = float(np.median([q[0] for q in tr["q"]]))
         light = float(np.median([q[1] for q in tr["q"]]))
@@ -240,7 +264,6 @@ def main():
         if ada is not None:
             a = ada(tr["emb"])
             tr["ada_v"] = a.mean(0) / max(1e-6, np.linalg.norm(a.mean(0)))
-        flush(tr, final=True)
         np.save(os.path.join(work, "tracks", f"{tr['id']}.npy"), np.stack(tr["crops"]))
         tr["quality"] = {"sharpness": round(sharp, 1), "brightness": round(light, 1), "det": round(float(np.mean([s for s in tr["scores"] if s > 0] or [0])), 3)}
     T.mark("embed+crops")
@@ -284,7 +307,8 @@ def main():
         best = max(g, key=lambda k: len(tracks[k]["frames"]))
         q = [x[0] for x in tracks[best]["q"]]
         os.makedirs(os.path.join(work, "thumbs"), exist_ok=True)
-        cv2.imwrite(os.path.join(work, "thumbs", f"{pid}.jpg"), tracks[best]["emb"][int(np.argmax(q))])
+        # imencode + tofile: cv2.imwrite cannot open non-ASCII paths on Windows (an Arabic user name, say).
+        cv2.imencode(".jpg", tracks[best]["emb"][int(np.argmax(q))])[1].tofile(os.path.join(work, "thumbs", f"{pid}.jpg"))
     for tr in tracks:
         res_tracks.append({
             "id": tr["id"], "t0": round(tr["frames"][0] / fps, 3), "t1": round((tr["frames"][-1] + 1) / fps, 3), "frames": len(tr["frames"]),

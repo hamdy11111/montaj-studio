@@ -15,8 +15,21 @@ export const DEFAULTS = Object.freeze({
   pauseMinS: 0.5,
   asdSmooth: 5,            // frames of moving average on the ASD score
   asdMinS: 0.3,            // shortest "speaking on screen" span
-  linkThreshold: 0.4,      // voice ↔ face: share of the voice's visible time the face is seen speaking
-  linkMinEvidenceS: 2,     // seconds of the voice with that face visible, below which no link is made
+  linkThreshold: 0.15,     // voice ↔ face: the contrast score (see linkSpeakersToFaces) a link needs
+  linkMinEvidenceS: 3,     // seconds of the voice with that face visible, below which no link is made
+  linkPriorS: 5,           // evidence shrink: a score counts fully only after several seconds of visible speech
+  linkBaseline: 0.3,       // the face's "speaking" share assumed when it is hardly seen at other times
+  linkMinCoverage: 0.25,   // the face must be on screen for this share of the voice's speech (else: a voice heard
+                           // mostly off-screen — a TV, the person filming — that a face happened to mouth along with)
+  // Laughter: laughter-detection fires on crowd noise and chatter (alone: ~40–50 % of its spans were laughs on the
+  // user's raw videos, judged by an independent listening model), PANNs' laughter classes rarely pass 0.3 there. Both
+  // together — laughter-detection ≥ 0.8 with some PANNs laughter (≥ 0.05) within ±0.5 s — were laughs ~80 % of the time.
+  laughLD: 0.8,
+  laughPannsSupport: 0.05,
+  laughPannsAlone: 0.3,
+  laughPannsWindowS: 1,
+  laughMinS: 0.3,
+  laughGapS: 0.3,
 });
 
 /** Hungarian method (Kuhn–Munkres), minimising. `cost` is rows × cols (any shape); returns col index per row or -1. */
@@ -137,24 +150,61 @@ export function speakingSpans(track, opts = {}) {
   return out;
 }
 
+/**
+ * Laughter spans from the two frame tracks of the audio stage ({hop, laughterDetection: [p], panns: [p]}): a frame is
+ * laughter when laughter-detection is ≥ laughLD and PANNs' laughter classes reach laughPannsSupport somewhere within
+ * ±laughPannsWindowS/2, or when PANNs alone is ≥ laughPannsAlone. Spans shorter than laughMinS are dropped, gaps up to
+ * laughGapS are bridged. p: a heuristic score, 0.55–1 (see DEFAULTS for the measured precision at this setting).
+ */
+export function laughterSpans(track, opts = {}) {
+  const o = { ...DEFAULTS, ...opts };
+  const hop = track.hop || 0.05;
+  const ld = track.laughterDetection || [], pa = track.panns || [];
+  const n = Math.min(ld.length, pa.length);
+  const half = Math.max(0, Math.round(o.laughPannsWindowS / hop / 2));
+  const paMax = new Array(n).fill(0);
+  for (let i = 0; i < n; i++) { let m = 0; for (let j = Math.max(0, i - half); j <= Math.min(n - 1, i + half); j++) m = Math.max(m, pa[j]); paMax[i] = m; }
+  const on = Array.from({ length: n }, (_, i) => (ld[i] >= o.laughLD && paMax[i] >= o.laughPannsSupport) || pa[i] >= o.laughPannsAlone);
+  const raw = [];
+  for (let i = 0, st = -1; i <= n; i++) {
+    if (i < n && on[i]) { if (st < 0) st = i; } else if (st >= 0) { raw.push([st, i]); st = -1; }
+  }
+  const merged = [];
+  for (const r of raw) { const last = merged[merged.length - 1]; if (last && (r[0] - last[1]) * hop <= o.laughGapS) last[1] = r[1]; else merged.push([...r]); }
+  return merged.filter(([a, b]) => (b - a) * hop >= o.laughMinS).map(([a, b]) => {
+    const l = Math.max(...ld.slice(a, b)), q = Math.max(...paMax.slice(a, b));
+    const sources = [...(l >= o.laughLD ? ["laughter-detection"] : []), ...(q >= o.laughPannsSupport ? ["PANNs"] : [])];
+    const p = q >= o.laughPannsAlone ? Math.max(0.85, l) : 0.55 + 0.25 * Math.min(1, (l - o.laughLD) / Math.max(1e-6, 1 - o.laughLD)) + 0.2 * Math.min(1, q / 0.2);
+    return { start: a * hop, end: b * hop, p: Math.min(1, p), sources, ld: l, panns: q };
+  });
+}
+
 const sigmoid = (x) => 1 / (1 + Math.exp(-x));
 
 /**
- * Voices ↔ on-screen people. For a voice S and a person P: of the seconds S speaks while P is on screen ("visible"),
- * the share where P's mouth is seen speaking ("speaking"). The Hungarian method picks the best one-to-one pairing over
- * the whole file; a pair below linkThreshold, or with under linkMinEvidenceS of visible time, is not made, and that
- * voice is off-screen.
+ * Voices ↔ on-screen people. For a voice S and a person P, over the whole file:
+ *   shareS   of the seconds S talks while P is on screen, the share where P's mouth is seen speaking (ASD > 0)
+ *   baseline the same share when S is NOT talking (other voices, silence) — a face that always "speaks" (eating,
+ *            laughing, a moving camera, the model's bias) has a high baseline and earns nothing
+ *   score    (shareS − baseline) × visible / (visible + linkPriorS): the contrast, trusted more with more evidence
+ * The Hungarian method picks the best one-to-one pairing; a pair under linkThreshold, with under linkMinEvidenceS of
+ * visible time, or with the face on screen for under linkMinCoverage of the voice's speech, is not made, and that voice
+ * is off-screen (the person behind the camera, a TV, a voice-over). On the user's raw videos the wrong links all had
+ * the face on screen for 3–10 % of the voice's speech, the right ones for 75–100 %.
  * tracks: [{id, identity, t0, fps, scores: [per frame]}] · exclusive: [{start, end, speaker}]
  */
 export function linkSpeakersToFaces(exclusive, tracks, opts = {}) {
   const o = { ...DEFAULTS, ...opts };
   const voices = [...new Set(exclusive.map((t) => t.speaker))];
   const people = [...new Set(tracks.map((t) => t.identity))];
+  const talk = voices.map((v) => exclusive.filter((t) => t.speaker === v).reduce((a, t) => a + t.end - t.start, 0));
   const stat = voices.map(() => people.map(() => ({ visible: 0, speaking: 0 })));
+  const all = people.map(() => ({ visible: 0, speaking: 0 }));
   for (const tr of tracks) {
     const pj = people.indexOf(tr.identity);
     const fps = tr.fps || 25;
     const scores = tr.scores || [];
+    for (const v of scores) { all[pj].visible += 1 / fps; if (v > 0) all[pj].speaking += 1 / fps; }
     for (const turn of exclusive) {
       const vi = voices.indexOf(turn.speaker);
       const f0 = Math.max(0, Math.floor((turn.start - tr.t0) * fps)), f1 = Math.min(scores.length, Math.ceil((turn.end - tr.t0) * fps));
@@ -164,17 +214,27 @@ export function linkSpeakersToFaces(exclusive, tracks, opts = {}) {
       }
     }
   }
-  const share = stat.map((row) => row.map((c) => (c.visible >= o.linkMinEvidenceS ? c.speaking / c.visible : 0)));
-  const pick = hungarian(share.map((row) => row.map((v) => -v)));
+  const detail = stat.map((row, i) => row.map((c, j) => {
+    const visO = all[j].visible - c.visible, spkO = all[j].speaking - c.speaking;
+    const baseline = visO >= 2 ? spkO / visO : o.linkBaseline;
+    const shareS = c.visible > 0 ? c.speaking / c.visible : 0;
+    const coverage = talk[i] > 0 ? c.visible / talk[i] : 0;
+    const score = c.visible >= o.linkMinEvidenceS ? (shareS - baseline) * (c.visible / (c.visible + o.linkPriorS)) : -1;
+    return { shareS, baseline, score, coverage, visible: c.visible, speaking: c.speaking };
+  }));
+  const pick = hungarian(detail.map((row) => row.map((d) => -d.score)));
+  const r3 = (x) => Number(x.toFixed(3));
   const links = {};
   voices.forEach((v, i) => {
     const j = pick[i];
-    const ok = j >= 0 && share[i][j] >= o.linkThreshold;
-    links[v] = ok
-      ? { face: people[j], confidence: Number(share[i][j].toFixed(3)), visibleS: Number(stat[i][j].visible.toFixed(2)), speakingS: Number(stat[i][j].speaking.toFixed(2)) }
-      : { face: null, offScreen: true, confidence: j >= 0 ? Number((1 - share[i][j]).toFixed(3)) : null, best: j >= 0 ? people[j] : null };
+    const d = j >= 0 ? detail[i][j] : null;
+    const conf = d ? r3(sigmoid((d.score - o.linkThreshold) * 10)) : null;
+    links[v] = d && d.score >= o.linkThreshold && d.coverage >= o.linkMinCoverage
+      ? { face: people[j], confidence: conf, score: r3(d.score), shareS: r3(d.shareS), baseline: r3(d.baseline), coverage: r3(d.coverage), visibleS: r3(d.visible), speakingS: r3(d.speaking) }
+      : { face: null, offScreen: true, confidence: d ? r3(d.coverage < o.linkMinCoverage ? Math.max(1 - conf, 1 - d.coverage / o.linkMinCoverage) : 1 - conf) : null,
+        best: d ? people[j] : null, score: d ? r3(d.score) : null, coverage: d ? r3(d.coverage) : null };
   });
-  return { links, voices, people, share: share.map((r) => r.map((v) => Number(v.toFixed(3)))) };
+  return { links, voices, people, score: detail.map((r) => r.map((d) => r3(d.score))) };
 }
 
 /** Speaking-on-screen spans of every track, with the voice talking at that moment when it is linked to that face. */
@@ -238,7 +298,8 @@ export function buildTimeline({ media, stages, opts = {} }) {
   // Sound, laughter, feeling, spikes.
   if (S.audio) {
     for (const a of S.audio.tags || []) ev.push(makeEvent({ t0: a.start, t1: a.end, type: "audio_tag", source_model: S.audio.tagModel, confidence: a.p, text: a.label, extra: { index: a.index } }));
-    for (const l of S.audio.laughter || []) {
+    const laughs = S.audio.laughTrack ? laughterSpans(S.audio.laughTrack, o) : S.audio.laughter || [];
+    for (const l of laughs) {
       const who = excl.filter((t) => overlapS(l.start, l.end, t.start, t.end) > 0).map((t) => t.speaker);
       ev.push(makeEvent({ t0: l.start, t1: l.end, type: "laughter", source_model: l.sources.join(" + "), confidence: l.p, speaker: who.length === 1 ? who[0] : null, extra: { sources: l.sources, ...(l.kind ? { kind: l.kind } : {}) } }));
     }

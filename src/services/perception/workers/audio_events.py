@@ -62,7 +62,7 @@ def panns(x16, md, dev, thr):
     m.to(dev).eval()
     x = librosa.resample(x16, orig_sr=16000, target_sr=32000)
     hop = 320 / 32000
-    win, ctx = 30 * 32000, 2 * 32000   # 30 s pieces with 2 s of context on each side
+    win, ctx = 10 * 32000, 1 * 32000   # 10 s pieces with 1 s of context on each side (30 s pieces took ~8 GB)
     frames = int(math.ceil(len(x) / 320))
     out = np.zeros((frames, 527), np.float32)
     for a in range(0, len(x), win):
@@ -103,8 +103,8 @@ def laughter_model(x16, md, dev, thr):
     n = len(S)
     pad = np.pad(S, ((22, 22), (0, 0)), mode="edge")
     probs = np.zeros(n, np.float32)
-    for a in range(0, n, 512):
-        b = min(n, a + 512)
+    for a in range(0, n, 128):  # 512 windows at once took ~8 GB of activations
+        b = min(n, a + 128)
         batch = np.stack([pad[i:i + 44] for i in range(a, b)])[:, None]
         with torch.inference_mode():
             probs[a:b] = m(torch.from_numpy(batch).to(dev)).float().cpu().numpy().reshape(-1)
@@ -206,7 +206,9 @@ def main():
     T.mark("loudness")
     pitch = pitch_spikes(x)
     T.mark("pitch")
-    pc.write(out, {"model": "PANNs Cnn14_DecisionLevelMax + " + (laugh_model or "—"), "tagModel": "PANNs Cnn14_DecisionLevelMax (AudioSet)", "laughModel": laugh_model,
+    # The two laughter tracks on a 50 ms grid, so the thresholds can be tuned later without running the models again.
+    track = {"hop": 0.05, "laughterDetection": [round(float(v), 2) for v in b[::5]], "panns": [round(float(v), 2) for v in a[::5]]}
+    pc.write(out, {"model": "PANNs Cnn14_DecisionLevelMax + " + (laugh_model or "—"), "laughTrack": track, "tagModel": "PANNs Cnn14_DecisionLevelMax (AudioSet)", "laughModel": laugh_model,
                    "device": dev, "tags": tags, "laughter": laugh, "loudness": loud, "pitch": pitch, "vram_peak_mb": pc.torch_peak_mb(), "timing": T.parts})
 
 

@@ -3,7 +3,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { makeEvent, validateEvent, finalize, eventsIn, countByType, TYPES } from "../../src/services/perception/timeline.js";
-import { hungarian, speakerNames, wordsWithSpeakers, utterances, pauses, speakingSpans, linkSpeakersToFaces, buildTimeline } from "../../src/services/perception/fuse.js";
+import { hungarian, speakerNames, wordsWithSpeakers, utterances, pauses, speakingSpans, linkSpeakersToFaces, laughterSpans, buildTimeline } from "../../src/services/perception/fuse.js";
 
 test("events have the one shape; bad types and times are refused; confidence is clamped", () => {
   const e = makeEvent({ t0: 2.00049, t1: 1, type: "laughter", confidence: 1.7 });
@@ -61,7 +61,7 @@ test("speaking spans: smoothed ASD score above zero, short blips dropped", () =>
   assert.equal(sp[0].end, 10 + 30 / 25);
 });
 
-test("voices ↔ faces: the face that speaks during a voice is linked; a voice whose visible face stays silent is off-screen", () => {
+test("voices ↔ faces: the face that speaks during a voice is linked; a voice whose visible face stays silent is off-screen; a face that always moves its mouth is not linked", () => {
   const fps = 25;
   // P1 is on screen 0–20 s and speaks during S1's turns (0–8, 12–20); S2 (8–12) is the person behind the camera:
   // P1 is visible but silent then. P2 appears 20–30 s and speaks during S3.
@@ -73,6 +73,14 @@ test("voices ↔ faces: the face that speaks during a voice is linked; a voice w
   assert.equal(r.links.S3.face, "P2");
   assert.equal(r.links.S2.face, null);
   assert.equal(r.links.S2.offScreen, true);
+  // A face whose mouth moves all the time (eating, laughing) is not the voice's, even if it is on screen while it talks.
+  const busy = linkSpeakersToFaces([{ start: 0, end: 10, speaker: "S1" }, { start: 10, end: 30, speaker: "S2" }], [{ id: "T1", identity: "P1", t0: 0, fps, scores: new Array(30 * fps).fill(1) }]);
+  assert.equal(busy.links.S1.face, null);
+  assert.equal(busy.links.S2.face, null);
+  // A voice heard for 60 s while a face that mouths along is on screen for only 4 s of it (a TV, the person filming).
+  const tv = linkSpeakersToFaces([{ start: 0, end: 60, speaker: "S1" }], [{ id: "T1", identity: "P1", t0: 10, fps, scores: new Array(4 * fps).fill(1) }, { id: "T2", identity: "P1", t0: 70, fps, scores: new Array(20 * fps).fill(-1) }]);
+  assert.equal(tv.links.S1.face, null);
+  assert.ok(tv.links.S1.coverage < 0.25);
 });
 
 test("buildTimeline joins the stages into one sorted, valid timeline (missing stages are fine)", () => {
@@ -85,7 +93,7 @@ test("buildTimeline joins the stages into one sorted, valid timeline (missing st
     audio: { tagModel: "PANNs", tags: [{ start: 1, end: 2, label: "Music", p: 0.6, index: 137 }], laughter: [{ start: 3.5, end: 4, p: 0.8, sources: ["laughter-detection", "PANNs"] }], loudness: [], pitch: [] },
     shots: { model: "TransNetV2", shots: [{ start: 0, end: 4 }] },
   };
-  const tl = buildTimeline({ media: { duration: 4 }, stages, opts: { linkMinEvidenceS: 0.5 } });
+  const tl = buildTimeline({ media: { duration: 4 }, stages, opts: { linkMinEvidenceS: 0.5, linkThreshold: 0.1 } });
   assert.equal(tl.version, 1);
   for (const e of tl.events) assert.deepEqual(validateEvent(e), [], JSON.stringify(e));
   for (let i = 1; i < tl.events.length; i++) assert.ok(tl.events[i].t0 >= tl.events[i - 1].t0);
@@ -146,4 +154,21 @@ test("the Arabic summary page renders every section from a timeline", async () =
   assert.match(html, /الضحك \(1\)/);
   assert.match(html, /مراجعة بالعين/);
   assert.match(html, /900/);
+});
+
+test("laughter needs both detectors (or a strong PANNs score); short blips are dropped and close spans joined", () => {
+  const hop = 0.05;
+  const ld = new Array(200).fill(0.1), pa = new Array(200).fill(0);
+  for (let i = 20; i < 40; i++) ld[i] = 0.95;           // 1.0–2.0 s: laughter-detection only (crowd noise) → no
+  for (let i = 60; i < 80; i++) ld[i] = 0.9;            // 3.0–4.0 s: both → yes
+  pa[70] = 0.08;
+  for (let i = 84; i < 90; i++) { ld[i] = 0.9; }        // 4.2–4.5 s: joined to the one before (gap 0.2 s), PANNs within 0.5 s
+  pa[86] = 0.06;
+  for (let i = 120; i < 130; i++) pa[i] = 0.4;          // 6.0–6.5 s: PANNs alone, strong → yes
+  pa[150] = 0.5;                                        // 7.5 s: a 50 ms blip → dropped
+  const s = laughterSpans({ hop, laughterDetection: ld, panns: pa });
+  assert.deepEqual(s.map((x) => [x.start, x.end]), [[3, 4.5], [6, 6.5]]);
+  assert.deepEqual(s[0].sources, ["laughter-detection", "PANNs"]);
+  assert.deepEqual(s[1].sources, ["PANNs"]);
+  assert.ok(s[1].p >= 0.85 && s[0].p > 0.55 && s[0].p <= 1);
 });

@@ -4,7 +4,8 @@
 //   node src/services/perception/cli.mjs <file|folder>… --out <dir> [options]
 //     --stages words,speakers,…   only these stages (and what they need); default: all
 //     --asr nemo|file             speech engine (default nemo); --asr-file <json> with --asr file
-//     --gpu-lock <gpu-lock.mjs>   take the shared GPU lock around every model run (the parallel sessions' lock)
+//     --gpu-lock <gpu-lock.mjs>   take the shared GPU lock around every model run (the parallel sessions' lock);
+//                                 default: the PERCEPTION_GPU_LOCK environment variable; without either, a warning
 //     --runtime <dir>             the runtime folder (venvs + models); default: the project's runtime/
 //     --cache <dir>               result cache (default <runtime>/perception-cache)
 //     --refresh stage,…           run these stages again even when cached
@@ -58,9 +59,11 @@ async function main() {
   const o = parse(process.argv.slice(2));
   const ffmpeg = require("ffmpeg-static");
   const ffprobe = require("ffprobe-static").path;
-  const svc = new PerceptionService({ runtimeDir: o.runtime, cacheDir: o.cache, ffmpeg, ffprobe, gpuLock: makeGpuLock({ script: o.gpuLock }), log: (l) => process.stderr.write(`${l}\n`) });
+  const lockScript = o.gpuLock || process.env.PERCEPTION_GPU_LOCK || null;
+  const svc = new PerceptionService({ runtimeDir: o.runtime, cacheDir: o.cache, ffmpeg, ffprobe, gpuLock: makeGpuLock({ script: lockScript }), log: (l) => process.stderr.write(`${l}\n`) });
   if (o.status) { console.log(JSON.stringify(svc.status(), null, 2)); return; }
   if (!o.out || !o.files.length) { console.error("usage: cli.mjs <file|folder>… --out <dir> [--stages …] [--gpu-lock …]"); process.exit(2); }
+  if (!lockScript) console.error("WARNING: no GPU lock (--gpu-lock or PERCEPTION_GPU_LOCK): the models will use the card without waiting for other jobs.");
   fs.mkdirSync(o.out, { recursive: true });
   const files = o.files.flatMap(expand);
   for (const f of files) {

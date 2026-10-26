@@ -35,7 +35,7 @@ export const STAGES = Object.freeze(["words", "speakers", "audio", "emotion", "s
 // Which stages read which earlier ones (a re-run of one makes these re-run too).
 export const NEEDS = Object.freeze({ words: [], speakers: [], audio: [], emotion: ["words", "speakers"], shots: [], faces: ["shots"], asd: ["faces"], vision: ["shots", "words"] });
 // Bump a stage's version when its worker's output changes: the cache key changes with it.
-const VERSION = { asr: 1, words: 1, speakers: 1, audio: 1, emotion: 1, shots: 1, faces: 1, asd: 1, vision: 1 };
+const VERSION = { asr: 1, words: 1, speakers: 1, audio: 2, emotion: 1, shots: 1, faces: 2, asd: 1, vision: 1 };
 const WEIGHT = { words: 0.12, speakers: 0.08, audio: 0.08, emotion: 0.05, shots: 0.04, faces: 0.25, asd: 0.08, vision: 0.3 };
 
 /** Stages to run, in pipeline order, with what they need added ("asd" alone also runs shots and faces). */

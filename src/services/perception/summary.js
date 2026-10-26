@@ -39,6 +39,7 @@ export function summaryHtml(tl, extra = {}) {
   const c = countByType(tl.events);
   const ev = (t) => tl.events.filter((e) => e.type === t);
   const rep = tl.report?.stages || {};
+  const computeMs = Object.values(rep).reduce((a, r) => a + (r.ms || 0), 0); // first-run model time (cached stages keep theirs)
   const stageRows = Object.entries(rep).map(([s, r]) => `<tr><td>${esc(STAGE_AR[s] || s)}</td><td>${r.failed ? "❌ فشلت" : r.skipped ? `⏭️ ${esc(r.skipped)}` : r.cached ? "♻️ من الكاش" : "✅"}</td><td>${sec(r.ms)}</td><td>${r.vram?.deltaMB ?? "—"}</td><td>${r.torchPeakMB ?? "—"}</td><td>${esc(r.device || "")}</td><td dir="ltr">${esc(r.model || "")}</td></tr>`).join("");
   const spk = (tl.speakers || []).map((s) => `<tr><td>${esc(s.id)}</td><td>${s.seconds.toFixed(1)} ث</td><td>${s.face ? `${extra.thumbs?.[s.face] ? `<img src="${extra.thumbs[s.face]}" alt="">` : ""} ${esc(s.face)}` : "برّه الكادر"}</td><td>${s.linkConfidence ?? "—"}</td></tr>`).join("");
   const faces = (tl.faces || []).map((f) => `<span class="face">${extra.thumbs?.[f.id] ? `<img src="${extra.thumbs[f.id]}" alt="">` : ""}<b>${esc(f.id)}</b> ${f.seconds.toFixed(0)} ث${f.voice ? ` · صوته ${esc(f.voice)}` : ""}${f.poor ? " · إضاءة ضعيفة" : ""}</span>`).join("");
@@ -58,7 +59,7 @@ body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.6 "Segoe UI",Taho
 table{border-collapse:collapse;width:100%;font-size:13px}td,th{border-bottom:1px solid var(--line);padding:5px 6px;text-align:start;vertical-align:top}.tag,.face{display:inline-block;background:var(--card);border:1px solid var(--line);border-radius:14px;padding:2px 10px;margin:2px;font-size:13px}
 img{width:40px;height:40px;border-radius:50%;object-fit:cover;vertical-align:middle;margin-inline-end:4px}.scroll{overflow-x:auto}</style></head><body><main>
 <h1>الإدراك: ${esc(tl.media?.name || "")}</h1>
-<p class="mut">${clock(tl.media?.duration || 0)} · ${tl.media?.width}×${tl.media?.height} · ${tl.media?.fps} فريم/ث · بصمة ${esc(tl.media?.hash || "")} · وقت التحليل الكلي ${sec(tl.report?.totalMs)}</p>
+<p class="mut">${clock(tl.media?.duration || 0)} · ${tl.media?.width}×${tl.media?.height} · ${tl.media?.fps} فريم/ث · بصمة ${esc(tl.media?.hash || "")} · وقت التحليل (أول مرة) ${sec(computeMs)}</p>
 <div class="cards">${Object.entries(TYPE_AR).filter(([k]) => c[k]).map(([k, v]) => `<div class="card"><b>${c[k]}</b>${esc(v)}</div>`).join("")}</div>
 <h2>الخط الزمني</h2><div class="scroll">${strip(tl)}</div>
 <h2>المتكلمين ووشوشهم</h2><table><tr><th>الصوت</th><th>مدة الكلام</th><th>الوش</th><th>ثقة الربط</th></tr>${spk || '<tr><td colspan="4">—</td></tr>'}</table>

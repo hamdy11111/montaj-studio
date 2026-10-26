@@ -6,7 +6,6 @@
 # job: {media, ffmpeg, modelsDir, fps=25, threshold=0.5, duration}
 # result: {model, device, fps, shots: [{start, end, p}], cuts: [{t, p}]}
 import os
-import subprocess
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -14,15 +13,11 @@ import pcommon as pc  # noqa: E402
 
 
 def frames48(ffmpeg, path, fps):
+    """The authors' input: every frame as 48×27 RGB (the picture squeezed, whatever its shape)."""
+    import cv2
     import numpy as np
-    for gpu in (True, False):
-        cmd = [ffmpeg, "-hide_banner", "-v", "error"] + (["-hwaccel", "cuda"] if gpu else []) + ["-i", path, "-an", "-vf", f"fps={fps},scale=48:27:flags=bilinear",
-                                                                                                   "-f", "rawvideo", "-pix_fmt", "rgb24", "-"]
-        r = subprocess.run(cmd, capture_output=True)
-        if r.returncode == 0 and r.stdout:
-            return np.frombuffer(r.stdout, np.uint8).reshape(-1, 27, 48, 3)
-        pc.log("decode failed" + (" (GPU), CPU next" if gpu else ""), r.stderr.decode("utf-8", "replace")[-300:])
-    raise RuntimeError("could not decode the video")
+    out = [cv2.resize(img, (48, 27), interpolation=cv2.INTER_AREA)[..., ::-1] for _, _, img in pc.video_frames(ffmpeg, path, fps, 320)]
+    return np.ascontiguousarray(np.stack(out))
 
 
 def scenes(pred, thr):
