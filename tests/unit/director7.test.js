@@ -244,6 +244,14 @@ test("found on the 02 challenge: a mostly wordless video keeps its own sound (no
   const tm = momentsWithLinks({ words: talk, events: [], durationUs: 58 * US });
   const tt = ruleTreatments(tm.moments, { durationUs: 58 * US })[0];
   assert.equal(executionSpec(tt, tm.moments, talk).audio, undefined);
+  // In a talking video a kept wordless moment is a short beat (the clean-up would make a longer one dead air).
+  const tw = [...talk.slice(0, 10), ...talk.slice(10).map((w) => ({ ...w, startUs: w.startUs + 8 * US, endUs: w.endUs + 8 * US }))];
+  const te = onAxis([EV("shot_log", 13, 22, { extra: { energy: 4 } })], 66);
+  const tmw = momentsWithLinks({ words: tw, events: te, durationUs: 66 * US });
+  const act = tmw.moments.filter((m) => m.kind === "action");
+  assert.ok(act.length >= 1);
+  const ts2 = executionSpec({ order: tmw.moments.map((m) => m.n), hook: null, length: "full" }, tmw.moments, tw);
+  assert.ok(ts2.keepSpans.every(([a, b]) => b - a <= 2_000_000), JSON.stringify(ts2.keepSpans));
 });
 
 test("the output check without a transcript says so (a warning) instead of failing every line", () => {

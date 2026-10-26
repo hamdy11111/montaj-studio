@@ -336,19 +336,19 @@ export function ruleTreatments(moments, { durationUs, targetUs = null, links = [
   const result = hookMoment(moments, "result", { durationUs: D }), reaction = hookMoment(moments, "reaction", { durationUs: D }), question = hookMoment(moments, "question", { durationUs: D });
   const first = useful[0];
   if (targetUs) {
-    add({ id: "reel-result", title: "ريل: النتيجة الأول", length: "short", hook: result && { kind: "result", moment: result.n }, order: pickWithin(moments, targetUs, [first, result?.n]), why: `the strongest moments within ${Math.round(targetUs / US)} s, opened by the result` });
-    if (reaction) add({ id: "reel-reaction", title: "ريل: رد الفعل الأول", length: "short", hook: { kind: "reaction", moment: reaction.n }, order: pickWithin(moments, targetUs, [reaction.n]), why: "the reaction first, then the moments that lead to it" });
+    add({ id: "reel-result", title: "ريل: النتيجة الأول", length: "short", hook: result && { kind: "result", moment: result.n }, order: pickWithin(moments, targetUs, [first, result?.n]), why: `the strongest moments within ${Math.round(targetUs / US)} s, opened by the result`, whyAr: `أقوى اللحظات في ${Math.round(targetUs / US)} ث، وبتفتح بالنتيجة` });
+    if (reaction) add({ id: "reel-reaction", title: "ريل: رد الفعل الأول", length: "short", hook: { kind: "reaction", moment: reaction.n }, order: pickWithin(moments, targetUs, [reaction.n]), why: "the reaction first, then the moments that lead to it", whyAr: "رد الفعل الأول، وبعده اللحظات اللي وصّلت له" });
   }
-  add({ id: "result-full", title: "النتيجة الأول، الحكاية كاملة", length: "full", hook: result && { kind: "result", moment: result.n }, order: useful, why: "a flash-forward of the strongest late moment, then everything worth keeping in order" });
-  if (reaction) add({ id: "reaction-medium", title: "رد الفعل الأول، نسخة متوسطة", length: "medium", hook: { kind: "reaction", moment: reaction.n }, order: pickWithin(moments, medium, [first, reaction.n]), why: "the biggest reaction as the cold open, the strongest two thirds of the story" });
-  if (question) add({ id: "question-medium", title: "سؤال في الأول", length: "medium", hook: { kind: "question", moment: question.n }, order: pickWithin(moments, medium, [question.n]), why: `opens on «${question.text.slice(0, 40)}» — the question the video answers` });
+  add({ id: "result-full", title: "النتيجة الأول، الحكاية كاملة", length: "full", hook: result && { kind: "result", moment: result.n }, order: useful, why: "a flash-forward of the strongest late moment, then everything worth keeping in order", whyAr: "فلاش قدام من أقوى لحظة متأخرة، وبعده كل اللي يستاهل بالترتيب" });
+  if (reaction) add({ id: "reaction-medium", title: "رد الفعل الأول، نسخة متوسطة", length: "medium", hook: { kind: "reaction", moment: reaction.n }, order: pickWithin(moments, medium, [first, reaction.n]), why: "the biggest reaction as the cold open, the strongest two thirds of the story", whyAr: "أكبر رد فعل في الأول، وأقوى تلتين الحكاية" });
+  if (question) add({ id: "question-medium", title: "سؤال في الأول", length: "medium", hook: { kind: "question", moment: question.n }, order: pickWithin(moments, medium, [question.n]), why: `opens on «${question.text.slice(0, 40)}» — the question the video answers`, whyAr: `بيفتح بـ«${question.text.slice(0, 40)}»: السؤال اللي الفيديو بيجاوبه` });
   // Straight into the action: the slow opening goes (everything before the first build / punch / action moment).
   const start = moments.find((m) => m.role === "punch" || m.role === "reaction" || m.kind === "action" || (m.role === "build" && m.kind === "speech" && m.n > 1));
-  if (start && start.n > 1) add({ id: "in-medias-res", title: "من وسط الأحداث", length: "full", hook: { kind: "action", moment: start.n }, order: useful.filter((n) => n >= start.n || moments[n - 1].role === "setup"), why: `starts at moment ${start.n}, the opening before it goes` });
-  add({ id: "short-result", title: "نسخة قصيرة", length: "short", hook: result && { kind: "result", moment: result.n }, order: pickWithin(moments, short, [result?.n]), why: `the strongest moments within ${Math.round(short / US)} s` });
+  if (start && start.n > 1) add({ id: "in-medias-res", title: "من وسط الأحداث", length: "full", hook: { kind: "action", moment: start.n }, order: useful.filter((n) => n >= start.n || moments[n - 1].role === "setup"), why: `starts at moment ${start.n}, the opening before it goes`, whyAr: `بيبدأ من لحظة ${start.n}، والبداية البطيئة قبلها بتتشال` });
+  add({ id: "short-result", title: "نسخة قصيرة", length: "short", hook: result && { kind: "result", moment: result.n }, order: pickWithin(moments, short, [result?.n]), why: `the strongest moments within ${Math.round(short / US)} s`, whyAr: `أقوى اللحظات في ${Math.round(short / US)} ث` });
   // At least three: lengths of the plain story.
-  if (out.length < 3) add({ id: "plain-medium", title: "الحكاية بترتيبها، متوسطة", length: "medium", hook: null, order: pickWithin(moments, medium, [first]), why: "in shooting order, the weakest third out" });
-  if (out.length < 3) add({ id: "plain-full", title: "الحكاية بترتيبها", length: "full", hook: null, order: useful.length ? useful : moments.map((m) => m.n), why: "in shooting order, fillers out" });
+  if (out.length < 3) add({ id: "plain-medium", title: "الحكاية بترتيبها، متوسطة", length: "medium", hook: null, order: pickWithin(moments, medium, [first]), why: "in shooting order, the weakest third out", whyAr: "بترتيب التصوير، من غير أضعف تلت" });
+  if (out.length < 3) add({ id: "plain-full", title: "الحكاية بترتيبها", length: "full", hook: null, order: useful.length ? useful : moments.map((m) => m.n), why: "in shooting order, fillers out", whyAr: "بترتيب التصوير، من غير الحشو" });
   return out.slice(0, 5).map(({ key, ...t }) => t);
 }
 
@@ -389,15 +389,23 @@ export function executionSpec(treatment, moments, words, { angleEveryUs = 2_500_
   // A kept wordless moment is cut to its core — the reaction with its lead-in, the middle of a long action stretch —
   // tighter in shorter treatments, so a run of action becomes jump cuts, not one long shot (the cut reaction video's
   // rhythm), and the angle changes every ~2.5 s inside what is kept.
-  const CORE = { full: { core: 5_000_000, lead: 3_000_000 }, medium: { core: 4_000_000, lead: 2_500_000 }, short: { core: 3_000_000, lead: 2_000_000 } }[treatment.length] || { core: 5_000_000, lead: 3_000_000 };
+  // A video mostly without words (a game, a challenge): its own sound IS the content — no voice clean-up, which
+  // lowers everything between words (it made the 02 challenge's crowd silent: dead air, −17.5 LUFS). In a talking
+  // video the clean-up stays, so a wordless moment kept there is a short beat (< 2 s): longer, it reads as dead air
+  // (01 and 05: 2–15 silences ≥ 2 s).
+  const D = moments.length ? moments[moments.length - 1].e : 0;
+  const speechUs = moments.filter((m) => m.kind === "speech").reduce((n, m) => n + m.e - m.s, 0);
+  const actionUs = moments.filter((m) => m.kind === "action").reduce((n, m) => n + m.e - m.s, 0);
+  const actionVideo = D > 0 && speechUs / D < 0.45 && actionUs >= 20 * US;
+  const CORE = !actionVideo ? { core: 1_800_000, lead: 1_200_000, tail: 600_000 } : ({ full: { core: 5_000_000, lead: 3_000_000 }, medium: { core: 4_000_000, lead: 2_500_000 }, short: { core: 3_000_000, lead: 2_000_000 } }[treatment.length] || { core: 5_000_000, lead: 3_000_000 });
   for (const m of moments) {
     // A sentence left out: its words go (the pacing then closes the gap) and its whole stretch is cut.
     if (m.kind === "speech") { if (!kept.has(m.n)) { for (let i = m.w0; i <= m.w1; i++) dropWords.set(i, "treatment"); cutSpans.push({ fromUs: m.s, toUs: m.e, reason: `treatment: moment ${m.n} (speech)` }); } continue; }
     if (!kept.has(m.n)) { cutSpans.push({ fromUs: m.s, toUs: m.e, reason: `treatment: moment ${m.n} (${m.kind})` }); continue; }
     let a = m.s, b = m.e;
     const r = m.reactions.find((x) => BIG.has(x.type));
-    if (m.peak && r) { a = Math.max(m.s, r.t - CORE.lead); b = Math.min(m.e, Math.max(r.t1 ?? r.t, r.t) + 1_500_000); }
-    else if (!m.protected && m.e - m.s > CORE.core + 500_000) { const mid = (m.s + m.e) / 2; a = Math.round(mid - CORE.core / 2); b = Math.round(mid + CORE.core / 2); }
+    if (m.peak && r) { a = Math.max(m.s, r.t - CORE.lead); b = Math.min(m.e, Math.max(r.t1 ?? r.t, r.t) + (CORE.tail ?? 1_500_000)); }
+    else if (!m.protected && m.e - m.s > CORE.core + (actionVideo ? 500_000 : 0)) { const mid = (m.s + m.e) / 2; a = Math.round(mid - CORE.core / 2); b = Math.round(mid + CORE.core / 2); }
     // Never inside a word said in the action.
     for (const w of words) { if (w.startUs < a && w.endUs > a) a = w.startUs - 40_000; if (w.startUs < b && w.endUs > b) b = w.endUs + 60_000; }
     a = Math.max(m.s, Math.round(a)); b = Math.min(m.e, Math.round(b));
@@ -409,12 +417,6 @@ export function executionSpec(treatment, moments, words, { angleEveryUs = 2_500_
     // A laugh, applause or a scream in the action gets a sound of the same meaning (the library picks the file).
     if (r && r.t >= a && r.t < b) reactionSfx.push({ atUs: r.t, sound: r.type === "applause" ? "ding" : "pop", query: { laughter: "قفشة", applause: "هيصة", scream: "صدمة", gasp: "صدمة" }[r.type], mood: r.type === "laughter" ? "comic" : r.type === "applause" ? "joy" : "shock", why: `${r.type} in moment ${m.n}` });
   }
-  // A video mostly without words (a game, a challenge): its own sound IS the content — no voice clean-up, which
-  // lowers everything between words (it made the 02 challenge's crowd silent: dead air, −17.5 LUFS).
-  const D = moments.length ? moments[moments.length - 1].e : 0;
-  const speechUs = moments.filter((m) => m.kind === "speech").reduce((n, m) => n + m.e - m.s, 0);
-  const actionUs = moments.filter((m) => m.kind === "action").reduce((n, m) => n + m.e - m.s, 0);
-  const actionVideo = D > 0 && speechUs / D < 0.45 && actionUs >= 20 * US;
   const order = treatment.order.map((n) => [moments[n - 1].s, moments[n - 1].e]);
   let hook = null;
   if (treatment.hook && treatment.hook.kind !== "none") {

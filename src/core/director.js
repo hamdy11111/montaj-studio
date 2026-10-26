@@ -560,7 +560,7 @@ export function directPlan(input) {
 }
 
 // What a punch-in moment sounds like, by meaning (the sound library's Egyptian tags; the bundled sound is the fallback).
-const SFX_MEANING = { laugh: "قفشة", oops: "وقعة", shock: "صدمة", win: "هيصة", alert: "صدمة", no: "إحراج", fire: "لقطة", money: "فلوس", key: "ضربة" };
+const SFX_MEANING = { laugh: "قفشة", oops: "وقعة", shock: "صدمة", win: "لقطة", alert: "صدمة", no: "إحراج", fire: "لقطة", money: "فلوس", key: "ضربة" };
 
 /** Cuts with extra spans added, minus the spans that must stay (merged, sorted). */
 export function withSpans(cuts, add = [], keep = []) {

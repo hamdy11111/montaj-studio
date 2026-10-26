@@ -379,9 +379,15 @@ async function meaningSounds(S, plan, { moments, clips, log, bundled = false }) 
   const moodMoments = moments.map((m) => ({ startUs: m.s, endUs: m.e, mood: m.mood }));
   for (const x of want) {
     try {
-      const r = await lib.search(x.query, { mood: x.mood || "neutral", limit: 3, recent: used.slice(-6) });
-      const s = r.results?.[0];
-      if (s) { x.library = { id: s.id, file: s.file, leadUs: s.leadUs || 0, title: String(s.title || "").slice(0, 80) }; used.push(s.id); events.push({ atUs: vOf(x), sound: { id: s.id, comic: s.comic, cartoon: s.cartoon }, priority: 1, x }); info.picked.push(`${x.query} → ${s.title}`); }
+      // Over speech a sound is a short accent: a long one (a crowd cheering, a cinematic whoosh) masks the words — the
+      // verifier heard it on the interview (a «هيصة» cheer and a 2 s whoosh over a line). Wordless action allows more.
+      const m = moments.find((k) => vOf(x) >= k.s && vOf(x) < k.e);
+      const overSpeech = m?.kind === "speech" || moments.some((k) => k.kind === "speech" && vOf(x) + 1_500_000 > k.s && vOf(x) < k.e);
+      const maxS = x.query === "whoosh" ? 1.2 : overSpeech ? 1.6 : 3.5;
+      const r = await lib.search(x.query, { mood: x.mood || "neutral", limit: 8, recent: used.slice(-6) });
+      const s = (r.results || []).find((k) => k.durationS === null || k.durationS === undefined || k.durationS <= maxS);
+      if (s) { x.library = { id: s.id, file: s.file, leadUs: s.leadUs || 0, title: String(s.title || "").slice(0, 80) }; if (overSpeech) x.volumeDb = Math.min(x.volumeDb ?? -10, -10); used.push(s.id); events.push({ atUs: vOf(x), sound: { id: s.id, comic: s.comic, cartoon: s.cartoon }, priority: 1, x }); info.picked.push(`${x.query} → ${s.title} (${s.durationS ?? "?"} s)`); }
+      else info.picked.push(`${x.query}: nothing short enough (≤ ${maxS} s), the bundled sound`);
     } catch (e) { log(`sfx search «${x.query}»: ${e.message}`); }
   }
   // The library's rules over what was picked (a sound that breaks one falls back to the plain bundled sound).

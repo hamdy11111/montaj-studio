@@ -73,7 +73,9 @@ export function rubric({ treatment, plan, qa = null, moments, links = [], target
   const keptStrength = treatment.order.reduce((n, k) => n + pos0(byN(k)), 0);
   let story = clamp01(keptStrength / all);
   if (targetUs) story *= clamp01(1 - Math.abs(editUs - targetUs) / targetUs);
-  else story = clamp01(0.6 * story + 0.4 * clamp01(keptStrength / Math.max(1, editUs / US) / 0.5)); // strength per second
+  // No length asked: an edit keeps what carries the video (a short cut of a full interview is not what was asked for);
+  // strength per second counts a little (dead weight is still a cost).
+  else story = clamp01(0.85 * story + 0.15 * clamp01(keptStrength / Math.max(1, editUs / US) / 0.5));
   const scores = { hook: r2(hook), pace: r2(clamp01(pace)), punch: r2(punch), repetition: r2(repetition), midWord, story: r2(story) };
   const total = r2(Object.entries(RUBRIC_WEIGHTS).reduce((n, [k, w]) => n + w * scores[k], 0));
   return { scores, total, facts: { editSec: r2(editUs / US), medianShot: r2(median), longestShot: r2(longest), dead, links: relevant.length, linksTogether: together.length, repeats, wordFails, hookMoment: hookM?.n ?? null } };

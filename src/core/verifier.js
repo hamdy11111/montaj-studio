@@ -146,7 +146,7 @@ export function verifyOutput({ expected, outWords = [], loudness = null, black =
     if (Number.isFinite(loudness.tp) && loudness.tp > V.loudness.truePeakMax) add("out.truePeak", "warn", `true peak ${loudness.tp} dBTP (at most ${V.loudness.truePeakMax})`, { tp: loudness.tp });
   }
   // 4. Black frames and frozen / duplicated frames.
-  const blacks = black.filter((b) => b.endS - b.startS >= V.black.minS && (durationS === null || b.startS < durationS - 0.3));
+  const blacks = black.filter((b) => b.endS - b.startS >= V.black.minS && (durationS === null || b.startS < durationS - 0.5)); // the last frames: the encoder's tail
   for (const b of blacks) add("out.black", "fail", `black frames ${b.startS.toFixed(2)}–${b.endS.toFixed(2)} s`, { from: b.startS, to: b.endS });
   if (!blacks.length) passed.push("out.black");
   const frozenLong = frozen.filter((f) => f.endS - f.startS >= V.frozen.minS);
@@ -181,7 +181,7 @@ export function cutSheet({ chosen, items, ranking, pairs = [], moments, links = 
   const sec = (us) => (us / US).toFixed(1);
   const hookName = { result: "النتيجة الأول", question: "سؤال", reaction: "رد الفعل الأول", action: "من وسط الأحداث", none: "بدون" };
   const show = (n) => { const m = moments[n - 1]; return { n, at: Number(sec(m.s)), kind: m.kind, role: m.role, text: m.kind === "speech" ? m.text.slice(0, 80) : (m.summary || "").slice(0, 80) }; };
-  const alt = ranking.map((r) => { const x = byId.get(r.id); return { id: r.id, title: x.treatment.title, source: x.treatment.source, hook: x.treatment.hook?.kind || "none", lengthS: x.rubric.facts.editSec, total: x.rubric.total, scores: x.rubric.scores, wins: r.wins, losses: r.losses, why: x.treatment.why, fixes: x.treatment.fixes || [] }; });
+  const alt = ranking.map((r) => { const x = byId.get(r.id); return { id: r.id, title: x.treatment.title, source: x.treatment.source, hook: x.treatment.hook?.kind || "none", lengthS: x.rubric.facts.editSec, total: x.rubric.total, scores: x.rubric.scores, wins: r.wins, losses: r.losses, why: x.treatment.whyAr || x.treatment.why, fixes: x.treatment.fixes || [] }; });
   const unsure = links.filter((l) => l.unsure).map((l) => ({ cause: l.cause, reaction: l.reaction, why: l.why }));
   const sheet = {
     planner, chosen: alt.find((a) => a.id === chosen), alternatives: alt.filter((a) => a.id !== chosen),
