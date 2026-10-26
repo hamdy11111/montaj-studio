@@ -16,7 +16,7 @@ import { binaries, run } from "../../src/services/ffmpeg.js";
 import { AgentHub } from "../../src/agent/controlServer.js";
 import { alignExport } from "../../src/agent/director.js";
 import { momentsWithLinks, eventsOnAxis, ruleTreatments, validateTreatment, executionSpec, avoidSpoilers, spoils, SPOILER_AT, AMBIENT_CORE } from "../../src/core/treatments.js";
-import { expectedSpeech, verifyOutput, alignText, alignLayout, layoutAudio, wavBytes, verifyAligned, withAlignment, ALIGN } from "../../src/core/verifier.js";
+import { expectedSpeech, verifyOutput, alignText, alignLayout, layoutAudio, wavBytes, verifyAligned, withAlignment, edgeLevels, ALIGN } from "../../src/core/verifier.js";
 import { directPlan, DIRECTOR_STYLES } from "../../src/core/director.js";
 import { crossFilePeople, storyPlan, SAME_VOICE } from "../../src/core/story.js";
 import { planPrompt } from "../../src/services/directorLLM.js";
@@ -112,6 +112,21 @@ test("forced alignment: a clean export passes; a word cut at a joint fails (its 
   const few = expectedSpeech({ schema: "montaj.editplan/2", segments: [{ mediaId: "m", fromUs: 0.8 * US, toUs: 2.5 * US }] }, { m: SRC });
   const lf = alignLayout(few);
   assert.equal(verifyAligned({ expected: few, layout: lf, aligned: perfect(lf) }).judged, false);
+});
+
+test("forced alignment: the sound at each cut is measured and reported with a cut word; a short window keeps a drag under the threshold", () => {
+  const e = expectedSpeech(PLAN, { m: SRC });
+  const L = alignLayout(e);
+  const rate = 1000, pcm = new Int16Array(Math.round(12.9 * rate)).fill(30);
+  for (let i = Math.round(6.66 * rate); i < Math.round(6.7 * rate); i++) pcm[i] = 8000; // loud right at the first cut
+  const lv = edgeLevels(pcm, rate, L);
+  assert.ok(lv.edges.get(0).endDb > lv.quietDb + 40 && Math.abs(lv.edges.get(1).startDb - lv.quietDb) < 1);
+  const al = perfect(L), j = L.index.findIndex((i) => e.words[i].text === "معانا");
+  al[j] = { ...al[j], end: (L.pieces[0].wavFromUs + 6.7 * US) / US + 0.3 };
+  const c = verifyAligned({ expected: e, layout: L, aligned: al, levels: lv }).checks.find((x) => x.id === "out.clippedWord");
+  assert.ok(c.args.atCutDb > c.args.quietDb + 40);
+  // The worst drag of a line's last letter: the window's pad minus the director's smallest margin (60 ms).
+  assert.ok(ALIGN.pad * US - 60_000 < ALIGN.spillUs);
 });
 
 test("forced alignment replaces the transcription's speech checks, keeps loudness / black / frozen, and says which method judged", () => {

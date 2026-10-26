@@ -36,7 +36,7 @@ import { US } from "../core/util.js";
 import { eventsOnAxis, momentsWithLinks, ruleTreatments, validateTreatment, executionSpec, takeScorer, reactionOf, mediaSpanToAxis, phase6Shape, avoidSpoilers } from "../core/treatments.js";
 import { storyPlan, repairOrder, expand, storySheet, crossFilePeople } from "../core/story.js";
 import { rubric, rankTreatments } from "../core/critic.js";
-import { verifyPlan, verifyOutput, expectedSpeech, parseFfmpegChecks, cutSheet, envelope, bestCorrelation, settleLine, soundWindow, ALIGN, alignLayout, layoutAudio, wavBytes, verifyAligned, withAlignment } from "../core/verifier.js";
+import { verifyPlan, verifyOutput, expectedSpeech, parseFfmpegChecks, cutSheet, envelope, bestCorrelation, settleLine, soundWindow, ALIGN, alignLayout, layoutAudio, wavBytes, verifyAligned, withAlignment, edgeLevels } from "../core/verifier.js";
 import { applyPlan } from "./editPlan.js";
 
 /** The main-track clips the director works on, laid on the virtual axis, or an error. */
@@ -543,7 +543,8 @@ export async function alignExport(S, file, expected, { log = () => {}, runWorker
   const work = fs.mkdtempSync(path.join(os.tmpdir(), "montaj-verify-"));
   try {
     const wav = path.join(work, "export.wav");
-    fs.writeFileSync(wav, wavBytes(layoutAudio(new Int16Array(stdout.buffer, stdout.byteOffset, Math.floor(stdout.length / 2)), 16000, layout), 16000));
+    const pcm = new Int16Array(stdout.buffer, stdout.byteOffset, Math.floor(stdout.length / 2));
+    fs.writeFileSync(wav, wavBytes(layoutAudio(pcm, 16000, layout), 16000));
     // Every move allowed (maxShift) and every match kept (minConf 0): the verifier judges the letters, not the worker.
     // On the CPU by default: the same letters and times as on the card (measured: mean |Δconf| 0.0001, same times), ~15 s
     // for a 3.5-min export plus ~30 s to load — and it never waits for the shared card. device "gpu" uses the card.
@@ -558,7 +559,7 @@ export async function alignExport(S, file, expected, { log = () => {}, runWorker
       try { r = await alignWorker(python, job, path.join(work, "align.json")); } finally { await release(); }
     }
     log(`verify: ${r.words?.length ?? 0} words aligned in ${((Date.now() - t) / 1000).toFixed(1)} s (${r.device || "?"})`);
-    return { ...verifyAligned({ expected, layout, aligned: r.words || [] }), ms: Date.now() - t };
+    return { ...verifyAligned({ expected, layout, aligned: r.words || [], levels: edgeLevels(pcm, 16000, layout) }), ms: Date.now() - t };
   } finally { fs.rmSync(work, { recursive: true, force: true }); }
 }
 

@@ -183,8 +183,13 @@ export function verifyOutput({ expected, outWords = [], loudness = null, black =
 // file's own (the inside words), never an absolute number — a noisy street and a studio both pass when nothing is lost.
 export const ALIGN = {
   gapUs: 600_000,                  // silence put after every segment in the aligned audio
-  pad: 0.3,                        // s of sound around each line the worker may use (stays inside the silence)
-  spillUs: 90_000,                 // a word reaching this far into the silence after its segment lost sound at the cut
+  // s of sound around each line the worker may use. Short on purpose: the aligner drags a line's last letter to the end
+  // of its window when it finds nothing better (with 0.3 s, 13 of 01's joint words "spilled" 165–187 ms = 0.3 s minus
+  // the director's ~135 ms margin — every one exactly at the window's edge); with 0.15 s such a drag stays under ~30 ms.
+  pad: 0.15,
+  spillUs: 120_000,                // a word whose letters reach this far into the silence after its segment lost sound at the cut
+                                   // (a drag reaches at most pad − the director's smallest margin, 60 ms: 90 ms; real cuts 258–331 ms)
+  edgeUs: 40_000,                  // the sound at each cut (reported with the check)
   lineRatio: 0.45, lineMin: 3,     // a line (≥ 3 aligned words) under 45 % of the median: not heard (masked or lost)
   minWords: 8,                     // fewer aligned inside words than this: no reference, nothing judged
 };
@@ -243,6 +248,21 @@ export function wavBytes(pcm, rate) {
   return Buffer.concat([h, Buffer.from(pcm.buffer, pcm.byteOffset, n)]);
 }
 
+/**
+ * The sound right at every joint of the export (pcm in edit time): { quietDb (the file's 10th percentile of 50 ms
+ * windows), edges: Map(segment k → { endDb (its last edgeUs), startDb (its first edgeUs) }) } — shown with a cut word.
+ */
+export function edgeLevels(pcm, rate, layout, A = ALIGN) {
+  const at = (us) => Math.round((us * rate) / US);
+  const db = (a, b) => { a = Math.max(0, a); b = Math.min(pcm.length, b); if (b <= a) return -120; let q = 0; for (let i = a; i < b; i++) q += pcm[i] * pcm[i]; return 10 * Math.log10(q / (b - a) / 1073741824 + 1e-12); };
+  const win = at(50_000), lv = [];
+  for (let i = 0; i + win <= pcm.length; i += win) lv.push(db(i, i + win));
+  lv.sort((a, b) => a - b);
+  const edges = new Map();
+  for (const p of layout.pieces || []) edges.set(p.k, { startDb: db(at(p.editFromUs), at(p.editFromUs + A.edgeUs)), endDb: db(at(p.editToUs - A.edgeUs), at(p.editToUs)) });
+  return { quietDb: lv.length ? lv[Math.floor(lv.length * 0.1)] : -120, edges };
+}
+
 const median = (xs) => { if (!xs.length) return null; const s = [...xs].sort((a, b) => a - b), m = s.length >> 1; return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2; };
 
 /**
@@ -253,7 +273,7 @@ const median = (xs) => { if (!xs.length) return null; const s = [...xs].sort((a,
  * jointWords, clipped, lines, linesFound, important, importantFound }, words: [per expected word { text, editUs, conf,
  * spillUs, joint }], judged } — the speech part of verifyOutput, so the two can stand in for each other.
  */
-export function verifyAligned({ expected, layout, aligned }, A = ALIGN) {
+export function verifyAligned({ expected, layout, aligned, levels = null }, A = ALIGN) {
   const checks = [], passed = [];
   const add = (id, level, message, args = {}) => checks.push({ id, level, message, args });
   const segOf = new Map((layout.pieces || []).map((p) => [p.k, p]));
@@ -266,6 +286,7 @@ export function verifyAligned({ expected, layout, aligned }, A = ALIGN) {
     // Letters outside the segment's own sound: after its end (a word cut at the joint after it) or before its start;
     // and how much sound is left between the word and its cut (the director keeps a margin around every kept word).
     per[i].spillUs = Math.max(0, e - p.editToUs, p.editFromUs - s);
+    per[i].spillSide = e - p.editToUs >= p.editFromUs - s ? "end" : "start";
     per[i].edgeUs = per[i].last && !per[i].first ? p.editToUs - e : per[i].first && !per[i].last ? s - p.editFromUs : Math.min(p.editToUs - e, s - p.editFromUs);
   });
   const content = per.filter((w) => w.conf !== null && alignToken(w.text).length >= 3);
@@ -276,10 +297,12 @@ export function verifyAligned({ expected, layout, aligned }, A = ALIGN) {
     if (content.length) add("out.alignFew", "warn", `too few words to align (${inside.length}): lines and joints not judged`, { n: inside.length });
     return { checks, passed, ok: true, stats: { median: r2(med), words: per.length, aligned: content.length }, words: per, judged: false };
   }
-  // 1. Words cut at a joint: their letters dragged past the cut into the silence.
+  // 1. Words cut at a joint: their letters pushed past the cut into the silence. (The sound at the cut, edgeLevels, is
+  // reported with the check, not used to judge: in a noisy outdoor vlog a cut inside a word sits only 3–13 dB over the
+  // room noise.)
   const jointWords = per.filter((w) => w.joint && w.conf !== null && alignToken(w.text).length >= 2);
   const clipped = jointWords.filter((w) => w.spillUs >= A.spillUs);
-  for (const w of clipped) add("out.clippedWord", "fail", `the word «${w.text}» at a joint (${sec(w.editUs)} s) is cut: its letters run ${Math.round(w.spillUs / 1000)} ms past the cut`, { word: w.text, at: sec(w.editUs), conf: r2(w.conf), spillMs: Math.round(w.spillUs / 1000), median: r2(med), side: w.last && !w.first ? "end" : w.first && !w.last ? "start" : "both" });
+  for (const w of clipped) add("out.clippedWord", "fail", `the word «${w.text}» at a joint (${sec(w.editUs)} s) is cut: its letters run ${Math.round(w.spillUs / 1000)} ms past the cut`, { word: w.text, at: sec(w.editUs), conf: r2(w.conf), spillMs: Math.round(w.spillUs / 1000), median: r2(med), side: w.spillSide, ...(levels?.edges?.get(w.segment) ? { atCutDb: Math.round(w.spillSide === "end" ? levels.edges.get(w.segment).endDb : levels.edges.get(w.segment).startDb), quietDb: Math.round(levels.quietDb) } : {}) });
   if (!clipped.length) passed.push("out.clippedWord");
   // 2. Every line still there: its words' median letter probability against the file's.
   let found = 0, impFound = 0;
