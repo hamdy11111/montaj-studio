@@ -86,7 +86,8 @@ async function directorGpuLock(S) {
   const { makeGpuLock } = await import("../services/perception/perceptionService.js");
   const queue = S.gpu ? makeGpuLock({ queue: S.gpu, name: "director" }) : null;
   const script = process.env.DIRECTOR_GPU_LOCK || process.env.PERCEPTION_GPU_LOCK || null;
-  const file = script && fs.existsSync(script) ? fileGpuLock(script, "director") : null;
+  // The name the machine-wide lock is held under (a parallel session runs the app under its own name).
+  const file = script && fs.existsSync(script) ? fileGpuLock(script, process.env.DIRECTOR_GPU_LOCK_NAME || "director") : null;
   return { acquire: async (id) => { const a = queue ? await queue.acquire(id) : null; try { const b = file ? await file.acquire(id) : null; return async () => { if (b) await b(); if (a) await a(); }; } catch (e) { if (a) await a(); throw e; } } };
 }
 
