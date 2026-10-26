@@ -1,11 +1,12 @@
 // Inspector / Details panel (SCREEN-029..039): properties of the selected clip by kind, or the Project panel
 // (details, canvas, smart suggestions, global edits) when nothing is selected. Slider drags update the preview
 // live and commit one undoable change on release; values with keyframes write keyframes at the playhead.
-import { BUNDLED_FAMILIES } from "../../core/fonts.js";
+import { BUNDLED_FAMILIES, SYSTEM_FONTS } from "../../core/fonts.js";
 import { h, mount, clear } from "../dom.js";
 import { icon } from "../icons.js";
 import { t, getLang } from "../i18n.js";
-import { call, guard } from "../api.js";
+import { call, guard, mediaUrl, thumbUrl } from "../api.js";
+import { modal } from "../ui/modal.js";
 import { toast } from "../ui/toast.js";
 import { slider, toggle, select, segmented, colorInput, section, check } from "../ui/controls.js";
 import { US, formatDuration, clamp } from "../../core/util.js";
@@ -14,14 +15,28 @@ import { CURVE_PRESETS, VELOCITY_EFFECTS, SPEED_MIN, SPEED_MAX } from "../../cor
 import { FILTER_PRESETS, EFFECTS, TEXT_PRESETS, VOICE_CHANGERS } from "../../core/presets.js";
 import { GRAPHIC_TEMPLATES, EMOJI_ALIASES, graphicParams } from "../../core/graphics.js";
 import { canGoBehind } from "../../core/cutout.js";
+import { duckDbOf, DUCK_DEFAULT_DB } from "../../core/musicBed.js";
 import { HSL_CHANNELS, DEFAULT_ADJUST, DEFAULT_TRANSFORM, DEFAULT_VIDEO_FX, DEFAULT_AUDIO_FX, CANVAS_RATIOS, FPS_OPTIONS } from "../../core/model.js";
 
-const FONTS = [...BUNDLED_FAMILIES, "Segoe UI", "Arial", "Tahoma", "Times New Roman", "Georgia", "Verdana", "Trebuchet MS", "Courier New", "Impact", "Comic Sans MS", "Sakkal Majalla", "Traditional Arabic", "Arabic Typesetting", "Simplified Arabic", "Segoe UI Black"];
+const FONTS = [...BUNDLED_FAMILIES, ...SYSTEM_FONTS];
 // Arabic names of the motion-graphics parameters (core/graphics.js keeps the English titles for agents).
 const PARAM_AR = { text: "النص", title: "العنوان", subtitle: "العنوان الفرعي", font: "الخط", color: "لون النص", color2: "اللون السفلي (تدرّج)", accent: "اللون المميّز",
   position: "الموضع", size: "الحجم", x: "الموضع الأفقي", y: "الموضع الرأسي", width: "العرض", w: "العرض", h: "الارتفاع", style: "النمط", emoji: "إيموجي", icon: "أيقونة",
   items: "البنود (سطر لكل بند)", checked: "عدد المنجز", number: "الرقم", label: "التسمية", from: "من", to: "إلى", prefix: "قبل الرقم", suffix: "بعد الرقم",
-  decimals: "الأرقام العشرية", author: "القائل", motion: "الحركة", side: "الجهة", box: "خلفية مصمتة", thickness: "السُمك" };
+  decimals: "الأرقام العشرية", author: "القائل", motion: "الحركة", side: "الجهة", box: "خلفية مصمتة", thickness: "السُمك",
+  // The graphics kit's parameters (phase 3).
+  words: "الكلمات (سطر لكل كلمة)", times: "توقيت كل كلمة (ملي ثانية؛ فاضي = بالتساوي)", direction: "الاتجاه", corner: "المكان", hi: "الجزء الأصفر",
+  rot: "الميل (°)", motionBlur: "ضبابية الحركة عند النزول", word: "كلمة (اختياري)", l1: "السطر الأول", l2: "السطر التاني (أصفر)", kicker: "الشريط",
+  sub: "وصف في سطر", left: "الشخص على الشمال (صورة مقصوصة)", right: "الشخص على اليمين (صورة مقصوصة)", src: "الصورة أو الملف", cutout: "صورة مقصوصة على لون",
+  bg: "لون الخلفية", badge: "إيموجي الشارة", tag: "وسم صغير", still: "الفريم المتجمّد", stills: "الصور (سطر لكل صورة)", n: "عدد القطع", cx: "المركز أفقيًا",
+  cy: "المركز رأسيًا", name: "الاسم", role: "الصفة", arrow: "السهم", lines: "السطور", hotLast: "آخر سطر أحمر", swapAt: "التبديل عند (ملي ثانية)",
+  dec: "الأرقام العشرية", rollMs: "مدة الدوران (ملي ثانية)", unit: "الوحدة", kind: "النوع", value: "القيمة", max: "الهدف", prev: "القيمة السابقة",
+  pos: "المكان", done: "اتحقق", pulse: "نبضة عند (ملي ثانية، ‎-1 = مفيش)", dim: "تغميق الفيديو", cols: "الأعمدة (0 = تلقائي)", leftLabel: "اسم الشمال",
+  leftValue: "قيمة الشمال (%)", rightLabel: "اسم اليمين", rightValue: "قيمة اليمين (%)", prevL: "الشمال قبل", prevR: "اليمين قبل", fadeMs: "الظهور التدريجي (ملي ثانية)",
+  mode: "طريقة الظهور", emphasis: "كلمات أكبر", weight: "التخانة", type: "العلامة", strokeWidth: "سُمك الخط", x1: "من (أفقي)", y1: "من (رأسي)",
+  x2: "إلى (أفقي)", y2: "إلى (رأسي)", bend: "الانحناء", shape: "الشكل", textColor: "لون الكتابة", before: "قبل", after: "بعد", transition: "الانتقال" };
+// Graphics parameters that name a picture or a file: a picker (project media or a file) next to the text field.
+const MEDIA_PARAMS = new Set(["src", "still", "stills", "left", "right"]);
 const HSL_SWATCH = { red: "#e5484d", orange: "#f76b15", yellow: "#ffd400", green: "#30a46c", cyan: "#00c1cd", blue: "#3e63dd", purple: "#8e4ec6", magenta: "#d6409f" };
 
 export class Inspector {
@@ -124,7 +139,7 @@ export class Inspector {
       h("div", { class: "row" }, h("span", { class: "muted" }, t("in.blendMode")), select({ value: tr.blend || "normal", options: ["normal", "screen", "add", "multiply", "darken", "lighten"], onChange: (v) => ed.exec("updateSegment", { segId: seg.id, patch: { transform: { blend: v } } }) })),
       this.kfSlider(seg, "opacity", t("in.opacity"), { min: 0, max: 100, unit: "%", get: () => kfv("opacity") ?? tr.opacity, fromModel: (v) => Math.round(v * 100), toModel: (v) => v / 100, patch: (v) => ({ transform: { opacity: v } }) }),
     ] });
-    const parts = [transform, blend];
+    const parts = [this.jlSection(seg), transform, blend].filter(Boolean);
     if (["video", "image", "compound"].includes(seg.kind)) {
       const fx = { ...DEFAULT_VIDEO_FX, ...(seg.videoFx || {}) };
       const isMain = ed.trackOf(seg.id)?.isMain;
@@ -222,6 +237,7 @@ export class Inspector {
         slider({ label: t("in.fadeIn"), min: 0, max: Math.min(10, seg.duration / US), step: 0.1, unit: "s", value: (seg.fadeInUs || 0) / US, ...this.bind(seg, (v) => ({ fadeInUs: Math.round(v * US) }), { coalesce: "fadeIn" }) }),
         slider({ label: t("in.fadeOut"), min: 0, max: Math.min(10, seg.duration / US), step: 0.1, unit: "s", value: (seg.fadeOutUs || 0) / US, ...this.bind(seg, (v) => ({ fadeOutUs: Math.round(v * US) }), { coalesce: "fadeOut" }) }),
       ] }),
+      this.musicBedSection(seg),
       section({ title: t("in.normalize"), enabled: a.normalize.enabled, onToggle: (v) => ed.exec("updateSegment", { segId: seg.id, patch: p({ normalize: { enabled: v, targetLufs: ed.settings().edit.targetLufs } }) }), open: a.normalize.enabled, children: [h("div", { class: "muted small" }, t("in.normalizeHint"), ` (${a.normalize.targetLufs} LUFS)`)] }),
       section({ title: t("in.enhanceVoice"), enabled: a.enhanceVoice.enabled, onToggle: (v) => ed.exec("updateSegment", { segId: seg.id, patch: p({ enhanceVoice: { enabled: v } }) }), open: false, children: [] }),
       section({ title: t("in.reduceNoise"), enabled: a.denoise.enabled, onToggle: (v) => ed.exec("updateSegment", { segId: seg.id, patch: p({ denoise: { enabled: v } }) }), open: false, children: [] }),
@@ -229,6 +245,36 @@ export class Inspector {
       section({ title: t("in.voiceChanger"), children: [h("div", { class: "chips" }, Object.keys(VOICE_CHANGERS).map((k) => h("button", { class: ["chip", a.voiceChanger === k && "active"], onclick: () => ed.exec("updateSegment", { segId: seg.id, patch: p({ voiceChanger: k }) }) }, k)))] }),
       h("p", { class: "muted small" }, "Voice changer, noise reduction, isolation and loudness are rendered on export."),
       h("button", { class: "btn block", onclick: () => ed.exec("applyToAll", { segId: seg.id, key: "audioFx" }).then((r) => r && toast(t("c.done"), "success")) }, t("in.applyAll")));
+  }
+
+  /** Music under speech: this sound ducks under the timeline's speech (the track's role), by how much, its level. */
+  musicBedSection(seg) {
+    const ed = this.ed, track = ed.trackOf(seg.id);
+    if (!track || track.isMain) return null;
+    const db = duckDbOf(track);
+    const run = async (fn) => { const r = await guard(fn); if (r !== undefined) { await ed.reloadTimeline(); return r; } return undefined; };
+    const setDuck = (v) => run(() => call("musicbed.setDuck", ed.timelineId(), seg.id, v));
+    const info = h("div", { class: "muted small" }, t("in.bedHint"));
+    if (db) call("musicbed.speech", ed.timelineId()).then((r) => {
+      const kinds = new Set(Object.values(r?.sources || {}).filter(Boolean));
+      info.textContent = `${t("in.bedHint")} ${t("in.bedSpans", { n: r?.spans?.length || 0 })}${kinds.has("vad") ? ` ${t("in.bedVad")}` : ""}`;
+    }).catch(() => {});
+    return section({ title: t("in.musicBed"), enabled: db !== null, onToggle: (v) => setDuck(v ? DUCK_DEFAULT_DB : null), open: db !== null, children: db === null ? [info] : [
+      slider({ label: t("in.bedDuck"), min: 0, max: 30, step: 1, unit: "dB", value: db, onInput: () => {}, onChange: (v) => setDuck(Math.round(v)) }),
+      h("button", { class: "btn small", onclick: async () => { const r = await run(() => call("musicbed.autoLevel", ed.timelineId(), seg.id)); if (r) toast(r.level?.measured ? t("in.bedLevelDone", { db: r.level.volumeDb }) : t("in.bedLevelDefault"), "success"); } }, icon("volume"), t("in.bedAutoLevel")),
+      info] });
+  }
+
+  /** J/L of the joint before a main-track clip: its sound starts before its picture (J, negative) or after (L). */
+  jlSection(seg) {
+    const ed = this.ed, track = ed.trackOf(seg.id);
+    if (!track?.isMain || !["video", "image", "compound"].includes(seg.kind)) return null;
+    const segs = [...track.segments].sort((a, b) => a.start - b.start), prev = segs[segs.indexOf(seg) - 1];
+    if (!prev || prev.start + prev.duration !== seg.start || !["video", "image", "compound"].includes(prev.kind) || (prev.transitionOut?.type && prev.transitionOut.type !== "none")) return null;
+    const ms = Math.round((seg.jlUs || 0) / 1000);
+    return section({ title: t("in.jl"), open: !!ms, children: [
+      slider({ label: t("in.jlShift"), min: -500, max: 500, step: 10, unit: "ms", value: ms, onInput: () => {}, onChange: (v) => ed.exec("setJL", { segId: seg.id, jlUs: Math.round(v) * 1000, coalesceKey: true }) }),
+      h("div", { class: "muted small" }, t("in.jlHint"))] });
   }
 
   // ------------------------------------------------------------------ speed
@@ -382,6 +428,24 @@ export class Inspector {
     return h("div", { class: "row" }, check({ checked: track.role === "behind", label: t("lib.behindPerson"), onChange: (v) => this.ed.behindPerson([seg.id], v) }));
   }
 
+  /**
+   * "Choose…" for a graphics media field: a picture or video of this project (its media:// link) or a file on the
+   * computer (its path). A Lottie template's src takes a JSON file.
+   */
+  mediaPickButton(template, key, onPick) {
+    const lottie = template === "lottie-sticker" && key === "src";
+    const pick = () => {
+      const items = this.ed.mediaList().filter((m) => (lottie ? false : m.type === "image" || (m.type === "video" && ["still", "stills", "src"].includes(key))) && m.status !== "missing");
+      const list = h("div", { class: "col", style: { gap: "4px", maxHeight: "360px", overflowY: "auto" } },
+        items.length ? items.map((m) => h("button", { class: "list-row", onclick: () => { onPick(mediaUrl(m.id)); dlg.close(); } },
+          m.thumbPath ? h("img", { src: thumbUrl(m.id, m.thumbCount), alt: "", style: { width: "48px", height: "27px", objectFit: "cover" } }) : icon(m.type === "image" ? "image" : "video"),
+          h("span", { class: "grow nowrap" }, m.name))) : h("div", { class: "empty" }, t("in.pickNone")));
+      const fromFile = h("button", { class: "btn", onclick: async () => { const [f] = await call("dialog.openFiles", { kind: lottie ? "json" : "image" }); if (f) { onPick(f); dlg.close(); } } }, icon("upload"), t("in.pickFile"));
+      const dlg = modal({ title: t("in.pickMedia"), width: 460, body: list, footer: [fromFile] });
+    };
+    return h("button", { class: "btn small", title: t("in.pickMedia"), onclick: pick }, icon("folder"), t("in.pick"));
+  }
+
   /** Motion graphic: one control per template parameter (text, numbers, colours, choices, fonts, emoji, icon). */
   graphicTab(seg) {
     const ed = this.ed, gr = seg.text.graphic, tpl = GRAPHIC_TEMPLATES[gr.template];
@@ -412,12 +476,13 @@ export class Inspector {
         const lines = () => area.value.split("\n").map((x) => x.trim()).filter(Boolean).slice(0, sch.maxItems || 6).map((x) => (sch.items?.type === "number" ? Number(x) || 0 : x.slice(0, sch.items?.maxLength || 50)));
         area.addEventListener("input", () => live(k, lines()));
         area.addEventListener("change", () => commit(k, lines()));
-        return h("div", { class: "col" }, h("span", { class: "muted" }, label), area);
+        const add = MEDIA_PARAMS.has(k) ? this.mediaPickButton(gr.template, k, (ref) => { area.value = [...area.value.split("\n").map((x) => x.trim()).filter(Boolean), ref].join("\n"); commit(k, lines()); }) : null;
+        return h("div", { class: "col" }, h("div", { class: "row" }, h("span", { class: "muted grow" }, label), add), area);
       }
       const input = h("input", { type: "text", value: P[k] ?? "", maxlength: sch.maxLength || 120, dir: "auto", style: { width: "100%" } });
       input.addEventListener("input", () => live(k, input.value));
       input.addEventListener("change", () => commit(k, input.value));
-      const out = [h("span", { class: "muted" }, label), input];
+      const out = [MEDIA_PARAMS.has(k) ? h("div", { class: "row" }, h("span", { class: "muted grow" }, label), this.mediaPickButton(gr.template, k, (ref) => { input.value = ref; commit(k, ref); })) : h("span", { class: "muted" }, label), input];
       if (k === "emoji") { // the bundled 3D emoji
         const seen = new Set();
         out.push(h("div", { class: "emoji-pick" }, Object.entries(EMOJI_ALIASES).filter(([, name]) => !seen.has(name) && seen.add(name)).map(([ch, name]) =>

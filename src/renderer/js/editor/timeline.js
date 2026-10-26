@@ -1,6 +1,7 @@
 // Timeline panel (SCREEN-017, FEAT-019..035, FEAT-037 keyframes, FEAT-093 transitions):
 // toolbar, ruler, track headers (lock / hide / mute), clips with thumbnails and waveforms, playhead, markers,
-// In/Out range, drag-move with snapping, edge trimming, split mode, zoom and context menus.
+// In/Out range, drag-move with snapping, edge trimming, split mode, zoom and context menus; a J/L handle on each
+// main-track joint (drag: the picture cut moves, the sound cut stays); music beds and the library browsers.
 // Always laid out LTR (time flows left → right) in both languages.
 import { h, mount, clear, throttle } from "../dom.js";
 import { icon } from "../icons.js";
@@ -8,7 +9,9 @@ import { t } from "../i18n.js";
 import { call, thumbUrl } from "../api.js";
 import { US, clamp, formatTimecode } from "../../core/util.js";
 import { TRACK_COLORS } from "../../core/model.js";
-import { snapTime } from "../../core/timelineOps.js";
+import { snapTime, JL_MAX_US } from "../../core/timelineOps.js";
+import { isMusicTrack } from "../../core/musicBed.js";
+import { openMusicBed, openSoundLibrary, openBrollSearch } from "./libraryBrowsers.js";
 import { loadImage } from "./raster.js";
 
 const ROW_H = { video: 58, audio: 40, text: 28, sticker: 28, effect: 26, filter: 26, adjust: 26 };
@@ -98,6 +101,9 @@ export class TimelineView {
       h("div", { class: "grow" }),
       h("div", { class: "row" },
         b("mic", t("tl.recordVoice"), () => ed.run("voiceover")),
+        b("audio", t("tl.musicBed"), () => openMusicBed(ed)),
+        b("library", t("tl.sfxLib"), () => openSoundLibrary(ed)),
+        b("search", t("tl.broll"), () => openBrollSearch(ed)),
         h("span", { class: "tl-sep" }),
         b("magnet", t("tl.magnet"), () => ed.run("toggleMagnet"), { active: s.magnet }),
         b("snap", t("tl.snap"), () => ed.run("toggleSnapping"), { active: s.snapping }),
@@ -131,7 +137,7 @@ export class TimelineView {
     for (const track of this.orderedTracks()) {
       const hgt = ROW_H[track.type] || 30;
       this.heads.append(h("div", { class: ["tl-head", track.isMain && "main"], style: { height: `${hgt}px` } },
-        h("span", { class: "tl-head-type", title: track.role === "behind" ? t("lib.behindPerson") : track.type }, icon(track.role === "behind" ? "layers" : { video: "video", audio: "audio", text: "text", sticker: "sticker", effect: "effect", filter: "filter", adjust: "adjust" }[track.type] || "layers")),
+        h("span", { class: "tl-head-type", title: track.role === "behind" ? t("lib.behindPerson") : isMusicTrack(track) ? t("in.musicBed") : track.type }, icon(track.role === "behind" ? "layers" : isMusicTrack(track) ? "audio" : { video: "video", audio: "audio", text: "text", sticker: "sticker", effect: "effect", filter: "filter", adjust: "adjust" }[track.type] || "layers")),
         h("button", { class: ["icon-btn", track.locked && "active"], title: t("tl.lock"), "aria-label": t("tl.lock"), onclick: () => this.ed.exec("setTrackFlag", { trackId: track.id, flag: "locked", value: !track.locked }) }, icon(track.locked ? "lock" : "unlock")),
         track.type !== "audio" ? h("button", { class: ["icon-btn", track.hidden && "active"], title: t("tl.hide"), "aria-label": t("tl.hide"), onclick: () => this.ed.exec("setTrackFlag", { trackId: track.id, flag: "hidden", value: !track.hidden }) }, icon(track.hidden ? "eyeOff" : "eye")) : null,
         ["video", "audio"].includes(track.type) ? h("button", { class: ["icon-btn", track.muted && "active"], title: t("tl.mute"), "aria-label": t("tl.mute"), onclick: () => this.ed.exec("setTrackFlag", { trackId: track.id, flag: "muted", value: !track.muted }) }, icon(track.muted ? "mute" : "volume")) : null,
@@ -140,6 +146,10 @@ export class TimelineView {
       row.dataset.trackId = track.id; row.dataset.type = track.type;
       for (const seg of track.segments) row.append(this.clipEl(track, seg, hgt, sel.has(seg.id)));
       if (track.isMain) for (let i = 0; i < track.segments.length - 1; i++) row.append(this.transitionEl(track.segments[i], track.segments[i + 1]));
+      if (track.isMain && !track.locked) {
+        const segs = [...track.segments].sort((x, y) => x.start - y.start);
+        for (let i = 1; i < segs.length; i++) { const el = this.jlEl(segs[i - 1], segs[i], hgt); if (el) row.append(el); }
+      }
       this.rows.append(row);
     }
     if (tl.tracks.every((x) => !x.segments.length)) this.rows.append(h("div", { class: "tl-empty" }, icon("media"), t("ed.dragHere")));
@@ -185,6 +195,46 @@ export class TimelineView {
     const x = this.usToX(b.start);
     return h("button", { class: ["tl-trans", has && "on"], style: { left: `${x - 8}px` }, title: has ? a.transitionOut.type : t("tab.transitions"), "aria-label": t("tab.transitions"),
       onclick: (e) => { e.stopPropagation(); this.ed.select([a.id]); this.ed.openPanel("transitions"); } }, icon("transition"));
+  }
+
+  /**
+   * J/L handle on a joint of two picture clips (no transition, no gap): it sits where the picture cuts; drag it right
+   * for a J (the next clip's sound starts first), left for an L (the sound of the clip before runs on). ±0.5 s.
+   */
+  jlEl(a, b, hgt) {
+    const pic = (k) => ["video", "image", "compound"].includes(k);
+    if (!pic(a.kind) || !pic(b.kind) || Math.abs(a.start + a.duration - b.start) > 1000 || (a.transitionOut?.type && a.transitionOut.type !== "none")) return null;
+    const jl = b.jlUs || 0, label = (us) => (us < 0 ? "J" : us > 0 ? "L" : "J/L");
+    const x0 = this.usToX(b.start);
+    const tip = (us) => `${label(us)} ${Math.abs(Math.round(us / 1000))} ms · ${t("in.jlHint")}`;
+    const el = h("div", { class: ["tl-jl", jl && "on"], title: tip(jl), "aria-label": t("in.jl"),
+      style: { position: "absolute", left: `${x0 - this.usToX(jl) - 7}px`, bottom: "2px", width: "14px", height: "14px", borderRadius: "3px", zIndex: 6, cursor: "ew-resize",
+        display: "grid", placeItems: "center", fontSize: "9px", fontWeight: "700", color: jl ? "var(--accent-ink)" : "#ddd", background: jl ? "var(--accent)" : "rgba(0,0,0,.55)", opacity: jl ? 1 : 0.55 } }, label(jl).slice(0, 1));
+    el.addEventListener("pointerdown", (e) => {
+      if (e.button !== 0) return;
+      e.stopPropagation();
+      el.setPointerCapture(e.pointerId);
+      const release = this.holdRender(el);
+      let us = jl;
+      const move = (ev) => {
+        // The handle is the picture cut: right of the joint = the picture comes later = a J (negative J/L).
+        us = Math.round(Math.max(-JL_MAX_US, Math.min(JL_MAX_US, -(this.xToUs(ev.clientX) - b.start))) / 10_000) * 10_000;
+        el.style.left = `${x0 - this.usToX(us) - 7}px`;
+        el.textContent = label(us).slice(0, 1);
+        el.title = tip(us);
+      };
+      const up = () => {
+        el.removeEventListener("pointermove", move);
+        el.removeEventListener("pointerup", up);
+        if (us === jl) { release(true); return; }
+        release();
+        this.ed.exec("setJL", { segId: b.id, jlUs: us });
+      };
+      el.addEventListener("pointermove", move);
+      el.addEventListener("pointerup", up);
+    });
+    el.addEventListener("dblclick", (e) => { e.stopPropagation(); if (jl) this.ed.exec("setJL", { segId: b.id, jlUs: 0 }); });
+    return el;
   }
 
   thumbCanvas(seg, m, w, hgt) {

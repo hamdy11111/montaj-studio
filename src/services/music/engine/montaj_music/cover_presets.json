@@ -1,0 +1,789 @@
+{
+ "schema": "montaj-music.cover-presets/1",
+ "source": "AI Creative Studio · Music Rework Studio V3 presets (music-rework.preset/1), compacted",
+ "presets": [
+  {
+   "id": "acoustic",
+   "name_ar": "أكوستيك",
+   "description_ar": "جيتار دافئ وتفاصيل قليلة",
+   "group": "world",
+   "lead": "acoustic guitar",
+   "prompt": "intimate acoustic ensemble. acoustic guitar carries the source theme; piano responds in gaps. sparse open-string voicings. soft brushed percussion; light acoustic bass.",
+   "ornaments": "brief idiomatic acoustic guitar ornaments; piano answers only between lead phrases",
+   "dynamics": "restrained opening, gradual build at repeated phrases, brief breath before cadence",
+   "energy": 0.25,
+   "tempo_range": [
+    45,
+    125
+   ],
+   "variants": {
+    "Classic": {
+     "direction": "Authentic small-ensemble phrasing; soft brushed percussion; restrained piano responses.",
+     "summary_ar": "قريب من روح الستايل، مع مصاحبة متزنة."
+    },
+    "Modern": {
+     "direction": "Contemporary syncopated bass, tighter rhythmic accents, concise piano responses; keep acoustic guitar prominent.",
+     "summary_ar": "بيس وإيقاع معاصر، مع بقاء هوية الستايل."
+    },
+    "Grand": {
+     "direction": "Wider dynamic arc, sustained harmonic support only at peaks, stronger ensemble cadence; one clear acoustic guitar.",
+     "summary_ar": "تصاعد أوسع ومصاحبة أغنى عند الذروة فقط."
+    }
+   }
+  },
+  {
+   "id": "ambient",
+   "name_ar": "أمبيانت",
+   "description_ar": "مساحات هادئة وتطور بطيء",
+   "group": "world",
+   "lead": "soft piano",
+   "prompt": "spacious ambient instrumental. soft piano carries the source theme; sparse bell tones responds in gaps. slow evolving warm pads. minimal soft pulses; gentle low drone.",
+   "ornaments": "brief idiomatic soft piano ornaments; sparse bell tones answers only between lead phrases",
+   "dynamics": "restrained opening, gradual build at repeated phrases, brief breath before cadence",
+   "energy": 0.1,
+   "tempo_range": [
+    45,
+    125
+   ],
+   "variants": {
+    "Classic": {
+     "direction": "Authentic small-ensemble phrasing; minimal soft pulses; restrained sparse bell tones responses.",
+     "summary_ar": "قريب من روح الستايل، مع مصاحبة متزنة."
+    },
+    "Modern": {
+     "direction": "Contemporary syncopated bass, tighter rhythmic accents, concise sparse bell tones responses; keep soft piano prominent.",
+     "summary_ar": "بيس وإيقاع معاصر، مع بقاء هوية الستايل."
+    },
+    "Grand": {
+     "direction": "Wider dynamic arc, sustained harmonic support only at peaks, stronger ensemble cadence; one clear soft piano.",
+     "summary_ar": "تصاعد أوسع ومصاحبة أغنى عند الذروة فقط."
+    }
+   }
+  },
+  {
+   "id": "anatolian_rock",
+   "name_ar": "روك أناضولي",
+   "description_ar": "باغلاما كهربائية وفرقة روك",
+   "group": "turkish",
+   "lead": "electric baglama",
+   "prompt": "Anatolian psychedelic rock. electric baglama carries the source theme; electric guitar responds in gaps. organ pads with spacious voicings. live rock drums; driving bass guitar.",
+   "ornaments": "brief idiomatic electric baglama ornaments; electric guitar answers only between lead phrases",
+   "dynamics": "restrained opening, gradual build at repeated phrases, brief breath before cadence",
+   "energy": 0.75,
+   "tempo_range": [
+    65,
+    155
+   ],
+   "variants": {
+    "Classic": {
+     "direction": "Authentic small-ensemble phrasing; live rock drums; restrained electric guitar responses.",
+     "summary_ar": "قريب من روح الستايل، مع مصاحبة متزنة."
+    },
+    "Modern": {
+     "direction": "Contemporary syncopated bass, tighter rhythmic accents, concise electric guitar responses; keep electric baglama prominent.",
+     "summary_ar": "بيس وإيقاع معاصر، مع بقاء هوية الستايل."
+    },
+    "Grand": {
+     "direction": "Wider dynamic arc, sustained harmonic support only at peaks, stronger ensemble cadence; one clear electric baglama.",
+     "summary_ar": "تصاعد أوسع ومصاحبة أغنى عند الذروة فقط."
+    }
+   }
+  },
+  {
+   "id": "arabic_acoustic",
+   "name_ar": "أكوستيك عربي",
+   "description_ar": "حميمي وهادئ بآلات طبيعية",
+   "group": "arabic",
+   "lead": "oud",
+   "prompt": "Arabic acoustic chamber music. oud carries the source theme; ney responds in gaps. sparse fingerpicked acoustic guitar. soft frame drum; occasional low oud roots.",
+   "ornaments": "brief idiomatic oud ornaments; ney answers only between lead phrases",
+   "dynamics": "restrained opening, gradual build at repeated phrases, brief breath before cadence",
+   "energy": 0.25,
+   "tempo_range": [
+    45,
+    125
+   ],
+   "variants": {
+    "Classic": {
+     "direction": "Authentic small-ensemble phrasing; soft frame drum; restrained ney responses.",
+     "summary_ar": "قريب من روح الستايل، مع مصاحبة متزنة."
+    },
+    "Modern": {
+     "direction": "Contemporary syncopated bass, tighter rhythmic accents, concise ney responses; keep oud prominent.",
+     "summary_ar": "بيس وإيقاع معاصر، مع بقاء هوية الستايل."
+    },
+    "Grand": {
+     "direction": "Wider dynamic arc, sustained harmonic support only at peaks, stronger ensemble cadence; one clear oud.",
+     "summary_ar": "تصاعد أوسع ومصاحبة أغنى عند الذروة فقط."
+    }
+   }
+  },
+  {
+   "id": "blues",
+   "name_ar": "بلوز",
+   "description_ar": "جيتار معبّر وردود قصيرة",
+   "group": "world",
+   "lead": "electric guitar",
+   "prompt": "electric blues quartet. electric guitar carries the source theme; harmonica responds in gaps. sparse organ voicings respecting the source melody. relaxed shuffle drums; steady bass guitar.",
+   "ornaments": "brief idiomatic electric guitar ornaments; harmonica answers only between lead phrases",
+   "dynamics": "restrained opening, gradual build at repeated phrases, brief breath before cadence",
+   "energy": 0.5,
+   "tempo_range": [
+    65,
+    155
+   ],
+   "variants": {
+    "Classic": {
+     "direction": "Authentic small-ensemble phrasing; relaxed shuffle drums; restrained harmonica responses.",
+     "summary_ar": "قريب من روح الستايل، مع مصاحبة متزنة."
+    },
+    "Modern": {
+     "direction": "Contemporary syncopated bass, tighter rhythmic accents, concise harmonica responses; keep electric guitar prominent.",
+     "summary_ar": "بيس وإيقاع معاصر، مع بقاء هوية الستايل."
+    },
+    "Grand": {
+     "direction": "Wider dynamic arc, sustained harmonic support only at peaks, stronger ensemble cadence; one clear electric guitar.",
+     "summary_ar": "تصاعد أوسع ومصاحبة أغنى عند الذروة فقط."
+    }
+   }
+  },
+  {
+   "id": "cinematic_orchestra",
+   "name_ar": "أوركسترا سينمائية",
+   "description_ar": "تصاعد واسع ولحن معبّر",
+   "group": "world",
+   "lead": "solo violin",
+   "prompt": "cinematic orchestral score. solo violin carries the source theme; woodwinds responds in gaps. warm strings with spacious voicings. restrained timpani and soft cymbals; cellos and double bass.",
+   "ornaments": "brief idiomatic solo violin ornaments; woodwinds answers only between lead phrases",
+   "dynamics": "restrained opening, gradual build at repeated phrases, brief breath before cadence",
+   "energy": 0.45,
+   "tempo_range": [
+    45,
+    125
+   ],
+   "variants": {
+    "Classic": {
+     "direction": "Authentic small-ensemble phrasing; restrained timpani and soft cymbals; restrained woodwinds responses.",
+     "summary_ar": "قريب من روح الستايل، مع مصاحبة متزنة."
+    },
+    "Modern": {
+     "direction": "Contemporary syncopated bass, tighter rhythmic accents, concise woodwinds responses; keep solo violin prominent.",
+     "summary_ar": "بيس وإيقاع معاصر، مع بقاء هوية الستايل."
+    },
+    "Grand": {
+     "direction": "Wider dynamic arc, sustained harmonic support only at peaks, stronger ensemble cadence; one clear solo violin.",
+     "summary_ar": "تصاعد أوسع ومصاحبة أغنى عند الذروة فقط."
+    }
+   }
+  },
+  {
+   "id": "classical_arabic",
+   "name_ar": "أوركسترا عربية كلاسيكية",
+   "description_ar": "وتريات واسعة وردود شرقية",
+   "group": "arabic",
+   "lead": "solo violin",
+   "prompt": "classical Arabic orchestra. solo violin carries the source theme; qanun responds in gaps. supporting string section in slow modal voicings. restrained riqq and darbuka; cello roots.",
+   "ornaments": "brief idiomatic solo violin ornaments; qanun answers only between lead phrases",
+   "dynamics": "restrained opening, gradual build at repeated phrases, brief breath before cadence",
+   "energy": 0.5,
+   "tempo_range": [
+    65,
+    155
+   ],
+   "variants": {
+    "Classic": {
+     "direction": "Authentic small-ensemble phrasing; restrained riqq and darbuka; restrained qanun responses.",
+     "summary_ar": "قريب من روح الستايل، مع مصاحبة متزنة."
+    },
+    "Modern": {
+     "direction": "Contemporary syncopated bass, tighter rhythmic accents, concise qanun responses; keep solo violin prominent.",
+     "summary_ar": "بيس وإيقاع معاصر، مع بقاء هوية الستايل."
+    },
+    "Grand": {
+     "direction": "Wider dynamic arc, sustained harmonic support only at peaks, stronger ensemble cadence; one clear solo violin.",
+     "summary_ar": "تصاعد أوسع ومصاحبة أغنى عند الذروة فقط."
+    }
+   }
+  },
+  {
+   "id": "dabke",
+   "name_ar": "دبكة",
+   "description_ar": "نفخ شرقي وإيقاع راقص",
+   "group": "arabic",
+   "lead": "mijwiz reed",
+   "prompt": "Levantine dabke. mijwiz reed carries the source theme; oud responds in gaps. short keyboard backing. driving duple tabl and claps; steady low pulses.",
+   "ornaments": "brief idiomatic mijwiz reed ornaments; oud answers only between lead phrases",
+   "dynamics": "restrained opening, gradual build at repeated phrases, brief breath before cadence",
+   "energy": 0.9,
+   "tempo_range": [
+    65,
+    155
+   ],
+   "variants": {
+    "Classic": {
+     "direction": "Authentic small-ensemble phrasing; driving duple tabl and claps; restrained oud responses.",
+     "summary_ar": "قريب من روح الستايل، مع مصاحبة متزنة."
+    },
+    "Modern": {
+     "direction": "Contemporary syncopated bass, tighter rhythmic accents, concise oud responses; keep mijwiz reed prominent.",
+     "summary_ar": "بيس وإيقاع معاصر، مع بقاء هوية الستايل."
+    },
+    "Grand": {
+     "direction": "Wider dynamic arc, sustained harmonic support only at peaks, stronger ensemble cadence; one clear mijwiz reed.",
+     "summary_ar": "تصاعد أوسع ومصاحبة أغنى عند الذروة فقط."
+    }
+   }
+  },
+  {
+   "id": "egyptian_baladi",
+   "name_ar": "بلدي مصري",
+   "description_ar": "جمل معبّرة وإيقاع بلدي دافئ",
+   "group": "arabic",
+   "lead": "accordion",
+   "prompt": "Egyptian baladi. accordion carries the source theme; solo violin responds in gaps. restrained oud punctuation. grounded baladi darbuka; simple anchored bass.",
+   "ornaments": "brief idiomatic accordion ornaments; solo violin answers only between lead phrases",
+   "dynamics": "restrained opening, gradual build at repeated phrases, brief breath before cadence",
+   "energy": 0.55,
+   "tempo_range": [
+    65,
+    155
+   ],
+   "variants": {
+    "Classic": {
+     "direction": "Authentic small-ensemble phrasing; grounded baladi darbuka; restrained solo violin responses.",
+     "summary_ar": "قريب من روح الستايل، مع مصاحبة متزنة."
+    },
+    "Modern": {
+     "direction": "Contemporary syncopated bass, tighter rhythmic accents, concise solo violin responses; keep accordion prominent.",
+     "summary_ar": "بيس وإيقاع معاصر، مع بقاء هوية الستايل."
+    },
+    "Grand": {
+     "direction": "Wider dynamic arc, sustained harmonic support only at peaks, stronger ensemble cadence; one clear accordion.",
+     "summary_ar": "تصاعد أوسع ومصاحبة أغنى عند الذروة فقط."
+    }
+   }
+  },
+  {
+   "id": "egyptian_shaabi",
+   "name_ar": "شعبي مصري",
+   "description_ar": "أكورديون واضح وردود مزمار",
+   "group": "arabic",
+   "lead": "accordion",
+   "prompt": "Egyptian shaabi. accordion carries the source theme; mizmar responds in gaps. sparse keyboard stabs. driving darbuka and riqq; earthy short bass pulses.",
+   "ornaments": "brief idiomatic accordion ornaments; mizmar answers only between lead phrases",
+   "dynamics": "restrained opening, gradual build at repeated phrases, brief breath before cadence",
+   "energy": 0.75,
+   "tempo_range": [
+    65,
+    155
+   ],
+   "variants": {
+    "Classic": {
+     "direction": "Authentic small-ensemble phrasing; driving darbuka and riqq; restrained mizmar responses.",
+     "summary_ar": "قريب من روح الستايل، مع مصاحبة متزنة."
+    },
+    "Modern": {
+     "direction": "Contemporary syncopated bass, tighter rhythmic accents, concise mizmar responses; keep accordion prominent.",
+     "summary_ar": "بيس وإيقاع معاصر، مع بقاء هوية الستايل."
+    },
+    "Grand": {
+     "direction": "Wider dynamic arc, sustained harmonic support only at peaks, stronger ensemble cadence; one clear accordion.",
+     "summary_ar": "تصاعد أوسع ومصاحبة أغنى عند الذروة فقط."
+    }
+   }
+  },
+  {
+   "id": "egyptian_wedding",
+   "name_ar": "أفراح مصرية",
+   "description_ar": "فرقة حماسية راقصة",
+   "group": "arabic",
+   "lead": "accordion",
+   "prompt": "Egyptian wedding band. accordion carries the source theme; mizmar responds in gaps. short keyboard chord stabs. baladi darbuka and riqq; firm syncopated bass.",
+   "ornaments": "brief idiomatic accordion ornaments; mizmar answers only between lead phrases",
+   "dynamics": "restrained opening, gradual build at repeated phrases, brief breath before cadence",
+   "energy": 0.85,
+   "tempo_range": [
+    65,
+    155
+   ],
+   "variants": {
+    "Classic": {
+     "direction": "Authentic small-ensemble phrasing; baladi darbuka and riqq; restrained mizmar responses.",
+     "summary_ar": "قريب من روح الستايل، مع مصاحبة متزنة."
+    },
+    "Modern": {
+     "direction": "Contemporary syncopated bass, tighter rhythmic accents, concise mizmar responses; keep accordion prominent.",
+     "summary_ar": "بيس وإيقاع معاصر، مع بقاء هوية الستايل."
+    },
+    "Grand": {
+     "direction": "Wider dynamic arc, sustained harmonic support only at peaks, stronger ensemble cadence; one clear accordion.",
+     "summary_ar": "تصاعد أوسع ومصاحبة أغنى عند الذروة فقط."
+    }
+   }
+  },
+  {
+   "id": "electronic_dance",
+   "name_ar": "إلكتروني راقص",
+   "description_ar": "نبض واضح وتصاعد منظم",
+   "group": "world",
+   "lead": "warm synthesizer",
+   "prompt": "electronic dance instrumental. warm synthesizer carries the source theme; plucked synth responds in gaps. spacious sustained pad. four-on-floor electronic drums; clean rhythmic synth bass.",
+   "ornaments": "brief idiomatic warm synthesizer ornaments; plucked synth answers only between lead phrases",
+   "dynamics": "restrained opening, gradual build at repeated phrases, brief breath before cadence",
+   "energy": 0.9,
+   "tempo_range": [
+    65,
+    155
+   ],
+   "variants": {
+    "Classic": {
+     "direction": "Authentic small-ensemble phrasing; four-on-floor electronic drums; restrained plucked synth responses.",
+     "summary_ar": "قريب من روح الستايل، مع مصاحبة متزنة."
+    },
+    "Modern": {
+     "direction": "Contemporary syncopated bass, tighter rhythmic accents, concise plucked synth responses; keep warm synthesizer prominent.",
+     "summary_ar": "بيس وإيقاع معاصر، مع بقاء هوية الستايل."
+    },
+    "Grand": {
+     "direction": "Wider dynamic arc, sustained harmonic support only at peaks, stronger ensemble cadence; one clear warm synthesizer.",
+     "summary_ar": "تصاعد أوسع ومصاحبة أغنى عند الذروة فقط."
+    }
+   }
+  },
+  {
+   "id": "epic_orchestra",
+   "name_ar": "أوركسترا ملحمية",
+   "description_ar": "تصاعد قوي دون ازدحام اللحن",
+   "group": "world",
+   "lead": "solo horn",
+   "prompt": "epic orchestral instrumental. solo horn carries the source theme; violins responds in gaps. broad strings and brass only at peaks. measured orchestral drums; low strings ostinato.",
+   "ornaments": "brief idiomatic solo horn ornaments; violins answers only between lead phrases",
+   "dynamics": "restrained opening, gradual build at repeated phrases, brief breath before cadence",
+   "energy": 0.85,
+   "tempo_range": [
+    65,
+    155
+   ],
+   "variants": {
+    "Classic": {
+     "direction": "Authentic small-ensemble phrasing; measured orchestral drums; restrained violins responses.",
+     "summary_ar": "قريب من روح الستايل، مع مصاحبة متزنة."
+    },
+    "Modern": {
+     "direction": "Contemporary syncopated bass, tighter rhythmic accents, concise violins responses; keep solo horn prominent.",
+     "summary_ar": "بيس وإيقاع معاصر، مع بقاء هوية الستايل."
+    },
+    "Grand": {
+     "direction": "Wider dynamic arc, sustained harmonic support only at peaks, stronger ensemble cadence; one clear solo horn.",
+     "summary_ar": "تصاعد أوسع ومصاحبة أغنى عند الذروة فقط."
+    }
+   }
+  },
+  {
+   "id": "funk",
+   "name_ar": "فانك",
+   "description_ar": "إيقاع متقطع وبيس نشط",
+   "group": "world",
+   "lead": "clavinet",
+   "prompt": "tight funk band. clavinet carries the source theme; short horn stabs responds in gaps. muted rhythm guitar on offbeats. dry syncopated drums; syncopated electric bass.",
+   "ornaments": "brief idiomatic clavinet ornaments; short horn stabs answers only between lead phrases",
+   "dynamics": "restrained opening, gradual build at repeated phrases, brief breath before cadence",
+   "energy": 0.85,
+   "tempo_range": [
+    65,
+    155
+   ],
+   "variants": {
+    "Classic": {
+     "direction": "Authentic small-ensemble phrasing; dry syncopated drums; restrained short horn stabs responses.",
+     "summary_ar": "قريب من روح الستايل، مع مصاحبة متزنة."
+    },
+    "Modern": {
+     "direction": "Contemporary syncopated bass, tighter rhythmic accents, concise short horn stabs responses; keep clavinet prominent.",
+     "summary_ar": "بيس وإيقاع معاصر، مع بقاء هوية الستايل."
+    },
+    "Grand": {
+     "direction": "Wider dynamic arc, sustained harmonic support only at peaks, stronger ensemble cadence; one clear clavinet.",
+     "summary_ar": "تصاعد أوسع ومصاحبة أغنى عند الذروة فقط."
+    }
+   }
+  },
+  {
+   "id": "hip_hop",
+   "name_ar": "هيب هوب",
+   "description_ar": "درامز واضحة وجملة لحنية بارزة",
+   "group": "world",
+   "lead": "electric piano",
+   "prompt": "instrumental hip-hop. electric piano carries the source theme; muted guitar responds in gaps. sparse warm keyboard harmony. punchy laid-back drums; deep restrained bass.",
+   "ornaments": "brief idiomatic electric piano ornaments; muted guitar answers only between lead phrases",
+   "dynamics": "restrained opening, gradual build at repeated phrases, brief breath before cadence",
+   "energy": 0.65,
+   "tempo_range": [
+    65,
+    155
+   ],
+   "variants": {
+    "Classic": {
+     "direction": "Authentic small-ensemble phrasing; punchy laid-back drums; restrained muted guitar responses.",
+     "summary_ar": "قريب من روح الستايل، مع مصاحبة متزنة."
+    },
+    "Modern": {
+     "direction": "Contemporary syncopated bass, tighter rhythmic accents, concise muted guitar responses; keep electric piano prominent.",
+     "summary_ar": "بيس وإيقاع معاصر، مع بقاء هوية الستايل."
+    },
+    "Grand": {
+     "direction": "Wider dynamic arc, sustained harmonic support only at peaks, stronger ensemble cadence; one clear electric piano.",
+     "summary_ar": "تصاعد أوسع ومصاحبة أغنى عند الذروة فقط."
+    }
+   }
+  },
+  {
+   "id": "jazz",
+   "name_ar": "جاز",
+   "description_ar": "بيانو وردود ساكس بإحساس مرن",
+   "group": "world",
+   "lead": "piano",
+   "prompt": "small jazz ensemble. piano carries the source theme; tenor saxophone responds in gaps. open piano voicings leaving the theme exposed. brushed swing drums; walking acoustic bass.",
+   "ornaments": "brief idiomatic piano ornaments; tenor saxophone answers only between lead phrases",
+   "dynamics": "restrained opening, gradual build at repeated phrases, brief breath before cadence",
+   "energy": 0.45,
+   "tempo_range": [
+    45,
+    125
+   ],
+   "variants": {
+    "Classic": {
+     "direction": "Authentic small-ensemble phrasing; brushed swing drums; restrained tenor saxophone responses.",
+     "summary_ar": "قريب من روح الستايل، مع مصاحبة متزنة."
+    },
+    "Modern": {
+     "direction": "Contemporary syncopated bass, tighter rhythmic accents, concise tenor saxophone responses; keep piano prominent.",
+     "summary_ar": "بيس وإيقاع معاصر، مع بقاء هوية الستايل."
+    },
+    "Grand": {
+     "direction": "Wider dynamic arc, sustained harmonic support only at peaks, stronger ensemble cadence; one clear piano.",
+     "summary_ar": "تصاعد أوسع ومصاحبة أغنى عند الذروة فقط."
+    }
+   }
+  },
+  {
+   "id": "khaliji",
+   "name_ar": "خليجي",
+   "description_ar": "عود ودفوف بإحساس متمايل",
+   "group": "arabic",
+   "lead": "oud",
+   "prompt": "Khaliji ensemble. oud carries the source theme; solo violin responds in gaps. spacious keyboard support. flowing six-eight frame drums and claps; rounded bass pulses.",
+   "ornaments": "brief idiomatic oud ornaments; solo violin answers only between lead phrases",
+   "dynamics": "restrained opening, gradual build at repeated phrases, brief breath before cadence",
+   "energy": 0.65,
+   "tempo_range": [
+    65,
+    155
+   ],
+   "variants": {
+    "Classic": {
+     "direction": "Authentic small-ensemble phrasing; flowing six-eight frame drums and claps; restrained solo violin responses.",
+     "summary_ar": "قريب من روح الستايل، مع مصاحبة متزنة."
+    },
+    "Modern": {
+     "direction": "Contemporary syncopated bass, tighter rhythmic accents, concise solo violin responses; keep oud prominent.",
+     "summary_ar": "بيس وإيقاع معاصر، مع بقاء هوية الستايل."
+    },
+    "Grand": {
+     "direction": "Wider dynamic arc, sustained harmonic support only at peaks, stronger ensemble cadence; one clear oud.",
+     "summary_ar": "تصاعد أوسع ومصاحبة أغنى عند الذروة فقط."
+    }
+   }
+  },
+  {
+   "id": "latin",
+   "name_ar": "لاتيني",
+   "description_ar": "جيتار وإيقاع متمايل",
+   "group": "world",
+   "lead": "nylon guitar",
+   "prompt": "Latin acoustic dance ensemble. nylon guitar carries the source theme; trumpet responds in gaps. short piano comping. congas and clave-inspired percussion; syncopated bass.",
+   "ornaments": "brief idiomatic nylon guitar ornaments; trumpet answers only between lead phrases",
+   "dynamics": "restrained opening, gradual build at repeated phrases, brief breath before cadence",
+   "energy": 0.7,
+   "tempo_range": [
+    65,
+    155
+   ],
+   "variants": {
+    "Classic": {
+     "direction": "Authentic small-ensemble phrasing; congas and clave-inspired percussion; restrained trumpet responses.",
+     "summary_ar": "قريب من روح الستايل، مع مصاحبة متزنة."
+    },
+    "Modern": {
+     "direction": "Contemporary syncopated bass, tighter rhythmic accents, concise trumpet responses; keep nylon guitar prominent.",
+     "summary_ar": "بيس وإيقاع معاصر، مع بقاء هوية الستايل."
+    },
+    "Grand": {
+     "direction": "Wider dynamic arc, sustained harmonic support only at peaks, stronger ensemble cadence; one clear nylon guitar.",
+     "summary_ar": "تصاعد أوسع ومصاحبة أغنى عند الذروة فقط."
+    }
+   }
+  },
+  {
+   "id": "lo_fi",
+   "name_ar": "لو فاي",
+   "description_ar": "هادئ ودافئ دون تشويش مزعج",
+   "group": "world",
+   "lead": "soft electric piano",
+   "prompt": "lo-fi instrumental. soft electric piano carries the source theme; muted guitar responds in gaps. warm sparse voicings. soft laid-back drum groove; gentle rounded bass.",
+   "ornaments": "brief idiomatic soft electric piano ornaments; muted guitar answers only between lead phrases",
+   "dynamics": "restrained opening, gradual build at repeated phrases, brief breath before cadence",
+   "energy": 0.25,
+   "tempo_range": [
+    45,
+    125
+   ],
+   "variants": {
+    "Classic": {
+     "direction": "Authentic small-ensemble phrasing; soft laid-back drum groove; restrained muted guitar responses.",
+     "summary_ar": "قريب من روح الستايل، مع مصاحبة متزنة."
+    },
+    "Modern": {
+     "direction": "Contemporary syncopated bass, tighter rhythmic accents, concise muted guitar responses; keep soft electric piano prominent.",
+     "summary_ar": "بيس وإيقاع معاصر، مع بقاء هوية الستايل."
+    },
+    "Grand": {
+     "direction": "Wider dynamic arc, sustained harmonic support only at peaks, stronger ensemble cadence; one clear soft electric piano.",
+     "summary_ar": "تصاعد أوسع ومصاحبة أغنى عند الذروة فقط."
+    }
+   }
+  },
+  {
+   "id": "modern_arabic_pop",
+   "name_ar": "بوب عربي حديث",
+   "description_ar": "لحن واضح وإنتاج معاصر",
+   "group": "arabic",
+   "lead": "solo violin",
+   "prompt": "modern Arabic pop. solo violin carries the source theme; oud responds in gaps. warm keys with open voicings. tight modern drums with darbuka touches; clean pop bass.",
+   "ornaments": "brief idiomatic solo violin ornaments; oud answers only between lead phrases",
+   "dynamics": "restrained opening, gradual build at repeated phrases, brief breath before cadence",
+   "energy": 0.65,
+   "tempo_range": [
+    65,
+    155
+   ],
+   "variants": {
+    "Classic": {
+     "direction": "Authentic small-ensemble phrasing; tight modern drums with darbuka touches; restrained oud responses.",
+     "summary_ar": "قريب من روح الستايل، مع مصاحبة متزنة."
+    },
+    "Modern": {
+     "direction": "Contemporary syncopated bass, tighter rhythmic accents, concise oud responses; keep solo violin prominent.",
+     "summary_ar": "بيس وإيقاع معاصر، مع بقاء هوية الستايل."
+    },
+    "Grand": {
+     "direction": "Wider dynamic arc, sustained harmonic support only at peaks, stronger ensemble cadence; one clear solo violin.",
+     "summary_ar": "تصاعد أوسع ومصاحبة أغنى عند الذروة فقط."
+    }
+   }
+  },
+  {
+   "id": "oriental_takht",
+   "name_ar": "تخت شرقي",
+   "description_ar": "فرقة صغيرة ومساحة للزخارف",
+   "group": "arabic",
+   "lead": "oud",
+   "prompt": "intimate Arabic takht. oud carries the source theme; qanun responds in gaps. light violin sustained support, modal rather than dense chords. delicate riqq; low oud root punctuation.",
+   "ornaments": "brief idiomatic oud ornaments; qanun answers only between lead phrases",
+   "dynamics": "restrained opening, gradual build at repeated phrases, brief breath before cadence",
+   "energy": 0.3,
+   "tempo_range": [
+    45,
+    125
+   ],
+   "variants": {
+    "Classic": {
+     "direction": "Authentic small-ensemble phrasing; delicate riqq; restrained qanun responses.",
+     "summary_ar": "قريب من روح الستايل، مع مصاحبة متزنة."
+    },
+    "Modern": {
+     "direction": "Contemporary syncopated bass, tighter rhythmic accents, concise qanun responses; keep oud prominent.",
+     "summary_ar": "بيس وإيقاع معاصر، مع بقاء هوية الستايل."
+    },
+    "Grand": {
+     "direction": "Wider dynamic arc, sustained harmonic support only at peaks, stronger ensemble cadence; one clear oud.",
+     "summary_ar": "تصاعد أوسع ومصاحبة أغنى عند الذروة فقط."
+    }
+   }
+  },
+  {
+   "id": "pop",
+   "name_ar": "بوب",
+   "description_ar": "خفيف وواضح وقابل للترديد",
+   "group": "world",
+   "lead": "electric piano",
+   "prompt": "contemporary pop. electric piano carries the source theme; clean guitar responds in gaps. warm keyboard chords. tight pop drum kit; rounded electric bass.",
+   "ornaments": "brief idiomatic electric piano ornaments; clean guitar answers only between lead phrases",
+   "dynamics": "restrained opening, gradual build at repeated phrases, brief breath before cadence",
+   "energy": 0.65,
+   "tempo_range": [
+    65,
+    155
+   ],
+   "variants": {
+    "Classic": {
+     "direction": "Authentic small-ensemble phrasing; tight pop drum kit; restrained clean guitar responses.",
+     "summary_ar": "قريب من روح الستايل، مع مصاحبة متزنة."
+    },
+    "Modern": {
+     "direction": "Contemporary syncopated bass, tighter rhythmic accents, concise clean guitar responses; keep electric piano prominent.",
+     "summary_ar": "بيس وإيقاع معاصر، مع بقاء هوية الستايل."
+    },
+    "Grand": {
+     "direction": "Wider dynamic arc, sustained harmonic support only at peaks, stronger ensemble cadence; one clear electric piano.",
+     "summary_ar": "تصاعد أوسع ومصاحبة أغنى عند الذروة فقط."
+    }
+   }
+  },
+  {
+   "id": "rock",
+   "name_ar": "روك",
+   "description_ar": "جيتار رئيسي وفرقة حية",
+   "group": "world",
+   "lead": "electric guitar",
+   "prompt": "melodic rock band. electric guitar carries the source theme; organ responds in gaps. restrained rhythm guitar chords. live rock drums; bass guitar following the groove.",
+   "ornaments": "brief idiomatic electric guitar ornaments; organ answers only between lead phrases",
+   "dynamics": "restrained opening, gradual build at repeated phrases, brief breath before cadence",
+   "energy": 0.8,
+   "tempo_range": [
+    65,
+    155
+   ],
+   "variants": {
+    "Classic": {
+     "direction": "Authentic small-ensemble phrasing; live rock drums; restrained organ responses.",
+     "summary_ar": "قريب من روح الستايل، مع مصاحبة متزنة."
+    },
+    "Modern": {
+     "direction": "Contemporary syncopated bass, tighter rhythmic accents, concise organ responses; keep electric guitar prominent.",
+     "summary_ar": "بيس وإيقاع معاصر، مع بقاء هوية الستايل."
+    },
+    "Grand": {
+     "direction": "Wider dynamic arc, sustained harmonic support only at peaks, stronger ensemble cadence; one clear electric guitar.",
+     "summary_ar": "تصاعد أوسع ومصاحبة أغنى عند الذروة فقط."
+    }
+   }
+  },
+  {
+   "id": "saidi_mizmar",
+   "name_ar": "مزمار صعيدي",
+   "description_ar": "طابع ريفي وإيقاع قوي",
+   "group": "arabic",
+   "lead": "mizmar",
+   "prompt": "Upper Egyptian saidi folk. mizmar carries the source theme; rababa responds in gaps. modal drone without dense chords. strong duple tabl and hand percussion; low drum accents.",
+   "ornaments": "brief idiomatic mizmar ornaments; rababa answers only between lead phrases",
+   "dynamics": "restrained opening, gradual build at repeated phrases, brief breath before cadence",
+   "energy": 0.85,
+   "tempo_range": [
+    65,
+    155
+   ],
+   "variants": {
+    "Classic": {
+     "direction": "Authentic small-ensemble phrasing; strong duple tabl and hand percussion; restrained rababa responses.",
+     "summary_ar": "قريب من روح الستايل، مع مصاحبة متزنة."
+    },
+    "Modern": {
+     "direction": "Contemporary syncopated bass, tighter rhythmic accents, concise rababa responses; keep mizmar prominent.",
+     "summary_ar": "بيس وإيقاع معاصر، مع بقاء هوية الستايل."
+    },
+    "Grand": {
+     "direction": "Wider dynamic arc, sustained harmonic support only at peaks, stronger ensemble cadence; one clear mizmar.",
+     "summary_ar": "تصاعد أوسع ومصاحبة أغنى عند الذروة فقط."
+    }
+   }
+  },
+  {
+   "id": "turkish_classical",
+   "name_ar": "تركي كلاسيكي",
+   "description_ar": "قانون وناي بمساحة واسعة",
+   "group": "turkish",
+   "lead": "kanun",
+   "prompt": "Turkish classical chamber ensemble. kanun carries the source theme; ney responds in gaps. soft bowed strings, restrained modal support. subtle kudum; low strings only at cadences.",
+   "ornaments": "brief idiomatic kanun ornaments; ney answers only between lead phrases",
+   "dynamics": "restrained opening, gradual build at repeated phrases, brief breath before cadence",
+   "energy": 0.3,
+   "tempo_range": [
+    45,
+    125
+   ],
+   "variants": {
+    "Classic": {
+     "direction": "Authentic small-ensemble phrasing; subtle kudum; restrained ney responses.",
+     "summary_ar": "قريب من روح الستايل، مع مصاحبة متزنة."
+    },
+    "Modern": {
+     "direction": "Contemporary syncopated bass, tighter rhythmic accents, concise ney responses; keep kanun prominent.",
+     "summary_ar": "بيس وإيقاع معاصر، مع بقاء هوية الستايل."
+    },
+    "Grand": {
+     "direction": "Wider dynamic arc, sustained harmonic support only at peaks, stronger ensemble cadence; one clear kanun.",
+     "summary_ar": "تصاعد أوسع ومصاحبة أغنى عند الذروة فقط."
+    }
+   }
+  },
+  {
+   "id": "turkish_folk",
+   "name_ar": "تركي شعبي",
+   "description_ar": "باغلاما وزخارف طبيعية",
+   "group": "turkish",
+   "lead": "baglama",
+   "prompt": "Turkish folk ensemble. baglama carries the source theme; ney responds in gaps. sparse modal plucked support. light davul and frame drum; low plucked roots.",
+   "ornaments": "brief idiomatic baglama ornaments; ney answers only between lead phrases",
+   "dynamics": "restrained opening, gradual build at repeated phrases, brief breath before cadence",
+   "energy": 0.5,
+   "tempo_range": [
+    65,
+    155
+   ],
+   "variants": {
+    "Classic": {
+     "direction": "Authentic small-ensemble phrasing; light davul and frame drum; restrained ney responses.",
+     "summary_ar": "قريب من روح الستايل، مع مصاحبة متزنة."
+    },
+    "Modern": {
+     "direction": "Contemporary syncopated bass, tighter rhythmic accents, concise ney responses; keep baglama prominent.",
+     "summary_ar": "بيس وإيقاع معاصر، مع بقاء هوية الستايل."
+    },
+    "Grand": {
+     "direction": "Wider dynamic arc, sustained harmonic support only at peaks, stronger ensemble cadence; one clear baglama.",
+     "summary_ar": "تصاعد أوسع ومصاحبة أغنى عند الذروة فقط."
+    }
+   }
+  },
+  {
+   "id": "turkish_pop",
+   "name_ar": "بوب تركي",
+   "description_ar": "نبض حديث ولمسة شرقية",
+   "group": "turkish",
+   "lead": "electric baglama",
+   "prompt": "Turkish pop. electric baglama carries the source theme; clarinet responds in gaps. warm contemporary keys. tight pop drums with light darbuka; rounded electric bass.",
+   "ornaments": "brief idiomatic electric baglama ornaments; clarinet answers only between lead phrases",
+   "dynamics": "restrained opening, gradual build at repeated phrases, brief breath before cadence",
+   "energy": 0.7,
+   "tempo_range": [
+    65,
+    155
+   ],
+   "variants": {
+    "Classic": {
+     "direction": "Authentic small-ensemble phrasing; tight pop drums with light darbuka; restrained clarinet responses.",
+     "summary_ar": "قريب من روح الستايل، مع مصاحبة متزنة."
+    },
+    "Modern": {
+     "direction": "Contemporary syncopated bass, tighter rhythmic accents, concise clarinet responses; keep electric baglama prominent.",
+     "summary_ar": "بيس وإيقاع معاصر، مع بقاء هوية الستايل."
+    },
+    "Grand": {
+     "direction": "Wider dynamic arc, sustained harmonic support only at peaks, stronger ensemble cadence; one clear electric baglama.",
+     "summary_ar": "تصاعد أوسع ومصاحبة أغنى عند الذروة فقط."
+    }
+   }
+  }
+ ]
+}

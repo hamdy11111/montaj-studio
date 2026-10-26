@@ -373,6 +373,7 @@ export class ExportService {
       const files = { ...this.stickerFiles(timeline), ...this.writeOverlays(jobDir, overlays), ...gfx };
       const common = {
         media: this.mediaMap(projectId), overlays: files, luts: this.lutMap(timeline), compoundFiles, mattes, stabilized, caps, ...voice,
+        musicBed: this.musicBed?.forExport(timeline) || null, // music under speech (services/musicBedService.js)
         width: size.width, height: size.height, fps, range: opts.range || null, mode,
         video: { codec: opts.codec || "h264", format: opts.format || "mp4", bitrate: opts.bitrate || "recommended", hw: this.settings.get("performance").hwEncode },
         audio: { enabled: opts.audioEnabled !== false, format: opts.audioFormat || "flac" },

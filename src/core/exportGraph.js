@@ -11,6 +11,7 @@ import { RESOLUTIONS } from "./model.js";
 import { AppError } from "./validation.js";
 import { cutoutLayers, cutoutAfterTrack } from "./cutout.js";
 import { pictureTracks } from "./timelineOps.js";
+import { duckDbOf, duckExpr } from "./musicBed.js";
 
 const s = (us) => Number((us / US).toFixed(6));
 const hex = (c) => `0x${(c || "#000000").replace("#", "").slice(0, 6)}`;
@@ -125,6 +126,11 @@ export function buildExport(tl, o) {
       }
     }
     return ivs.length ? `volume='1-${(1 - 10 ** (-DUB_DUCK_DB / 20)).toFixed(4)}*min(1,${ivs.join("+")})':eval=frame` : null;
+  };
+  // Music under speech (core/musicBed.js): a music track's clips are lowered where speech is heard (o.musicBed.spans).
+  const duckUnderSpeech = (seg, tVar) => {
+    const db = duckDbOf(trackOf.get(seg.id));
+    return db && o.musicBed?.spans ? duckExpr(o.musicBed.spans, seg.start, seg.duration, tVar, db) : null;
   };
 
   const total = tracks.reduce((m, t) => Math.max(m, ...t.segments.map((x) => x.start + x.duration), 0), 0);
@@ -719,6 +725,7 @@ export function buildExport(tl, o) {
     fx.push(`aformat=sample_rates=48000:channel_layouts=stereo`);
     fx.push(`volume='${gainAt(EXPR, seg, tSeg)}':eval=frame`);
     fx.push(duckUnderDub(seg, tSeg));
+    fx.push(duckUnderSpeech(seg, tSeg));
     fx.push(tail);
     const delay = Math.max(0, Math.round((a0 - rangeStart) / 1000));
     fx.push(`adelay=${delay}|${delay}`);

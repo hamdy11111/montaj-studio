@@ -415,6 +415,12 @@ export function registerIpc({ getServices, getAgents = () => null, getWindow, ap
       return S().links.analyze(m.path, { verify: q.verify ? str(q.verify, "verify") : undefined, hint: q.hint ? str(q.hint, "hint") : null, options: q.options ? obj(q.options) : {}, onProgress: (p) => notifyAll("links:progress", { mediaId: m.id, progress: p }) });
     },
     "links.get": (mid) => S().links.cached(S().repos.media.get(id(mid)).path),
+    // ---------------------------------------------------------------- Phase 10: Easy Cover's choices; music under speech
+    "music.coverChoices": async () => (await import("../services/music/presets.js")).coverChoices(),
+    "musicbed.speech": (tid) => S().music.bed.speechOf(id(tid)),
+    "musicbed.place": (tid, o) => S().music.bed.place(id(tid), obj(o)),
+    "musicbed.autoLevel": (tid, sid) => S().music.bed.autoLevel(id(tid), id(sid)),
+    "musicbed.setDuck": (tid, sid, db) => S().music.bed.setDuck(id(tid), id(sid), db === null || db === undefined ? null : Math.max(0, Math.min(40, Number(db) || 0))),
   };
   // The VFX library service of this window's services (created on first use).
   let vfxLibInstance = null;

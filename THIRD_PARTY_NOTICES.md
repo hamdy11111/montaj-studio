@@ -140,3 +140,18 @@ The asset library lives outside the app and git (`D:\capcut new\assets-library`)
 | Noto Animated Emoji, 80 Lottie files | CC BY 4.0 (Google) — credit "Animated emoji: Noto Emoji Animation by Google, CC BY 4.0" | `assets-library/emoji/noto-lottie/` | https://googlefonts.github.io/noto-emoji-animation/ |
 | Noto Animated Emoji as transparent video, 30 files | CC BY 4.0 (Google) | `assets-library/emoji/animated-webm/` | https://github.com/remotion-dev/animated-emoji |
 | VFX/overlay clips (smoke, fire, sparks, light leaks, ink, bubbles…), 46 clips | Mixkit Stock Video Free License (each clip's licence — Free or Restricted — is in `vfx/index.json`) | `assets-library/vfx/<category>/` | https://mixkit.co/license/#videoFree |
+
+## Phase 10 — Easy Cover (music studio)
+
+Downloaded on request by the music studio's model manager (or imported from a folder), into the music models folder;
+never in the installer or in git. Each file is pinned to a revision and checked by its SHA-256.
+
+| Item | License | Where | Source |
+|---|---|---|---|
+| YuE2 3B bf16 (`checkpoints/yue2_3b_bf16.safetensors`, 7.8 GB) | CC BY-NC 4.0 — non-commercial | `<models>/checkpoints` | https://huggingface.co/Comfy-Org/YuE2 (revision 2f76ca7) |
+| SheetSage2 bf16 (`audio_encoders/sheetsage2_bf16.safetensors`, 1.4 GB) | CC BY-NC 4.0 — non-commercial | `<models>/audio_encoders` | https://huggingface.co/Comfy-Org/YuE2 (revision 2f76ca7) |
+| YuE2 instrumental LoRA `ar_lora_inst_v3abc_comfyui.safetensors` (0.2 GB) | CC BY-NC 4.0 — non-commercial | `<models>/loras` | https://huggingface.co/Mothersuperior/YuE2-instrumental-cot-full-loras (revision 947f2f4) |
+| Plenio Music Production System 0.7.0 (its `plenio` Python package: SheetSage2 transcription grid, ABC score rules) | Apache-2.0 (Johannes Plenio) | `<models>/packages/plenio-0.7.0.zip`, unpacked beside it | https://github.com/jplenio/Plenio-Music-Production-System (tag v0.7.0) |
+
+The 27 arranging styles (`src/services/music/engine/montaj_music/cover_presets.json`) are the user's own Music Rework
+Studio V3 recipes, compacted.

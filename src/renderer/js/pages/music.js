@@ -1,7 +1,9 @@
 // «استوديو الموسيقى» (home page view): the music engine's paths in six steps — what to make, the source and length,
 // the music's character, generation with its real progress, listening/comparing/refining (each change is a new version
 // in the same work group), and the generated-music library. Built with the app's own components; the engine and the
-// models are never loaded by opening this page (only "start engine" or a generation does).
+// models are never loaded by opening this page (only "start engine" or a generation does). «الكافر السهل» (cover)
+// takes a song and a part of it, an arranging style, a direction and a tempo; a part longer than 130 s is made in
+// sections (shown before it starts).
 import { h, mount, clear } from "../dom.js";
 import { icon } from "../icons.js";
 import { t, errorText, getLang } from "../i18n.js";
@@ -36,6 +38,8 @@ export function musicView(params = {}) {
     mode: "compose", choices: null, setup: null, status: null, source: null, range: [0, 0], group: null, title: "",
     s: { preset: "reference_vibe", energy: "auto", vibe: "balanced", bpm: 0, duration: 30, loop: false, description: "", style_override: "", keyscale: "D minor", meter: 0, seed: Math.floor(Math.random() * 2 ** 31) },
     originalDescription: null, job: null, libSearch: "", libFav: false,
+    // Easy Cover's choices (its styles come from the engine's preset file: music.coverChoices).
+    cover: null, c: { preset: "oriental_takht", variant: "Classic", tempo: "original", description: "", seed: Math.floor(Math.random() * 2 ** 31) },
     // Opened from the editor: the length of the timeline's range and the project to add the result to.
     project: params.musicProject || null, fromTimeline: params.musicSeconds ? { seconds: params.musicSeconds, range: !!params.musicRange } : null,
   };
@@ -126,7 +130,7 @@ export function musicView(params = {}) {
   const PATHS = [
     { id: "compose", icon: "sparkle", ready: true },
     { id: "inspired", icon: "audio", ready: true, experimental: true },
-    { id: "cover", icon: "sync", ready: false },
+    { id: "cover", icon: "sync", ready: true, experimental: true },
     { id: "tools", icon: "adjust", ready: false },
   ];
   const step1 = h("div");
@@ -146,7 +150,8 @@ export function musicView(params = {}) {
       ...[15, 30, 60, 90].map((n) => h("button", { class: ["chip", st.s.duration === n && "active"], onclick: () => { st.s.duration = n; drawStep2(); drawStep4(); } }, mmss(n))),
       h("span", { class: "muted small" }, t("mu.durationHint")),
       st.fromTimeline ? h("button", { class: ["chip", st.s.duration === st.fromTimeline.seconds && "active"], onclick: () => { st.s.duration = st.fromTimeline.seconds; drawStep2(); drawStep4(); } }, t(st.fromTimeline.range ? "mu.timelineRange" : "mu.timelineWhole", { t: mmss(st.fromTimeline.seconds) })) : null);
-    if (st.mode !== "inspired") { mount(step2, durRow); return; }
+    const isCover = st.mode === "cover", minLen = isCover ? 8 : 4;
+    if (st.mode !== "inspired" && !isCover) { mount(step2, durRow); return; }
     const canvas = h("canvas", { class: "mu-wave" });
     const startIn = h("input", { type: "text", value: mmss(st.range[0]), style: { width: "70px" }, class: "ltr" });
     const endIn = h("input", { type: "text", value: mmss(st.range[1]), style: { width: "70px" }, class: "ltr" });
@@ -155,12 +160,16 @@ export function musicView(params = {}) {
     const apply = () => {
       const a = parseTime(startIn.value), b = parseTime(endIn.value), D = st.source?.durationS || 0;
       if (!(a >= 0 && b > a && b <= D + 0.01)) { err.textContent = t("mu.badRange", { max: mmss(D) }); return; }
-      if (b - a < 4) { err.textContent = t("mu.rangeShort"); return; }
+      if (b - a < minLen) { err.textContent = t(isCover ? "mu.cover.rangeShort" : "mu.rangeShort"); return; }
+      if (isCover && b - a > 1200) { err.textContent = t("mu.cover.rangeLong"); return; }
       err.textContent = ""; st.range = [a, b]; redraw();
     };
     const redraw = () => {
       const D = st.source?.durationS || 1;
-      info.textContent = t("mu.rangeInfo", { a: mmss(st.range[0]), b: mmss(st.range[1]), d: (st.range[1] - st.range[0]).toFixed(1) }) + (st.range[1] - st.range[0] > 20 ? ` · ${t("mu.refFirst20")}` : "");
+      const len = st.range[1] - st.range[0];
+      info.textContent = t("mu.rangeInfo", { a: mmss(st.range[0]), b: mmss(st.range[1]), d: len.toFixed(1) })
+        + (isCover ? (len > (st.cover?.limits.single || 130) ? ` · ${t("mu.cover.sections", { n: Math.max(2, Math.round(len / 100)) })}` : "") : len > 20 ? ` · ${t("mu.refFirst20")}` : "");
+      if (isCover) drawStep4();
       startIn.value = mmss(st.range[0]); endIn.value = mmss(st.range[1]);
       if (st.source) requestAnimationFrame(() => drawWave(canvas, st.source.peaks, [st.range[0] / D, st.range[1] / D]));
     };
@@ -169,8 +178,8 @@ export function musicView(params = {}) {
     let dragFrom = null;
     canvas.onmousedown = (e) => { if (!st.source) return; const r = canvas.getBoundingClientRect(); dragFrom = Math.max(0, Math.min(1, (e.clientX - r.left) / r.width)); };
     canvas.onmousemove = (e) => { if (dragFrom === null) return; const r = canvas.getBoundingClientRect(), x = Math.max(0, Math.min(1, (e.clientX - r.left) / r.width)), D = st.source.durationS; st.range = [Math.min(dragFrom, x) * D, Math.max(dragFrom, x) * D]; redraw(); };
-    window.addEventListener("mouseup", () => { if (dragFrom !== null) { dragFrom = null; if (st.range[1] - st.range[0] < 4) err.textContent = t("mu.rangeShort"); else err.textContent = ""; } }, { once: false });
-    const setSource = (src) => { st.source = src; st.range = [0, Math.min(src.durationS, 30)]; if (!st.title) st.title = src.name.replace(/\.[^.]+$/, ""); drawStep2(); };
+    window.addEventListener("mouseup", () => { if (dragFrom !== null) { dragFrom = null; if (st.range[1] - st.range[0] < minLen) err.textContent = t(isCover ? "mu.cover.rangeShort" : "mu.rangeShort"); else err.textContent = ""; } }, { once: false });
+    const setSource = (src) => { st.source = src; st.range = [0, isCover ? Math.min(src.durationS, 1200) : Math.min(src.durationS, 30)]; if (!st.title) st.title = src.name.replace(/\.[^.]+$/, ""); drawStep2(); drawStep4(); };
     const pick = h("button", { class: "btn small", onclick: async () => { const [f] = await call("dialog.openFiles", { kind: "audio" }); if (f) { const s = await guard(() => call("music.addSource", f)); if (s) setSource(s); } } }, icon("upload"), t("mu.pickFile"));
     const projectPick = h("button", { class: "btn small", onclick: pickFromProject }, icon("folder"), t("mu.fromProject"));
     async function pickFromProject() {
@@ -193,13 +202,14 @@ export function musicView(params = {}) {
       st.source ? h("div", { class: "row", style: { gap: "8px", flexWrap: "wrap" } },
         h("button", { class: "chip", onclick: () => { st.range = [0, st.source.durationS]; redraw(); } }, t("mu.whole")),
         h("span", {}, t("mu.from")), startIn, h("span", {}, t("mu.to")), endIn, info) : null,
-      err, durRow);
+      err, isCover ? h("div", { class: "muted small" }, t("mu.cover.partHint")) : durRow);
     redraw();
   }
 
   // ---------------------------------------------------------------- step 3: character
   const step3 = h("div", { class: "col", style: { gap: "10px" } });
   function drawStep3() {
+    if (st.mode === "cover") return drawStep3Cover();
     const c = st.choices;
     if (!c) return;
     const search = h("input", { type: "search", placeholder: t("mu.searchStyles"), class: "search", style: { maxWidth: "260px" } });
@@ -257,6 +267,39 @@ export function musicView(params = {}) {
           h("label", { class: "col" }, t("mu.seed"), h("div", { class: "row" }, seed, h("button", { class: "btn small ghost", onclick: () => { st.s.seed = Math.floor(Math.random() * 2 ** 31); drawStep3(); } }, t("mu.newSeed"))), h("span", { class: "muted small" }, t("mu.seedHelp")))),
         h("label", { class: "col" }, t("mu.styleOverride"), styleOv, h("span", { class: "muted small" }, t("mu.styleOverrideHelp")))));
   }
+  /** Easy Cover: the arranging style (27, by family), its direction, the tempo and a short direction in words. */
+  function drawStep3Cover() {
+    const c = st.cover;
+    if (!c) return;
+    const search = h("input", { type: "search", placeholder: t("mu.searchStyles"), class: "search", style: { maxWidth: "260px" } });
+    const cards = h("div", { class: "col", style: { gap: "8px" } });
+    const drawCards = () => {
+      const q = search.value.trim();
+      mount(cards, ...["arabic", "turkish", "world"].map((g) => {
+        const items = c.presets.filter((p) => p.group === g && (!q || p.ar.includes(q) || p.help.includes(q) || p.lead.includes(q)));
+        return items.length ? h("div", { class: "col", style: { gap: "4px" } }, h("div", { class: "muted small" }, t(`mu.cover.group.${g}`)),
+          h("div", { class: "mu-cards" }, items.map((p) => h("button", { class: ["mu-card", st.c.preset === p.id && "active"], title: p.help, onclick: () => { st.c.preset = p.id; drawStep3Cover(); } },
+            h("b", {}, p.ar), h("span", { class: "muted small" }, p.help))))) : null;
+      }));
+    };
+    search.oninput = drawCards;
+    drawCards();
+    const preset = c.presets.find((p) => p.id === st.c.preset);
+    const chips = (key, values, label) => h("div", { class: "chips" }, values.map((v) => h("button", { class: ["chip", st.c[key] === v && "active"], onclick: () => { st.c[key] = v; drawStep3Cover(); } }, label(v))));
+    const desc = h("textarea", { rows: 2, maxlength: 600, dir: "auto", placeholder: t("mu.cover.descPh"), style: { width: "100%" }, oninput: (e) => { st.c.description = e.target.value; } });
+    desc.value = st.c.description;
+    const seed = h("input", { type: "number", min: 0, value: st.c.seed, style: { width: "140px" }, class: "ltr", onchange: (e) => { st.c.seed = Math.max(0, Math.floor(Number(e.target.value) || 0)); } });
+    mount(step3,
+      h("div", { class: "row", style: { gap: "8px" } }, h("b", {}, t("mu.style")), search),
+      cards,
+      h("div", { class: "mu-grid" },
+        h("div", {}, h("b", {}, t("mu.cover.variant")), chips("variant", c.variants, (v) => t(`mu.cover.v.${v}`)), h("div", { class: "muted small" }, preset?.variants[st.c.variant] || "")),
+        h("div", {}, h("b", {}, t("mu.speed")), chips("tempo", c.tempi, (v) => t(`mu.cover.t.${v}`)), h("div", { class: "muted small" }, t("mu.cover.tempoHelp")))),
+      h("div", {}, h("b", {}, t("mu.desc")), desc),
+      h("div", { class: "muted small" }, t("mu.cover.guide")),
+      h("details", {}, h("summary", {}, t("mu.advanced")),
+        h("label", { class: "col", style: { marginTop: "8px" } }, t("mu.seed"), h("div", { class: "row" }, seed, h("button", { class: "btn small ghost", onclick: () => { st.c.seed = Math.floor(Math.random() * 2 ** 31); drawStep3Cover(); } }, t("mu.newSeed"))), h("span", { class: "muted small" }, t("mu.seedHelp")))));
+  }
   const labelOf = (k, v) => {
     const c = st.choices;
     if (k === "preset") return c.presets.find((x) => x.id === v)?.ar || v;
@@ -271,6 +314,16 @@ export function musicView(params = {}) {
   const progressBox = h("div", { class: "card pad col", style: { gap: "6px", display: "none" } });
   function drawStep4() {
     const busy = st.job && ["queued", "waiting", "starting", "running"].includes(st.job.state);
+    if (st.mode === "cover") {
+      const len = st.source ? st.range[1] - st.range[0] : 0;
+      mount(step4,
+        h("div", { class: "row", style: { gap: "8px", flexWrap: "wrap" } },
+          h("button", { class: "btn", disabled: busy || !st.source, onclick: () => generateCover(true) }, icon("play"), t("mu.genPreview", { s: Math.min(30, Math.round(len) || 30) })),
+          h("button", { class: "btn primary", disabled: busy || !st.source, onclick: () => generateCover(false) }, icon("sparkle"), t("mu.cover.genPart", { t: mmss(len) }))),
+        h("div", { class: "muted small" }, len > (st.cover?.limits.single || 130) ? t("mu.cover.longHint", { n: Math.max(2, Math.round(len / 100)) }) : t("mu.cover.genHint")), progressBox);
+      drawProgress();
+      return;
+    }
     const preview = Math.min(15, st.s.duration);
     mount(step4,
       h("div", { class: "row", style: { gap: "8px", flexWrap: "wrap" } },
@@ -308,6 +361,19 @@ export function musicView(params = {}) {
     drawStep4();
   }
 
+  async function generateCover(preview, extra = {}) {
+    if (!st.source) { toast(t("mu.noSource"), "error"); return; }
+    const preset = st.cover?.presets.find((p) => p.id === st.c.preset);
+    const [a, b] = st.range;
+    const req = { path: "cover", source: st.source.file, start: a, duration: preview ? Math.min(30, b - a) : b - a, preview, ...st.c, ...extra,
+      title: st.title ? `${st.title} · ${preset?.ar || ""}` : preset?.ar || t("mu.music"), group: extra.group || st.group || undefined, sourceName: st.source.name };
+    const j = await guard(() => call("music.submit", req));
+    if (!j) return;
+    st.job = j; st.group = j.group;
+    toast(t("mu.received"), "info", { ms: 2500 });
+    drawStep4();
+  }
+
   // ---------------------------------------------------------------- step 5: listen, compare, refine (this work group)
   const step5 = h("div", { class: "col", style: { gap: "8px" } });
   async function drawStep5() {
@@ -328,6 +394,14 @@ export function musicView(params = {}) {
     const canvas = h("canvas", { class: "mu-wave small" });
     if (x.exists) call("music.peaks", x.id).then((p) => drawWave(canvas, p || [])).catch(() => {});
     const rate = (r) => guard(async () => { const reason = r === "dislike" ? await promptDialog({ title: t("mu.whyDislike"), label: t("mu.optional") }) : ""; await call("music.rate", x.id, m.rating === r ? null : r, reason || ""); drawStep5(); drawLibrary(); });
+    // A refinement of a cover: the same song part with one choice changed (`part` changes the part itself).
+    const coverVariant = (patch, label, part = {}) => h("button", { class: "btn small", onclick: () => {
+      const s0 = m.settings || {};
+      if (!s0.source) { toast(t("mu.noSource"), "error"); return; }
+      st.c = { ...st.c, preset: s0.preset, variant: s0.variant, tempo: s0.tempo, description: s0.description || "", seed: s0.seed, ...patch }; st.group = m.group;
+      const job = { path: "cover", source: s0.source, start: s0.start, duration: s0.duration, preview: !!s0.preview, ...st.c, ...part, title: x.name.replace(/ · نسخة \d+$/, ""), group: m.group, parent: x.id };
+      guard(() => call("music.submit", job)).then((j) => { if (j) { st.job = j; drawStep4(); toast(t("mu.received"), "info", { ms: 2500 }); } });
+    } }, label);
     const variant = (patch, label) => h("button", { class: "btn small", onclick: () => {
       const s = { ...m.settings, ...patch, seed: patch.seed ?? m.settings?.seed };
       st.s = { ...st.s, ...s }; st.group = m.group;
@@ -342,7 +416,13 @@ export function musicView(params = {}) {
         h("button", { class: "icon-btn", title: t("mu.more"), onclick: (e) => itemMenu(x, e) }, icon("more"))),
       canvas,
       h("div", { class: "muted small" }, [m.engine, m.seed !== undefined ? `${t("mu.seed")} ${m.seed}` : "", m.generationSeconds ? t("mu.tookS", { s: Math.round(m.generationSeconds) }) : "", m.reason ? `«${m.reason}»` : ""].filter(Boolean).join(" · ")),
-      refine ? h("div", { class: "row", style: { gap: "6px", flexWrap: "wrap" } }, h("span", { class: "muted small" }, t("mu.refine")),
+      m.path === "cover" && m.review?.length ? h("details", {}, h("summary", { class: "small" }, t("mu.cover.review", { n: m.review.length })), ...m.review.map((r) => h("div", { class: "small muted" }, r))) : null,
+      refine && m.path === "cover" ? h("div", { class: "row", style: { gap: "6px", flexWrap: "wrap" } }, h("span", { class: "muted small" }, t("mu.refine")),
+        coverVariant({ seed: ((m.settings?.seed || 0) + 7919) % 2 ** 32 }, t("mu.r.variant")),
+        ...["Classic", "Modern", "Grand"].filter((v) => v !== m.settings?.variant).map((v) => coverVariant({ variant: v }, t(`mu.cover.v.${v}`))),
+        ...["slower", "faster"].filter((v) => v !== m.settings?.tempo).map((v) => coverVariant({ tempo: v }, t(`mu.cover.t.${v}`))),
+        m.settings?.preview && st.source?.file === m.settings.source ? coverVariant({}, t("mu.cover.fullFromPreview"), { preview: false, start: st.range[0], duration: st.range[1] - st.range[0] }) : null) : null,
+      refine && m.path !== "cover" ? h("div", { class: "row", style: { gap: "6px", flexWrap: "wrap" } }, h("span", { class: "muted small" }, t("mu.refine")),
         variant({ seed: ((m.settings?.seed || 0) + 7919) % 2 ** 32 }, t("mu.r.variant")),
         variant({ energy: "calm" }, t("mu.r.calmer")),
         variant({ energy: "energetic" }, t("mu.r.energetic")),
@@ -360,7 +440,11 @@ export function musicView(params = {}) {
         if (dest) { const res = await guard(() => call("music.saveAs", x.id, dest)); if (res) toast(t("mu.savedTo", { path: res.path }), "success", { action: { label: t("ex.openFolder"), run: () => call("app.showInFolder", res.path) } }); }
       } },
       { label: t("mu.addToProject"), icon: "plus", run: () => addToProject(x) },
-      { label: t("mu.openSettings"), icon: "adjust", run: () => { st.s = { ...st.s, ...(x.meta.settings || {}) }; st.group = x.meta.group; st.mode = x.meta.path || "compose"; drawAll(); root.scrollIntoView({ behavior: "smooth" }); } },
+      { label: t("mu.openSettings"), icon: "adjust", run: () => {
+        if (x.meta.path === "cover") { const s0 = x.meta.settings || {}; st.c = { ...st.c, preset: s0.preset, variant: s0.variant, tempo: s0.tempo, description: s0.description || "", seed: s0.seed }; }
+        else st.s = { ...st.s, ...(x.meta.settings || {}) };
+        st.group = x.meta.group; st.mode = x.meta.path || "compose"; drawAll(); root.scrollIntoView({ behavior: "smooth" });
+      } },
       { label: x.favorite ? t("mu.unfavorite") : t("mu.favorite"), icon: "star", run: async () => { await guard(() => call("music.favorite", x.id, !x.favorite)); drawLibrary(); } },
       { label: t("c.rename"), icon: "design", run: async () => { const n = await promptDialog({ title: t("c.rename"), value: x.name }); if (n) { await guard(() => call("music.rename", x.id, n)); drawLibrary(); drawStep5(); } } },
       { label: t("c.delete"), icon: "trash", danger: true, run: async () => { if (await confirmDialog({ title: t("c.delete"), message: x.name, danger: true, okLabel: t("c.delete") })) { await guard(() => call("music.remove", x.id)); drawLibrary(); drawStep5(); } } },
@@ -416,6 +500,7 @@ export function musicView(params = {}) {
 
   (async () => {
     st.choices = await call("music.choices").catch(() => null);
+    st.cover = await call("music.coverChoices").catch(() => null);
     const jobs = (await call("music.jobs").catch(() => [])) || [];
     st.job = jobs.find((j) => ["queued", "waiting", "starting", "running"].includes(j.state)) || jobs[0] || null;
     if (st.job?.group) st.group = st.job.group;

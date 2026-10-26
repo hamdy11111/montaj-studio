@@ -639,7 +639,7 @@ export function graphicStateAt(graphic, durationUs, fps, tUs) {
 // on every preview frame — the same React component the export renders, so the preview is the export. The layer
 // follows the segment's transform (position, scale, rotation, opacity, blend mode). Approximation: these graphics
 // show above every canvas layer (a clip on a higher track does not cover them in the preview; it does in the export).
-// The layer attaches itself to the editor's Player (installRemotionPreview, called once below) after each render.
+// The editor's Player creates the layer and syncs it at the end of each render (player.js).
 
 let playerModule = null, playerModuleFailed = false;
 function loadPlayerModule() {
@@ -648,7 +648,7 @@ function loadPlayerModule() {
   return playerModule;
 }
 
-class RemotionLayer {
+export class RemotionLayer {
   constructor(player) {
     this.player = player;
     this.root = document.createElement("div");
@@ -707,17 +707,3 @@ class RemotionLayer {
   destroy() { for (const it of this.items.values()) it.ctl.destroy(); this.root.remove(); this.items.clear(); }
 }
 
-/** Attach the Remotion layer to the editor's Player class: after each canvas render, the layer follows. */
-export function installRemotionPreview(PlayerClass) {
-  if (!PlayerClass || PlayerClass.prototype.__remotionLayer) return;
-  const render = PlayerClass.prototype.render, destroy = PlayerClass.prototype.destroy;
-  PlayerClass.prototype.__remotionLayer = true;
-  PlayerClass.prototype.render = function (...a) {
-    const r = render.apply(this, a);
-    try { (this.remotionLayer ||= new RemotionLayer(this)).sync(); } catch (e) { console.error("remotion layer", e); }
-    return r;
-  };
-  PlayerClass.prototype.destroy = function (...a) { this.remotionLayer?.destroy(); this.remotionLayer = null; return destroy.apply(this, a); };
-}
-// player.js imports this module, so the Player class exists once that import has finished.
-if (typeof document !== "undefined") import("./player.js").then((m) => installRemotionPreview(m.Player)).catch(() => {});
