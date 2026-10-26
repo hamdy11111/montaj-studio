@@ -34,10 +34,10 @@ export const CAPTION_TEMPLATES = {
 
 export const CAPTION_TEMPLATE_IDS = Object.keys(CAPTION_TEMPLATES);
 // Motion, eased per frame (never two or three hard frames): a spoken word springs 1.0 → 1.15 → 1.0 over 120 ms, a page
-// comes in 0.86 → 1.04 → 1.0 over 160 ms, the highlight box slides to the next word in 110 ms, a wipe fills in 16 steps.
+// comes in 0.86 → 1.04 → 1.0 over 160 ms, the highlight box slides to the next word in 110 ms, a wipe fills in 8 steps.
 export const SPRING = { word: { from: 1, peak: 1.15, ms: 120 }, page: { from: 0.86, peak: 1.04, ms: 160 }, rise: 0.35 };
 export const BOX_SLIDE_MS = 110;
-const WIPE_STEPS = 16;
+const WIPE_STEPS = 8; // each step is an image of the page in the export: 8 fill a 0.3–0.6 s word every frame or two
 const easeOut = (u) => 1 - (1 - u) ** 3;
 const easeInOut = (u) => 0.5 - Math.cos(Math.PI * u) / 2;
 const r3 = (v) => Math.round(v * 1000) / 1000;
