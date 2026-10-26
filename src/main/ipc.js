@@ -424,6 +424,20 @@ export function registerIpc({ getServices, getAgents = () => null, getWindow, ap
     // ---------------------------------------------------------------- director (Phase 7): the verifier on an export, the planner models
     "director.verify": async (tid, file) => (await import("../agent/director.js")).verifyExport(A().userContext(), id(tid), str(file, "file")),
     "director.planners": async () => (await import("../services/directorLLM.js")).plannerModels(S().perception.runtime).map(({ id: i, name }) => ({ id: i, name })),
+    // ---------------------------------------------------------------- AI layers' set-up (round 4): perception, best take, links, B-roll
+    "ai.setupStatus": (o) => S().aiSetup.status(obj(o)),
+    "ai.prepareLayer": (layer) => S().aiSetup.prepareLayer(str(layer, "layer")),
+    "ai.installEnv": (layer) => S().aiSetup.installEnv(str(layer, "layer")),
+    "ai.checkEnv": (layer) => S().aiSetup.checkEnvTask(str(layer, "layer")),
+    "ai.repairEnv": (layer) => S().aiSetup.repairEnv(str(layer, "layer")),
+    "ai.importEnv": (layer, folder) => S().aiSetup.importEnv(str(layer, "layer"), str(folder, "folder")),
+    "ai.installLlama": () => S().aiSetup.installLlama(),
+    "ai.downloadSet": (key) => S().aiSetup.downloadSet(str(key, "set")),
+    "ai.importSet": (key, folder) => S().aiSetup.importSet(str(key, "set"), str(folder, "folder")),
+    "ai.verifySet": (key) => S().aiSetup.verifySet(str(key, "set")),
+    "ai.repairSet": (key) => S().aiSetup.repairSet(str(key, "set")),
+    "ai.importAll": (folder) => S().aiSetup.importAll(str(folder, "folder")),
+    "ai.setupCancel": () => S().aiSetup.cancel(),
   };
   // The VFX library service of this window's services (created on first use).
   let vfxLibInstance = null;

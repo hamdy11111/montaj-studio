@@ -25,12 +25,14 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { buildTimeline, speakerNames, wordsWithSpeakers, utterances, DEFAULTS as FUSE } from "./fuse.js";
 import { nemoModel } from "../captionService.js";
+import { modelSet, layerDef } from "../aiSetup/catalog.js";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url)).replace(/app\.asar([\\/])/, "app.asar.unpacked$1");
 const WORKERS = path.join(HERE, "workers");
 const ASR_DIR = path.join(HERE, "..", "asr");
 const REPO = path.resolve(HERE, "..", "..", "..");
 
+const PERCEPTION_SETS = layerDef("perception").sets;
 export const STAGES = Object.freeze(["words", "speakers", "audio", "emotion", "shots", "faces", "asd", "vision"]);
 // Which stages read which earlier ones (a re-run of one makes these re-run too).
 export const NEEDS = Object.freeze({ words: [], speakers: [], audio: [], emotion: ["words", "speakers"], shots: [], faces: ["shots"], asd: ["faces"], vision: ["shots", "words"] });
@@ -204,6 +206,7 @@ export class PerceptionService {
         vision: has(this.models, "qwen3.6-35b-a3b"),
       },
       llama: has(this.runtime, "llama", process.platform === "win32" ? "llama-server.exe" : "llama-server"),
+      missing: Object.fromEntries(STAGES.map((st) => [st, this.missing(st)]).filter(([, why]) => why)),
     };
   }
 
@@ -219,6 +222,22 @@ export class PerceptionService {
       path: file, name: path.basename(file), duration: Number(j.format?.duration) || 0, hasAudio: !!a, hasVideo: !!v,
       width: v ? (turned ? v.height : v.width) : null, height: v ? (turned ? v.width : v.height) : null, fps: d ? Number((n / d).toFixed(3)) : null,
     };
+  }
+
+  /**
+   * Why a stage cannot run here (its runtime, llama.cpp or a required model file of the AI set-up's catalog is not
+   * installed — checked by name and size, no hashing), or null when it can.
+   */
+  missing(stage) {
+    if (!fs.existsSync(venvPython(this.runtime, stage === "words" ? "asr" : "perception"))) return `${stage === "words" ? "asr" : "perception"} runtime not installed`;
+    if (stage === "vision" && !fs.existsSync(path.join(this.runtime, "llama", process.platform === "win32" ? "llama-server.exe" : "llama-server"))) return "llama.cpp not installed";
+    for (const id of PERCEPTION_SETS) {
+      const set = modelSet("perception", id);
+      if (!set || set.optional || !set.stages.includes(stage)) continue;
+      const bad = set.files.find((f) => { const p = path.join(this.models, ...f.dir.split("/"), f.file); return !fs.existsSync(p) || fs.statSync(p).size !== f.size; });
+      if (bad) return `model not installed: ${set.name} (${bad.file})`;
+    }
+    return null;
   }
 
   /** The last timeline made for this file's content, or null. */
@@ -277,6 +296,9 @@ export class PerceptionService {
 
     for (const stage of todo) {
       if (signal?.aborted) throw Object.assign(new Error("cancelled"), { cancelled: true });
+      // A stage whose runtime or models are not installed is skipped (the AI set-up page installs them).
+      const lack = asr === "file" && stage === "words" ? null : this.missing(stage);
+      if (lack) { report[stage] = { skipped: lack }; doneW += WEIGHT[stage]; continue; }
       const def = this.#stage(stage, { media, audio, dir, results, asr, o });
       if (def.skip) { report[stage] = { skipped: def.skip }; doneW += WEIGHT[stage]; continue; }
       keys[stage] = stageKey(stage, { ...def.params, needs: NEEDS[stage].map((n) => keys[n] || null) });

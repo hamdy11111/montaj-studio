@@ -9,6 +9,7 @@ const EVENTS = new Set(["export:progress", "export:done", "export:error", "media
   "imagegen:engine"]);
 EVENTS.add("perception:progress"); // perception (Phase 4)
 EVENTS.add("links:progress"); // cause ↔ reaction links (Phase 6)
+EVENTS.add("ai:setup"); // AI layers' set-up (round 4)
 
 contextBridge.exposeInMainWorld("api", {
   async call(method, ...args) {
