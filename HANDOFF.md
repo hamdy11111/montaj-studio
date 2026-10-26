@@ -130,13 +130,13 @@ Read, never edited: `src/core/speech.js` (retakeGroups, fillers), `src/core/poli
 
 `runtime\takes` — new venv (Python 3.12 from `runtime\python312`): torch 2.11.0+cu130, torchvision 0.26, torchaudio,
 opensmile 2.6.0, mediapipe 1.1.1, onnxruntime-gpu 1.31, opencv-python-headless 5.0, librosa, soundfile, scipy,
-transformers 5.20.2, accelerate, safetensors, gdown (unused, can be removed).
+transformers 5.20.2, accelerate, safetensors.
 
 `runtime\models\takes\` (≈ 190 MB):
 
 | model | source (official) | licence | size |
 |---|---|---|---|
-| DNSMOS P.835 `sig_bak_ovr.onnx` (+ `model_v8.onnx` P.808, unused) | github.com/microsoft/DNS-Challenge `DNSMOS/DNSMOS` | CC-BY-4.0 (repo LICENSE) | 1.4 MB |
+| DNSMOS P.835 `sig_bak_ovr.onnx` | github.com/microsoft/DNS-Challenge `DNSMOS/DNSMOS` | CC-BY-4.0 (repo LICENSE) | 1.4 MB |
 | MediaPipe Face Landmarker `face_landmarker.task` (float16 v1) | storage.googleapis.com/mediapipe-models (Google) | Apache-2.0 | 3.7 MB |
 | LibreFace 2.0 ONNX (AU encoder + intensity + presence, FE) | nuget.org/packages/LibreFace 2.0.0 (ihp-lab, the authors' own .NET package) | USC research licence (non-commercial — personal use OK) | 90 MB |
 | L2CS-Net ResNet50 Gaze360 `l2cs_gaze360_resnet50.safetensors` | huggingface.co/py-feat/l2cs (Py-Feat's re-host of the authors' weights; the authors' Google Drive folder now returns 404) | code MIT, weights under Gaze360 terms (non-commercial) | 96 MB |
@@ -201,3 +201,27 @@ For the installed app the venv and models must be reachable from `%APPDATA%\Mont
   pitch shift is not). Speed ramps beyond a few % break the per-window offsets.
 - The 4K HEVC decode per take is the main cost (≈ 6 s per take); fine for a handful of groups, slow for a raw with
   hundreds of retakes — reuse perception's GPU-resize decode if that happens.
+
+## Disk (clean-up per `D:\capcut new\CLAUDE.md`)
+
+Removed (nothing in `src/`, `bench/` or `scripts/` uses them; no links inside; all mine):
+- the session scratchpad: the synthetic test media (`synthetic05.mp4` + its clean/degraded parts, two "published"
+  WAVs cut from 01's raw audio), worker/judge job and output files, debug crops, logs — 48 MB;
+- `runtime	akes-cache\` — the feature and fingerprint cache of the test runs (21 KB; recreated on demand);
+- `runtime\models	akes\dnsmos\model_v8.onnx` (DNSMOS P.808, not used) and `dnsmos_local.py` (reference script) — 0.2 MB;
+- the empty bench pick store `النتائجest-take\picks\` and the `gdown` package in `runtime	akes` (only used for a
+  failed L2CS download attempt);
+- `src/services/takes/workers/__pycache__` in the worktree.
+
+Kept (used by the code or meant for the user):
+- `runtime	akes` — the venv the workers run in: 4.1 GB;
+- `runtime\models	akes` — DNSMOS, MediaPipe, LibreFace, L2CS, YuNet: 183 MB;
+- `montaj-bench\النتائجest-take\` — the six `*.takes.json`, the pick page, `measure.json`, `judge-check.json`,
+  `اقرأني.md`: ~60 KB;
+- the worktree `D:\capcut new\worktreesest-take` (branch not merged yet) with its junctions `runtime`,
+  `node_modules`, `src\servicessr\models` and the git-ignored `npm run build:graphics` output the tests need.
+  When the branch is merged: unlink the three junctions first (`rmdir`), then remove the worktree.
+
+Shared caches, reported only (not deleted): the pip cache (`%LOCALAPPDATA%\pip\cache`, 14 GB in total; this phase
+added the torch cu130 wheels to it) and the Hugging Face cache, where the judge's Qwen2.5-Omni-7B (21 GB) already was
+before this phase.
