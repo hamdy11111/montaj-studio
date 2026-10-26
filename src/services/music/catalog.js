@@ -59,7 +59,30 @@ export const MODEL_SETS = [
       ace("vae", "ace_1.5_vae.safetensors", "6de92e3a862acd287e08b024ac90f0783a8635451b728721a33ff03565bcb2bb", 337_431_732),
     ],
   },
+  {
+    // Easy Cover (re-arrange a song on its own melody). Hashes = the Hugging Face LFS oids at the pinned revisions;
+    // Plenio is the GitHub release zip of its v0.7.0 tag (unpacked by the engine on first use, imported as a library).
+    id: "yue2cover",
+    name: "YuE2 Cover (YuE2 3B + SheetSage2 + instrumental LoRA)",
+    version: "YuE2 3B bf16 (Comfy-Org repack 2f76ca7) · LoRA ar_inst_v3abc (947f2f4) · Plenio 0.7.0",
+    engine: "YuE2 + SheetSage2 (ComfyUI) · Plenio",
+    paths: ["cover"],
+    license: "CC BY-NC 4.0 (YuE2, SheetSage2, instrumental LoRA: non-commercial) · Plenio Apache-2.0",
+    restrictions: "Non-commercial use only (CC BY-NC 4.0).",
+    needs: "NVIDIA GPU with 12 GB+ (24 GB recommended), 16 GB RAM",
+    source: `${HF}/Comfy-Org/YuE2`,
+    status: "experimental",
+    files: [
+      { url: `${HF}/Comfy-Org/YuE2/resolve/2f76ca75e6ee094169de899cc7fc99d6887e2196/checkpoints/yue2_3b_bf16.safetensors`, file: "yue2_3b_bf16.safetensors", dir: "checkpoints", sha256: "33765adbf9813c9a50318218760b2fd819a319862460a04884607581961c6fee", size: 7_799_983_228 },
+      { url: `${HF}/Comfy-Org/YuE2/resolve/2f76ca75e6ee094169de899cc7fc99d6887e2196/audio_encoders/sheetsage2_bf16.safetensors`, file: "sheetsage2_bf16.safetensors", dir: "audio_encoders", sha256: "5fd960ce3df281e3f3a889d174584d88f96247711480cf96377b12d7e8b6adc5", size: 1_386_868_122 },
+      { url: `${HF}/Mothersuperior/YuE2-instrumental-cot-full-loras/resolve/947f2f4b28978b2b6c3e316e6a87925c76bf3c4b/ar_lora_inst_v3abc_comfyui.safetensors`, file: "ar_lora_inst_v3abc_comfyui.safetensors", dir: "loras", sha256: "de6a11d5701df103a191c87dc73115266e2420f3834739319dec5c24d2119f31", size: 212_891_736 },
+      { url: "https://codeload.github.com/jplenio/Plenio-Music-Production-System/zip/refs/tags/v0.7.0", file: "plenio-0.7.0.zip", dir: "packages", sha256: "eb6206181ed910681a33bad46c676593954f4ef926c9e2cf9bb049d8ec725af5", size: 39_148_456 },
+    ],
+  },
 ];
+
+/** Where the cover engine finds Plenio (the model set's zip) in a models folder. */
+export const plenioZip = (modelsDir) => `${modelsDir}/packages/plenio-0.7.0.zip`;
 
 export const modelSet = (id) => MODEL_SETS.find((m) => m.id === id);
 export const setBytes = (set) => set.files.reduce((n, f) => n + f.size, 0);

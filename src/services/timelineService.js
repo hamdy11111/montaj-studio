@@ -240,6 +240,7 @@ export class TimelineService {
       case "addMarker": return this.commit(timelineId, "marker", (tl) => ops.addMarker(tl, a.timeUs, a.color ? validateColor(a.color) : "#00C1CD", a.note || ""));
       case "updateMarker": return this.commit(timelineId, "marker", (tl) => { const m = tl.markers.find((x) => x.id === a.id); if (!m) throw new AppError("NOT_FOUND", "err.markerNotFound"); if (a.note !== undefined) m.note = String(a.note).slice(0, 500); if (a.color) m.color = validateColor(a.color); return m; });
       case "removeMarker": return this.commit(timelineId, "marker", (tl) => { tl.markers = tl.markers.filter((m) => m.id !== a.id); return true; });
+      case "setJL": return this.commit(timelineId, "jl", (tl) => ops.setJL(tl, a.segId, a.jlUs), { coalesceKey: a.coalesceKey ? `${a.segId}:jl` : null });
       case "setTrackFlag": return this.commit(timelineId, "track", (tl) => ops.setTrackFlag(tl, a.trackId, a.flag, a.value));
       case "setCanvas": return this.commit(timelineId, "canvas", (tl) => this.applyCanvas(tl, a));
       case "setTransition": return this.commit(timelineId, "transition", (tl) => {

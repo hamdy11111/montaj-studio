@@ -1,7 +1,9 @@
 // Preview compositor (SCREEN-016 Player, FEAT-035..040, FEAT-066..079, FEAT-092..095).
 // Draws every visible layer of the timeline onto a <canvas> with the same layer math as the exporter
 // (core/layerMath NUM backend), plays media through <video>/<audio> elements synced to the playhead, and routes
-// audio through Web Audio so volume keyframes, fades and gains above 0 dB are audible.
+// audio through Web Audio so volume keyframes, fades and gains above 0 dB are audible. Main-track pictures are laid
+// with their own edit points (J/L cuts, core/timelineOps pictureTracks) like the export; a music bed is lowered under
+// the timeline's speech with the export's curve (core/musicBed.js); Remotion graphics play in their own layer on top.
 // Preview approximations (documented): per-pixel grading runs at preview resolution; voice changer, noise
 // reduction and loudness normalization are applied only on export.
 import { h } from "../dom.js";
@@ -13,8 +15,10 @@ import { parseCube } from "../../core/lut.js";
 import { mediaUrl, call } from "../api.js";
 import { rasterText, rasterSticker, stickerSrc } from "./raster.js";
 import { captionCanvas, captionStateAt, captionLayout, stateKey } from "./captionRaster.js";
-import { graphicCanvas, graphicStateAt, preloadGraphic } from "./graphicsRaster.js";
+import { graphicCanvas, graphicStateAt, preloadGraphic, RemotionLayer } from "./graphicsRaster.js";
 import { cutoutLayers, cutoutAfterTrack } from "../../core/cutout.js";
+import { pictureTracks } from "../../core/timelineOps.js";
+import { duckDbOf, duckGainAt } from "../../core/musicBed.js";
 
 const BLEND = { normal: "source-over", screen: "screen", add: "lighter", multiply: "multiply", darken: "darken", lighten: "lighten", overlay: "overlay" };
 const VISUAL = new Set(["video", "image", "text", "sticker", "compound"]);
@@ -55,6 +59,8 @@ export class Player {
     this.ro = new ResizeObserver(() => this.layout());
     this.ro.observe(host);
     this.loop = this.loop.bind(this);
+    this.bed = { tl: null, spans: [], busy: false }; // speech spans the music beds duck under (main process)
+    this.remotionLayer = new RemotionLayer(this);
     this.raf = requestAnimationFrame(this.loop);
     this.overlay.addEventListener("pointerdown", (e) => this.onPointerDown(e));
     this.overlay.addEventListener("dblclick", (e) => this.ed.onDoubleClick?.(this.hitTest(e)));
@@ -64,6 +70,8 @@ export class Player {
     cancelAnimationFrame(this.raf);
     document.fonts.removeEventListener("loadingdone", this.onFonts);
     this.ro.disconnect();
+    this.remotionLayer?.destroy();
+    this.remotionLayer = null;
     for (const m of [this.videos, this.audios, this.mattes]) for (const v of m.values()) { v.el.pause(); v.el.removeAttribute("src"); v.el.load(); }
     this.actx?.close().catch(() => {});
   }
@@ -248,15 +256,21 @@ export class Player {
     try { v.node = this.actx.createMediaElementSource(v.el); v.gain = this.actx.createGain(); v.node.connect(v.gain).connect(this.master); } catch { /* already connected */ }
   }
 
-  /** Keep a media element on the source time for segment-local time; play/pause with the transport. */
-  syncMedia(v, seg, localUs, audible, gain) {
+  /**
+   * Keep a media element on the source time for segment-local time; play/pause with the transport. `win` = the local
+   * span in which the element plays: the clip, or more when its picture is laid earlier or later than its sound (J/L;
+   * a constant speed then runs on past the clip's own edges).
+   */
+  syncMedia(v, seg, localUs, audible, gain, win = null) {
     const el = v.el;
-    const want = (seg.sourceStart + sourceOffsetAt(seg, clamp(localUs, 0, seg.duration))) / US;
+    const from = win ? win[0] : 0, to = win ? win[1] : seg.duration;
+    const outside = seg.speedMode !== "curve" && (localUs < 0 || localUs > seg.duration);
+    const want = outside ? (seg.sourceStart + localUs * (seg.speed || 1)) / US : (seg.sourceStart + sourceOffsetAt(seg, clamp(localUs, 0, seg.duration))) / US;
     const rate = clamp(rateAt(seg, clamp(localUs, 0, seg.duration)), 0.0625, 16);
     if (v.gain) v.gain.gain.value = audible ? gain : 0;
     else el.volume = audible ? clamp(gain, 0, 1) : 0;
     el.muted = !audible && !v.gain;
-    if (this.playing && localUs >= 0 && localUs < seg.duration) {
+    if (this.playing && localUs >= from && localUs < to) {
       el.preservesPitch = !seg.changePitch;
       if (Math.abs(el.playbackRate - rate) > 0.01) el.playbackRate = rate;
       if (Math.abs(el.currentTime - want) > 0.25 || el.readyState < 2) { if (!el.seeking) el.currentTime = want; }
@@ -313,9 +327,15 @@ export class Player {
     const tracks = [...tl.tracks].sort((a, b) => a.order - b.order);
     const live = new Set();
     const cutoutAfter = cutoutAfterTrack(tl);
+    // J/L cuts: the main track's pictures with their own edit points (the sound keeps the clips' edit points).
+    const picMain = pictureTracks(tl.tracks, (s) => this.ed.media(s.mediaId)?.durationUs || null).find((x) => x.isMain);
+    const pic = new Map((picMain?.segments || []).map((s) => [s.id, s]));
+    const bed = tracks.some((x) => duckDbOf(x)) ? this.bedSpans(tl) : null;
     for (const track of tracks) {
       if (track.id === cutoutAfter) this.pendingCutouts = true;
       const segs = track.segments.filter((s) => !s.disabled).sort((a, b) => a.start - b.start);
+      const psegs = track.isMain ? segs.map((s) => pic.get(s.id) || s) : segs;
+      const duckDb = duckDbOf(track);
       if (track.isMain && !track.hidden && tl.canvas.bgType === "blur") {
         // Blurred backgrounds sit under every main-track clip on screen, also during a transition (as in the export).
         segs.forEach((seg, i) => {
@@ -330,7 +350,9 @@ export class Player {
         if (seg.kind === "audio" || ((seg.kind === "video" || seg.kind === "compound") && !this.ed.mediaMissing(seg))) {
           const isAudioTrack = seg.kind === "audio";
           const pool = isAudioTrack ? this.audios : this.videos;
-          const active = t >= seg.start - 2 * US && t < seg.start + seg.duration + US;
+          const p = psegs[i];
+          const from = Math.min(seg.start, p.start), to = Math.max(seg.start + seg.duration, p.start + p.duration);
+          const active = t >= from - 2 * US && t < to + US;
           if (active) {
             const v = this.mediaElement(pool, seg, isAudioTrack ? "audio" : "video");
             if (v) {
@@ -338,17 +360,19 @@ export class Player {
               const local = t - seg.start;
               const inside = local >= 0 && local < seg.duration;
               const audible = inside && !track.muted && !(seg.kind !== "audio" && seg.audioDetached);
-              this.syncMedia(v, seg, local, audible, gainAt(NUM, seg, local / US));
+              const gain = gainAt(NUM, seg, local / US) * (duckDb && bed ? duckGainAt(bed, t, duckDb) : 1);
+              this.syncMedia(v, seg, local, audible, gain, p === seg ? null : [from - seg.start, to - seg.start]);
             }
           }
         }
         if (track.hidden) return;
         if (GRADE.has(seg.kind)) { if (t >= seg.start && t < seg.start + seg.duration) this.gradeComposite(seg, t); return; }
         if (!VISUAL.has(seg.kind)) return;
-        const tr = track.isMain ? transitionsFor(segs, i) : { transIn: null, transOut: null };
+        const ps = psegs[i];
+        const tr = track.isMain ? transitionsFor(psegs, i) : { transIn: null, transOut: null };
         const pre = tr.transIn ? (tr.transIn.d * US) / 2 : 0, post = tr.transOut ? (tr.transOut.d * US) / 2 : 0;
-        if (t < seg.start - pre || t >= seg.start + seg.duration + post) return;
-        this.drawLayer(seg, t, tr);
+        if (t < ps.start - pre || t >= ps.start + ps.duration + post) return;
+        this.drawLayer(ps, t, tr);
       });
       if (this.pendingCutouts) {
         // Text behind the person: the person, cut out of the main clip, over the behind tracks (core/cutout.js).
@@ -360,6 +384,19 @@ export class Player {
     for (const pool of [this.videos, this.audios]) for (const [id, v] of pool) if (!live.has(id)) { if (!v.el.paused) v.el.pause(); if (!this.findSeg(id)) pool.delete(id); }
     for (const m of this.mattes.values()) if (m.usedIn !== this.stats.renders && !m.el.paused) m.el.pause(); // no cutout on screen
     this.drawOverlay();
+    try { this.remotionLayer?.sync(); } catch (e) { console.error("remotion layer", e); }
+  }
+
+  /** Speech spans of this timeline state for the music beds (asked of the main process once per timeline edit). */
+  bedSpans(tl) {
+    if (this.bed.tl !== tl && !this.bed.busy && this.ed.timelineId?.()) {
+      this.bed.busy = true;
+      call("musicbed.speech", this.ed.timelineId())
+        .then((r) => { this.bed.spans = r?.spans || []; })
+        .catch(() => { this.bed.spans = []; })
+        .finally(() => { this.bed.tl = tl; this.bed.busy = false; this.invalidate(); });
+    }
+    return this.bed.spans;
   }
 
   /** Returns a drawable + its base (fit) size, or null if not ready yet. */

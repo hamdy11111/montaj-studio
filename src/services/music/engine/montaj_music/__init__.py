@@ -48,6 +48,23 @@ class MontajMusicCompose:
         return {"ui": {"montaj": [json.dumps({"job": req.get("job"), "report": report["files"]["wav"]}, ensure_ascii=False)]}}
 
 
+class MontajMusicCover(MontajMusicCompose):
+    """Easy Cover: a song re-arranged on its own melody (SheetSage2 score → YuE2 3B with the instrumental LoRA)."""
+
+    def run(self, request):
+        from .cover import cover
+        req = json.loads(request)
+        notify = _notify(req.get("job"), req.get("client") or None)
+        try:
+            report = cover(req, notify, _check)
+        except Exception as e:  # noqa: BLE001 — the app shows the message; the traceback goes to the engine log
+            if type(e).__name__ != "InterruptProcessingException":
+                traceback.print_exc()
+            raise
+        notify("done", "اكتمل")
+        return {"ui": {"montaj": [json.dumps({"job": req.get("job"), "report": report["files"]["wav"]}, ensure_ascii=False)]}}
+
+
 def _routes():
     """The engine's own process (the venv's python.exe is only a launcher): the app measures this pid's memory."""
     import os
@@ -64,5 +81,5 @@ try:
 except Exception:  # noqa: BLE001 — imported outside a running server (tests): no route
     pass
 
-NODE_CLASS_MAPPINGS = {"MontajMusicCompose": MontajMusicCompose}
-NODE_DISPLAY_NAME_MAPPINGS = {"MontajMusicCompose": "Montaj · تأليف موسيقى جديدة"}
+NODE_CLASS_MAPPINGS = {"MontajMusicCompose": MontajMusicCompose, "MontajMusicCover": MontajMusicCover}
+NODE_DISPLAY_NAME_MAPPINGS = {"MontajMusicCompose": "Montaj · تأليف موسيقى جديدة", "MontajMusicCover": "Montaj · الكافر السهل"}

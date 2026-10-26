@@ -1,3 +1,6 @@
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 // The "compose" path's choices as the interface shows them: Arabic names that describe what is heard, and one line
 // on what each changes. The ids and values are the engine's (engine/montaj_music/compose.py, ported from the source
 // studio's original.py). All of them guide the model; none is a guarantee of the exact notes.
@@ -57,4 +60,20 @@ export function interpret(text) {
   for (const p of COMPOSE_PRESETS) if (t.includes(plain(p.ar))) suggestions.preset = p.id;
   if (/بدون (طبول|ايقاع)|من غير (طبول|طبله|ايقاع)/.test(t)) suggestions.description = "no percussion";
   return { suggestions, ambiguous, scope: "قواعد عربية محددة؛ راجع الاقتراح قبل تطبيقه. النص الحر وحده لا يبدّل الاختيارات." };
+}
+
+// ---------------------------------------------------------------- Easy Cover
+// The cover path's styles: the engine's own preset file (engine/montaj_music/cover_presets.json, the source studio's 27
+// arranging recipes), with what the interface shows — the Arabic name, one line, the family and the three directions.
+export const COVER_VARIANTS = ["Classic", "Modern", "Grand"];
+export const COVER_TEMPI = ["original", "slower", "faster"];
+export const COVER_LIMITS = { min: 8, max: 1200, preview: 30, single: 130 };
+
+export function coverChoices() {
+  const file = path.join(path.dirname(fileURLToPath(import.meta.url)), "engine", "montaj_music", "cover_presets.json").replace(/app\.asar([\\/])/,"app.asar.unpacked$1");
+  const data = JSON.parse(fs.readFileSync(file, "utf8"));
+  return {
+    presets: data.presets.map((p) => ({ id: p.id, ar: p.name_ar, help: p.description_ar, group: p.group, lead: p.lead, variants: Object.fromEntries(COVER_VARIANTS.map((v) => [v, p.variants[v]?.summary_ar || ""])) })),
+    variants: COVER_VARIANTS, tempi: COVER_TEMPI, limits: COVER_LIMITS,
+  };
 }

@@ -29,6 +29,11 @@ export const BUNDLED_FONTS = [
 ];
 
 export const BUNDLED_FAMILIES = BUNDLED_FONTS.map((f) => f.family);
+// Windows fonts offered next to the bundled ones (not bundled: their licences do not allow it, so they are drawn only
+// where Windows has them — the preview, the export's rasters and the graphics browser all run on this PC). Calibri
+// first: the plan's fourth base font (Calibri Bold = Calibri at weight 700); the user's copy has 255 Arabic glyphs.
+export const SYSTEM_FONTS = ["Calibri", "Segoe UI", "Arial", "Tahoma", "Times New Roman", "Georgia", "Verdana", "Trebuchet MS", "Courier New", "Impact", "Comic Sans MS", "Sakkal Majalla", "Traditional Arabic", "Arabic Typesetting", "Simplified Arabic", "Segoe UI Black"];
+
 export const DEFAULT_FONT = "Cairo";
 
 /** CSS font stack: the chosen family, then a bundled Arabic-capable fallback, then system fonts. */

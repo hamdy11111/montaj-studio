@@ -14,7 +14,7 @@ import { AppError } from "../core/validation.js";
 import { uid, US } from "../core/util.js";
 import { binaries, run } from "./ffmpeg.js";
 import { musicRuntime, NODE_PACKAGE } from "./musicSetupService.js";
-import { MODEL_SETS } from "./music/catalog.js";
+import { MODEL_SETS, plenioZip } from "./music/catalog.js";
 import { ComfyEngine, gpuFree } from "./comfyEngine.js";
 import { GpuQueue } from "./gpuQueue.js";
 
@@ -59,7 +59,7 @@ export class MusicService {
   resources() { return this.engine.resources(); }
 
   /** Before loading a model: enough RAM, GPU memory and disk, or a clear message (nothing is started). */
-  checkResources() { return this.engine.checkResources({ ramMB: 4000, vramMB: 5000, diskMB: 2000 }); }
+  checkResources(pathId = "compose") { return this.engine.checkResources({ ramMB: pathId === "cover" ? 8000 : 4000, vramMB: pathId === "cover" ? 12000 : 5000, diskMB: 2000 }); }
 
   start() { return this.engine.start(); }
 
@@ -115,11 +115,13 @@ export class MusicService {
   /**
    * A new generation. req: { path: "compose"|"inspired", preset, vibe, energy, duration, bpm, keyscale, meter, seed, loop,
    * description, style_override, reference: { file, start, seconds }, group (to add a version to a work group), parent,
-   * title }. Returns the job at once ("queued"); a second request while one runs is refused (no duplicate jobs).
+   * title }; Easy Cover ("cover"): { source (a studio source file), start, duration, preset, variant, tempo, description, seed,
+   * preview }. Returns the job at once ("queued"); a second request while one runs is refused (no duplicate jobs).
    */
   submit(req) {
     const busy = [...this.jobs.values()].find((j) => ["queued", "waiting", "starting", "running"].includes(j.state));
     if (busy) throw new AppError("CONFLICT", "err.musicBusy", { job: busy.id });
+    if (req.path === "cover" && (!req.source || !fs.existsSync(req.source))) throw new AppError("VALIDATION", "err.musicSource");
     const set = MODEL_SETS.find((s) => s.paths.includes(req.path || "compose"));
     const j = { id: uid(), state: "queued", stage: "queued", message: "", created: new Date().toISOString(), req: { ...req }, group: req.group || uid(), title: String(req.title || "").slice(0, 80), set: set?.id };
     this.jobs.set(j.id, j);
@@ -145,7 +147,7 @@ export class MusicService {
     const st = await this.setup.status();
     const set = st.sets.find((s) => s.id === j.set);
     if (!st.runtime.installed || (set && !set.installed)) throw new AppError("PROVIDER", "err.musicNotReady", { missing: [!st.runtime.installed && "runtime", set && !set.installed && set.name].filter(Boolean) });
-    this.checkResources();
+    this.checkResources(j.req.path);
     this.update(j, { state: "starting", stage: "engine", startedAt: new Date().toISOString() });
     await this.start();
     if (j.state === "cancelled") return;
@@ -157,9 +159,11 @@ export class MusicService {
     const clientId = `montaj-${j.id}`;
     const request = { ...j.req, reference: ref, job: j.id, client: clientId, out_dir: outDir, name, ffmpeg: binaries().ffmpeg, keep_loaded: !!this.settings.get("music").keepLoaded,
       // The models' SHA-256 for the result's report: checked by the model manager when they were installed or imported.
-      model_sha256: Object.fromEntries((MODEL_SETS.find((s) => s.id === j.set)?.files || []).map((x) => [x.file, x.sha256])) };
+      model_sha256: Object.fromEntries((MODEL_SETS.find((s) => s.id === j.set)?.files || []).map((x) => [x.file, x.sha256])),
+      plenio: j.req.path === "cover" ? plenioZip(this.setup.modelsDir()) : undefined };
+    const node = j.req.path === "cover" ? "MontajMusicCover" : "MontajMusicCompose";
     try {
-      await this.engine.runPrompt({ 1: { class_type: "MontajMusicCompose", inputs: { request: JSON.stringify(request) } } }, {
+      await this.engine.runPrompt({ 1: { class_type: node, inputs: { request: JSON.stringify(request) } } }, {
         clientId, failKey: "err.musicFailed",
         onQueued: (promptId) => this.update(j, { promptId, state: "running", stage: "load" }),
         onEvent: (type, d) => {
@@ -204,7 +208,9 @@ export class MusicService {
     try { durationUs = (await this.media.probe(files.wav)).durationUs || durationUs; } catch { /* keep the engine's */ }
     const m = { group: j.group, version, parent: j.req.parent || null, n, path: report.path, engine: report.engine, settings: report.settings, plan: report.composition,
       seed: report.composition?.seed, reference: report.reference, loop: report.loop, loudness: report.loudness, files, report: path.join(outDir, "report.json"),
-      generationSeconds: report.generation_seconds, status: report.status, rating: null, reason: "", source: j.req.sourceName || null };
+      generationSeconds: report.generation_seconds, status: report.status, rating: null, reason: "", source: j.req.sourceName || null,
+      // Easy Cover: what the checks said (review reasons) and how many sections the song was generated in.
+      review: report.review_reasons || null, sections: report.plan?.chunks?.length || null };
     const lid = this.repos.library.add({ kind: "audio", category: "music", name: title, path: files.wav, durationUs, sizeBytes: fs.statSync(files.wav).size, meta: m });
     return this.item(lid);
   }

@@ -21,6 +21,7 @@ import { GpuQueue } from "./gpuQueue.js";
 import { VideoSetupService } from "./videoSetupService.js";
 import { VideoService } from "./videoService.js";
 import { MusicService } from "./musicService.js";
+import { MusicBedService } from "./musicBedService.js";
 import { BackupService } from "./backupService.js";
 import { PackageService } from "./packageService.js";
 import { setBinaries } from "./ffmpeg.js";
@@ -82,6 +83,9 @@ export async function createServices({ root, appVersion = "1.0.0", notify = () =
   let ff = {};
   try { ff = binaries(); } catch (e) { log("perception: ffmpeg missing", e.message); }
   const perception = new PerceptionService({ userData: root, cacheDir: path.join(paths.cache, "perception"), ffmpeg: ff.ffmpeg, ffprobe: ff.ffprobe, gpuLock: makeGpuLock({ queue: gpu }), log: (l) => log("perception", l) });
+  // Phase 10: music under speech in the editor (a music bed ducks under the timeline's speech; used by the export).
+  music.bed = new MusicBedService({ repos, paths, timelines, captions, media, log });
+  exporter.musicBed = music.bed;
   const purged = projects.purgeExpired();
   if (settings.get("draft").autoBackup) { try { backup.autoBackup(); } catch (e) { log("auto backup failed", e.message); } }
   return { paths, repos, settings, media, analysis, timelines, exporter, projects, tts, captions, asrSetup, mattes, stabilizer, dubber, dubSetup, musicSetup, music, videoSetup, video, gpu, backup, packages, sfxLib, broll, imagegen, perception, startup: { purged } };

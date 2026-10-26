@@ -55,7 +55,10 @@ export function openSettings(initialTab = "draft") {
           if (await guard(() => call("settings.clearCache", "all")) !== undefined) { await guard(() => call("settings.clearCache", "proxy")); toast(t("set.cacheCleared"), "success"); drawPane(); }
         } }, t("set.clear")))),
         folderRow(t("set.presetDir"), "draft", "presetDir"),
-        row(t("set.autoBackup"), tg("draft", "autoBackup"), t("set.autoBackupHint")));
+        row(t("set.autoBackup"), tg("draft", "autoBackup"), t("set.autoBackupHint")),
+        // Phase 9/10: the sound and B-roll library folder (read when the app starts) and the person cut-out quality.
+        folderRow(t("set.libraryDir"), "media", "libraryDir"), h("div", { class: "muted small" }, t("set.restartHint")),
+        row(t("set.matteQuality"), sel("media", "matteQuality", ["auto", "pro", "fast"].map((v) => ({ value: v, label: t(`set.matteQuality.${v}`) })))));
     } else if (tab === "edit") {
       const linkBox = h("div", { class: "chips" }, LINK_TYPES.map((k) => check({ checked: e.linkage.includes(k), label: k, onChange: (v) => set("edit", "linkage", v ? [...new Set([...s.edit.linkage, k])] : s.edit.linkage.filter((x) => x !== k)) })));
       mount(pane,
