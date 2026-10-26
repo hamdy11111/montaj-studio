@@ -34,6 +34,7 @@ import { binaries } from "./ffmpeg.js";
 import { PerceptionService, makeGpuLock } from "./perception/perceptionService.js";
 import { TakeService } from "./takes/takeService.js";
 import { LinkService } from "./links/linkService.js";
+import { AiSetupService } from "./aiSetupService.js";
 
 export async function createServices({ root, appVersion = "1.0.0", notify = () => {}, log = () => {} }) {
   const paths = makePaths(root);
@@ -90,10 +91,12 @@ export async function createServices({ root, appVersion = "1.0.0", notify = () =
   const takes = new TakeService({ userData: root, cacheDir: path.join(paths.cache, "takes"), storeDir: path.join(root, "takes-picks"), ffmpeg: ff.ffmpeg, ffprobe: ff.ffprobe, perception, gpuLock: makeGpuLock({ queue: gpu, name: "takes" }), log: (l) => log("takes", l) });
   // Cause ↔ reaction links + moment roles (Phase 6): read perception's timeline; the vision check takes the GPU queue.
   const links = new LinkService({ userData: root, cacheDir: path.join(paths.cache, "links"), perception, ffmpeg: ff.ffmpeg, gpuLock: makeGpuLock({ queue: gpu, name: "links" }), log: (l) => log("links", l) });
+  // Set-up of the AI layers (round 4): installs / imports / checks / repairs their runtimes and models in runtime/.
+  const aiSetup = new AiSetupService({ paths, settings, notify, log });
   // Phase 10: music under speech in the editor (a music bed ducks under the timeline's speech; used by the export).
   music.bed = new MusicBedService({ repos, paths, timelines, captions, media, log });
   exporter.musicBed = music.bed;
   const purged = projects.purgeExpired();
   if (settings.get("draft").autoBackup) { try { backup.autoBackup(); } catch (e) { log("auto backup failed", e.message); } }
-  return { paths, repos, settings, media, analysis, timelines, exporter, projects, tts, captions, asrSetup, mattes, stabilizer, dubber, dubSetup, musicSetup, music, videoSetup, video, gpu, backup, packages, sfxLib, broll, imagegen, perception, takes, links, startup: { purged } };
+  return { paths, repos, settings, media, analysis, timelines, exporter, projects, tts, captions, asrSetup, mattes, stabilizer, dubber, dubSetup, musicSetup, music, videoSetup, video, gpu, backup, packages, sfxLib, broll, imagegen, perception, takes, links, aiSetup, startup: { purged } };
 }
