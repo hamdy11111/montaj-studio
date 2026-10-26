@@ -1,0 +1,155 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<title>اكتب الكلام</title>
+<style>
+  :root { --bg:#0e1112; --card:#151b1c; --line:#243033; --text:#e8eeee; --muted:#8aa0a3; --accent:#00c1cd; --ok:#6fd38a; --warn:#f4c26b; }
+  body { font-family: Tajawal, Cairo, "Segoe UI", sans-serif; background: var(--bg); color: var(--text); margin: 0; }
+  header { position: sticky; top: 0; background: #0b0e0f; border-bottom: 1px solid var(--line); padding: 10px 16px; z-index: 2; }
+  header .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+  h1 { font-size: 18px; margin: 0; }
+  main { max-width: 980px; margin: 0 auto; padding: 12px 16px 80px; }
+  details { background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 8px 12px; margin: 10px 0; }
+  .seg { display: grid; grid-template-columns: 44px 1fr; gap: 8px; background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 8px; margin: 8px 0; }
+  .seg.current { border-color: var(--accent); }
+  .seg.done { opacity: .78; }
+  .seg.done .num { color: var(--ok); }
+  .seg.unsure .num { color: var(--warn); }
+  .num { font-size: 12px; color: var(--muted); text-align: center; }
+  button { background: #1e2a2c; color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 4px 10px; cursor: pointer; font: inherit; }
+  button.primary { background: var(--accent); color: #002a2d; border: 0; font-weight: 700; }
+  button.play { width: 40px; height: 40px; font-size: 16px; }
+  textarea { width: 100%; box-sizing: border-box; background: #0b0f10; color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 8px; font: 18px/1.6 Tajawal, Cairo, sans-serif; resize: vertical; min-height: 48px; }
+  .tools { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 6px; font-size: 13px; align-items: center; }
+  .muted { color: var(--muted); font-size: 13px; }
+  .bar { height: 6px; background: #1b2426; border-radius: 3px; overflow: hidden; flex: 1; min-width: 120px; }
+  .bar span { display: block; height: 100%; background: var(--ok); }
+  kbd { background: #1e2a2c; border: 1px solid var(--line); border-radius: 4px; padding: 0 5px; font-size: 12px; direction: ltr; display: inline-block; }
+</style>
+</head>
+<body>
+<header>
+  <div class="row">
+    <h1>اكتب الكلام</h1>
+    <span id="progress" class="muted"></span>
+    <div class="bar"><span id="barfill" style="width:0"></span></div>
+    <label class="muted">السرعة <select id="rate"><option value="1">عادي</option><option value="0.85">أبطأ</option><option value="0.7">أبطأ كمان</option></select></label>
+    <button class="primary" id="save">حفظ الملف</button>
+    <span id="saved" class="muted"></span>
+  </div>
+</header>
+<main>
+  <details open>
+    <summary><b>إزاي تكتب</b> (اقراها مرة)</summary>
+    <ul>
+      <li>اسمع الجملة <kbd>▶</kbd>، وصحّح المسودة لحد ما تبقى <b>زي ما اتقال بالظبط</b>، باللهجة زي ما هي: «عايز» مش «أريد».</li>
+      <li><b>الإنجليزي اكتبه بالإنجليزي</b> (YouTube، challenge)، و<b>الأرقام بالأرقام</b> (3، 500).</li>
+      <li>الأسامي اكتبها صح. والكلمة اللي مش واضحة خالص اكتب مكانها <b>[غير مفهوم]</b>.</li>
+      <li>لو فيه كلام متداخل، اكتب الكلام الأوضح، وضيف <b>[متداخل]</b>. ولو الجملة مفيهاش كلام (موسيقى أو دوشة) اكتب <b>[مفيش كلام]</b>.</li>
+      <li>ما تكتبش تشكيل، وعلامات الترقيم مش مهمة.</li>
+      <li>لما تخلص جملة دوس <kbd>Ctrl</kbd>+<kbd>Enter</kbd>: بتتعلّم «خلصت» والجملة اللي بعدها بتشتغل لوحدها. وتعيد السماع بـ<kbd>Ctrl</kbd>+<kbd>Space</kbd>.</li>
+      <li>الشغل بيتحفظ لوحده في المتصفح. ولما تخلص (أو لما تحب)، دوس <b>«حفظ الملف»</b> واحفظه جنب الصفحة دي باسم <code>reference.json</code>.</li>
+    </ul>
+  </details>
+  <div id="list"></div>
+</main>
+<audio id="player"></audio>
+<script src="data.js"></script>
+<script>
+(function () {
+  const T = window.TRANSCRIPT;
+  if (!T) { document.getElementById("list").textContent = "ملف البيانات (data.js) مش موجود جنب الصفحة."; return; }
+  const KEY = "montaj-transcript:" + T.id;
+  let state = {};
+  try { state = JSON.parse(localStorage.getItem(KEY) || "{}"); } catch (e) { state = {}; }
+  const player = document.getElementById("player");
+  const rate = document.getElementById("rate");
+  let current = null;
+  const rows = new Map();
+  const persist = () => {
+    try { localStorage.setItem(KEY, JSON.stringify(state)); document.getElementById("saved").textContent = "اتحفظ في المتصفح"; } catch (e) { /* storage blocked: the save button still works */ }
+    progress();
+  };
+  function progress() {
+    const done = T.segments.filter((s) => state[s.id] && state[s.id].status === "done").length;
+    document.getElementById("progress").textContent = `${done} من ${T.segments.length} جملة (${T.minutes} دقيقة)`;
+    document.getElementById("barfill").style.width = `${Math.round((100 * done) / T.segments.length)}%`;
+  }
+  function play(s) {
+    player.src = s.clip; player.playbackRate = Number(rate.value); player.play().catch(() => {});
+    focus(s);
+  }
+  function focus(s) {
+    if (current) rows.get(current).el.classList.remove("current");
+    current = s.id;
+    const r = rows.get(s.id);
+    r.el.classList.add("current");
+    r.ta.focus();
+    r.el.scrollIntoView({ block: "center", behavior: "smooth" });
+  }
+  function mark(s, status) {
+    state[s.id] = { ...(state[s.id] || {}), text: rows.get(s.id).ta.value, status };
+    const el = rows.get(s.id).el;
+    el.classList.toggle("done", status === "done");
+    el.classList.toggle("unsure", status === "unsure");
+    persist();
+  }
+  const list = document.getElementById("list");
+  for (const s of T.segments) {
+    const el = document.createElement("div"); el.className = "seg";
+    const left = document.createElement("div");
+    const btn = document.createElement("button"); btn.className = "play"; btn.textContent = "▶"; btn.title = "اسمع"; btn.onclick = () => play(s);
+    const num = document.createElement("div"); num.className = "num"; num.textContent = s.id;
+    left.append(btn, num);
+    const right = document.createElement("div");
+    const ta = document.createElement("textarea"); ta.dir = "auto"; ta.value = (state[s.id] && state[s.id].text) ?? s.draft;
+    ta.oninput = () => { state[s.id] = { ...(state[s.id] || {}), text: ta.value, status: (state[s.id] && state[s.id].status) || "edited" }; persist(); };
+    ta.onfocus = () => { if (current !== s.id) { if (current) rows.get(current).el.classList.remove("current"); current = s.id; el.classList.add("current"); } };
+    const tools = document.createElement("div"); tools.className = "tools";
+    const time = document.createElement("span"); time.className = "muted"; time.textContent = `${s.media} · ${s.start.toFixed(1)}–${s.end.toFixed(1)} ث`;
+    const tag = (label) => { const b = document.createElement("button"); b.textContent = label; b.onclick = () => { ta.setRangeText(` ${label} `, ta.selectionStart, ta.selectionEnd, "end"); ta.dispatchEvent(new Event("input")); ta.focus(); }; return b; };
+    const done = document.createElement("button"); done.textContent = "✓ خلصت"; done.onclick = () => { mark(s, "done"); next(s); };
+    const unsure = document.createElement("button"); unsure.textContent = "؟ مش متأكد"; unsure.onclick = () => mark(s, "unsure");
+    tools.append(time, tag("[غير مفهوم]"), tag("[متداخل]"), tag("[مفيش كلام]"), unsure, done);
+    right.append(ta, tools);
+    el.append(left, right);
+    list.append(el);
+    rows.set(s.id, { el, ta });
+    if (state[s.id] && state[s.id].status === "done") el.classList.add("done");
+    if (state[s.id] && state[s.id].status === "unsure") el.classList.add("unsure");
+  }
+  function next(s) {
+    const i = T.segments.findIndex((x) => x.id === s.id);
+    const n = T.segments.slice(i + 1).find((x) => !(state[x.id] && state[x.id].status === "done")) || T.segments[i + 1];
+    if (n) play(n);
+  }
+  document.addEventListener("keydown", (e) => {
+    const s = T.segments.find((x) => x.id === current);
+    if (!s) return;
+    if (e.ctrlKey && e.key === "Enter") { e.preventDefault(); mark(s, "done"); next(s); }
+    if (e.ctrlKey && (e.key === " " || e.code === "Space")) { e.preventDefault(); play(s); }
+  });
+  rate.onchange = () => { player.playbackRate = Number(rate.value); };
+  document.getElementById("save").onclick = async () => {
+    const out = { schema: "montaj-bench.reference/1", id: T.id, media: T.media, savedAt: new Date().toISOString(),
+      segments: T.segments.map((s) => ({ id: s.id, media: s.media, mediaIndex: s.mediaIndex, start: s.start, end: s.end, clip: s.clip,
+        text: (state[s.id] && state[s.id].text) ?? s.draft, status: (state[s.id] && state[s.id].status) || "draft" })) };
+    const blob = new Blob([JSON.stringify(out, null, 1)], { type: "application/json" });
+    try {
+      if (window.showSaveFilePicker) {
+        const h = await window.showSaveFilePicker({ suggestedName: "reference.json", types: [{ description: "JSON", accept: { "application/json": [".json"] } }] });
+        const w = await h.createWritable(); await w.write(blob); await w.close();
+        document.getElementById("saved").textContent = "اتحفظ الملف ✓"; return;
+      }
+    } catch (e) { if (e && e.name === "AbortError") return; }
+    const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = "reference.json"; a.click();
+    document.getElementById("saved").textContent = "اتنزّل في فولدر التنزيلات: انقله جنب الصفحة دي";
+  };
+  progress();
+  const first = T.segments.find((x) => !(state[x.id] && state[x.id].status === "done"));
+  if (first) focus(first);
+})();
+</script>
+</body>
+</html>

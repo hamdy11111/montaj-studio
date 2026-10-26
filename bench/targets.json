@@ -1,0 +1,18 @@
+{
+  "_source": "edit-hamdy references (mrbeast-reference.md, attention.md, policy) and practitioner retention rules collected in PLAN_editor_and_graphics.md; tunable, not laws",
+  "shortMaxSec": 180,
+  "short": {
+    "shotMedian": { "max": 2.5, "_why": "reels: a change every 1.5–3 s" },
+    "firstSpeech": { "max": 0.5, "_why": "the hook starts at once" },
+    "longestShot": { "max": 6, "_why": "a reason to keep watching every 3–6 s" },
+    "stillest": { "max": 3 },
+    "loudness": { "target": -14, "tol": 2 }
+  },
+  "long": {
+    "shotMedian": { "max": 4, "_why": "MrBeast measured median 1.73 s; explainers slower — 4 s is the ceiling, not the goal" },
+    "firstSpeech": { "max": 1.0 },
+    "longestShot": { "max": 40, "_why": "no static talking head longer than 40 s" },
+    "stillest": { "max": 15 },
+    "loudness": { "target": -14, "tol": 2 }
+  }
+}
