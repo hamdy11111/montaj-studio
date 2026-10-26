@@ -34,7 +34,7 @@ export const MEDIA_SOURCES = [
 export const MEDIA_NOT_FETCHED = [
   { name: "FLUX 3 Image Klein (INT8 ComfyUI build + prompt upsampler)", why: "black-forest-labs/flux-3-image-klein-comfy is gated (accept the FLUX Kommunity License with a Hugging Face login) and needs ComfyUI 0.41; the video runtime has 0.40" },
   { name: "RMBG-2.0", why: "briaai/RMBG-2.0 is gated (licence form); BiRefNet (MIT), its architecture, is used instead" },
-  { name: "VideoMaMa", why: "SammyLim/VideoMaMa (6.1 GB UNet, Stability Community License, code CC-BY-NC) + stable-video-diffusion-img2vid-xt; not installed in this pass — see HANDOFF" },
+  { name: "VideoMaMa", why: "downloaded for the challenger test only (SammyLim/VideoMaMa 6.1 GB, Stability Community License, code CC-BY-NC, + SVD-xt VAE/image encoder 1.4 GB): no better than MatAnyone2 on the hard windows at 5× the memory, so the app does not use it" },
   { name: "TAPNext", why: "not installed: CoTracker3 covers the point tracks" },
   { name: "Freesound", why: "its API needs a personal key" },
   { name: "Pixabay sound effects", why: "the site refuses scripted downloads (HTTP 403 behind a browser check); download by hand and use import folder" },

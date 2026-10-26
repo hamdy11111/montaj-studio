@@ -154,6 +154,23 @@ def load(name, models, device):
         # The published script calls self._sample_frames for a video document but only defines the module function.
         if not hasattr(r, "_sample_frames"):
             r._sample_frames = sample_frames
+        # ...and with transformers 5.8 its tokenize() leaves mm_token_type_ids (and the pixel values) as lists, out of step
+        # with the truncated, padded input_ids: Qwen3VL's rope index then fails. Rebuilt from the ids, as tensors.
+        tokenize = r.tokenize
+
+        def fixed_tokenize(pairs, **kw):
+            inputs = tokenize(pairs, **kw)
+            ids = inputs["input_ids"]
+            cfg = r.model.config
+            tt = torch.zeros_like(ids)
+            tt[ids == cfg.image_token_id] = 1
+            tt[ids == cfg.video_token_id] = 2
+            inputs["mm_token_type_ids"] = tt
+            for k in list(inputs.keys()):
+                if not torch.is_tensor(inputs[k]):
+                    inputs[k] = torch.as_tensor(np.asarray(inputs[k]))
+            return inputs
+        r.tokenize = fixed_tokenize
         sys.path.remove(path); sys.modules.pop("scripts", None); sys.modules.pop("scripts.qwen3_vl_reranker", None)
         return {"rr": r}
     raise ValueError(name)
