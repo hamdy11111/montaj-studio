@@ -398,10 +398,14 @@ export function executionSpec(treatment, moments, words, { angleEveryUs = 2_500_
   const actionUs = moments.filter((m) => m.kind === "action").reduce((n, m) => n + m.e - m.s, 0);
   const actionVideo = D > 0 && speechUs / D < 0.45 && actionUs >= 20 * US;
   const CORE = !actionVideo ? { core: 1_800_000, lead: 1_200_000, tail: 600_000 } : ({ full: { core: 5_000_000, lead: 3_000_000 }, medium: { core: 4_000_000, lead: 2_500_000 }, short: { core: 3_000_000, lead: 2_000_000 } }[treatment.length] || { core: 5_000_000, lead: 3_000_000 });
+  let lastKept = null;
   for (const m of moments) {
     // A sentence left out: its words go (the pacing then closes the gap) and its whole stretch is cut.
-    if (m.kind === "speech") { if (!kept.has(m.n)) { for (let i = m.w0; i <= m.w1; i++) dropWords.set(i, "treatment"); cutSpans.push({ fromUs: m.s, toUs: m.e, reason: `treatment: moment ${m.n} (speech)` }); } continue; }
+    if (m.kind === "speech") { if (!kept.has(m.n)) { for (let i = m.w0; i <= m.w1; i++) dropWords.set(i, "treatment"); cutSpans.push({ fromUs: m.s, toUs: m.e, reason: `treatment: moment ${m.n} (speech)` }); } else lastKept = "speech"; continue; }
     if (!kept.has(m.n)) { cutSpans.push({ fromUs: m.s, toUs: m.e, reason: `treatment: moment ${m.n} (${m.kind})` }); continue; }
+    // In a talking video one beat per wordless run: two beats side by side are 3–4 s of near silence (05's dead air).
+    if (!actionVideo && lastKept === "wordless" && !m.reactions.some((x) => BIG.has(x.type)) && !m.protected) { cutSpans.push({ fromUs: m.s, toUs: m.e, reason: `treatment: one beat per quiet stretch (moment ${m.n})` }); continue; }
+    lastKept = "wordless";
     let a = m.s, b = m.e;
     const r = m.reactions.find((x) => BIG.has(x.type));
     if (m.peak && r) { a = Math.max(m.s, r.t - CORE.lead); b = Math.min(m.e, Math.max(r.t1 ?? r.t, r.t) + (CORE.tail ?? 1_500_000)); }

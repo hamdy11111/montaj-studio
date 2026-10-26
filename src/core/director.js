@@ -258,6 +258,24 @@ export function directPlan(input) {
   const breaks = [...joints, ...(spec?.angleBreaks || [])].filter((j) => editTime(cuts, j) !== null);
   for (const c of [...cuts, ...breaks.map((j) => ({ fromUs: j, toUs: j }))].sort((x, y) => x.fromUs - y.fromUs)) { if (c.fromUs - s0 > 200_000) shots.push([s0, c.fromUs]); s0 = Math.max(s0, c.toUs); }
   if (durationUs - s0 > 200_000) shots.push([s0, durationUs]);
+  // A long take with no cut (an interview's two-shot, a cook talking for 20 s) is a long static shot (the baseline's
+  // 16–38 s): the angle changes inside it at a word boundary — at a pause when there is one — every ~4 s of edit time,
+  // as an editor hides it with a cut-zoom. No time is removed; the words are never split.
+  const LONG = S(A.longShot), STEP = S(4), TAILS = S(2);
+  for (let i = 0; i < shots.length; i++) {
+    const [a, b] = shots[i];
+    if (editAt(cuts, b) - editAt(cuts, a) <= LONG) continue;
+    const inside = kept.filter((w) => w.startUs > a && w.startUs < b);
+    let at = null;
+    for (const [k, w] of inside.entries()) {
+      const t = w.startUs - 40_000, since = editAt(cuts, t) - editAt(cuts, a), left = editAt(cuts, b) - editAt(cuts, t);
+      if (since < STEP || left < TAILS) continue;
+      const prev = inside[k - 1] || kept[kept.indexOf(w) - 1];
+      const pause = prev ? w.startUs - prev.endUs >= 120_000 || /[.!?؟…،,]$/.test(prev.text) : true;
+      if (pause || since >= STEP + S(1.5)) { at = Math.max(a + 200_000, t); break; }
+    }
+    if (at !== null) shots.splice(i, 1, [a, at], [at, b]); // the second part is looked at again
+  }
   let prevAngle = null;
   const angleOf = shots.map(([a, b]) => {
     const inShot = momentsKept.filter((m) => m.s >= a && m.s < b);

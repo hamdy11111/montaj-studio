@@ -276,3 +276,18 @@ test("the joint check is measured against the speech model's own agreement: word
   const noisy = verifyOutput({ expected: exp, outWords: back((w, i) => exp.words.indexOf(w) % 3 === 0) });
   assert.ok(noisy.ok && noisy.checks.some((c) => c.id === "out.lowAgreement"));
 });
+
+test("a long take is broken by an angle change at a word boundary (no long static shot); no time is removed", () => {
+  // 20 s of uninterrupted talk (words 0.4 s apart), one tiny pause at 9.0 s.
+  const talk = [];
+  let k = 0;
+  for (let t = 0.2; t < 20; t += 0.5) talk.push(W(t > 8.9 && t < 9.3 ? "كده." : `كلمة${k++}`, t, t + 0.4));
+  const r = directPlan({ mediaId: "media-1", words: talk, durationUs: 20.5 * US, track: [], style: "energetic", retakes: false, media: { width: 1080, height: 1920 }, canvas: { width: 1080, height: 1920 } });
+  const shots = shotLengths(r.plan).sort((a, b) => a - b);
+  assert.ok(shots[shots.length - 1] <= 6.5, `longest ${shots[shots.length - 1]} s`);
+  const kept = r.plan.segments.reduce((n, s) => n + s.toUs - s.fromUs, 0);
+  assert.ok(kept > 19 * US, "the talk is kept");
+  // (an angle piece that starts where a punch-in ends inherits the punch-in's time: not a split made here)
+  const punchEnds = new Set((r.plan.zooms || []).filter((x) => /^punch/.test(x.reason)).map((x) => x.toUs));
+  for (const z of (r.plan.zooms || []).filter((x) => /^angle/.test(x.reason) && !punchEnds.has(x.fromUs))) for (const w of talk) assert.ok(!(w.startUs < z.fromUs && w.endUs > z.fromUs + 1000) || z.fromUs <= 300_000, `an angle change inside «${w.text}» at ${z.fromUs}`);
+});

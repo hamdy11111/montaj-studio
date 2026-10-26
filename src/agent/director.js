@@ -221,7 +221,7 @@ export async function autoEdit(ctx, timelineId, opts = {}, job = null) {
     for (const t of treatments) {
       const spec = executionSpec(t, moments, cWords);
       const r = directPlan({ ...base, spec });
-      const guards = verifyPlan({ moments, links, cuts: r.virtual.cuts, durationUs, treatment: t });
+      const guards = verifyPlan({ moments, links, cuts: r.virtual.cuts, durationUs, treatment: t, targetUs: base.targetUs });
       items.push({ id: t.id, treatment: t, spec, plan: r.plan, qa: r.qa, out: r, guards, rubric: rubric({ treatment: t, plan: r.plan, qa: r.qa, moments, links, targetUs: base.targetUs }) });
     }
     reportPlan(0.4, "critic");
@@ -244,7 +244,7 @@ export async function autoEdit(ctx, timelineId, opts = {}, job = null) {
     }
     reportPlan(0.85, "sounds");
     const soundInfo = await meaningSounds(S, final.plan, { moments, clips, log, bundled: opts.sounds === "bundled" });
-    const guards = verifyPlan({ moments, links, cuts: final.virtual.cuts, durationUs, treatment: chosen.treatment });
+    const guards = verifyPlan({ moments, links, cuts: final.virtual.cuts, durationUs, treatment: chosen.treatment, targetUs: base.targetUs });
     const { plan, notes, decisions } = final;
     let qa = final.qa;
     // The verifier's guards join the quality guards (one verdict for the app).
@@ -366,14 +366,17 @@ async function meaningGraphics(S, { out, moments, chosenSpec, timelines, clips, 
 
 // ------------------------------------------------------------------ sounds by meaning
 /**
- * The plan's sounds that carry a meaning (`query`, `mood`) get a file from the sound library (its Egyptian meaning
- * tags, CLAP), within its rules (no comic sound in a serious moment, comic sounds spaced); the bundled sound stays as
- * the fallback when the library is missing or finds nothing. Changes plan.sfx in place.
+ * The plan's sounds that carry a meaning (`query`, `mood`) get a file from the sound library through its director
+ * tools (SFX_TOOLS: `sfx_search` by the moment's meaning and mood, `sfx_check_plan` over the result — no comic sound in
+ * a serious moment, comic sounds spaced); the bundled sound stays as the fallback when the library is missing or finds
+ * nothing. Changes plan.sfx in place.
  */
 async function meaningSounds(S, plan, { moments, clips, log, bundled = false }) {
   const lib = bundled ? null : S.sfxLib;
   const want = (plan.sfx || []).filter((x) => x.query);
   if (!lib || !want.length) return { library: false, n: 0 };
+  const { sfxToolHandlers } = await import("../services/sfxLibrary.js");
+  const tools = sfxToolHandlers(lib);
   const used = [], events = [], info = { library: true, n: 0, picked: [] };
   const vOf = (x) => { const c = clips.find((k) => k.mediaId === x.mediaId) || clips[0]; return Math.round(c.vStart + (x.atUs - c.srcStart) / (c.speed || 1)); };
   const moodMoments = moments.map((m) => ({ startUs: m.s, endUs: m.e, mood: m.mood }));
@@ -384,18 +387,20 @@ async function meaningSounds(S, plan, { moments, clips, log, bundled = false }) 
       const m = moments.find((k) => vOf(x) >= k.s && vOf(x) < k.e);
       const overSpeech = m?.kind === "speech" || moments.some((k) => k.kind === "speech" && vOf(x) + 1_500_000 > k.s && vOf(x) < k.e);
       const maxS = x.query === "whoosh" ? 1.2 : overSpeech ? 1.6 : 3.5;
-      const r = await lib.search(x.query, { mood: x.mood || "neutral", limit: 8, recent: used.slice(-6) });
-      const s = (r.results || []).find((k) => k.durationS === null || k.durationS === undefined || k.durationS <= maxS);
+      const r = await tools.sfx_search({ query: x.query, mood: x.mood || "neutral", limit: 10 });
+      // …and never a human voice (a gasp, a laugh track) on top of someone speaking.
+      const fit = (r.results || []).filter((k) => (k.durationS === null || k.durationS === undefined || k.durationS <= maxS) && !(overSpeech && k.category === "reactions"));
+      const s = fit.find((k) => !used.slice(-6).includes(k.id)) || fit[0]; // not the same file again and again
       if (s) { x.library = { id: s.id, file: s.file, leadUs: s.leadUs || 0, title: String(s.title || "").slice(0, 80) }; if (overSpeech) x.volumeDb = Math.min(x.volumeDb ?? -10, -10); used.push(s.id); events.push({ atUs: vOf(x), sound: { id: s.id, comic: s.comic, cartoon: s.cartoon }, priority: 1, x }); info.picked.push(`${x.query} → ${s.title} (${s.durationS ?? "?"} s)`); }
       else info.picked.push(`${x.query}: nothing short enough (≤ ${maxS} s), the bundled sound`);
     } catch (e) { log(`sfx search «${x.query}»: ${e.message}`); }
   }
   // The library's rules over what was picked (a sound that breaks one falls back to the plain bundled sound).
   try {
-    const { enforceSfxPlan } = await import("../services/sfxLibrary/rules.js");
-    const { dropped } = enforceSfxPlan(events, { moments: moodMoments });
-    for (const d of dropped) { delete d.event.x.library; info.picked.push(`dropped: ${d.rule}`); }
-  } catch { /* rules unavailable */ }
+    const { kept } = await tools.sfx_check_plan({ events: events.map((e, i) => ({ atUs: e.atUs, soundId: e.sound.id, priority: e.priority, i })), moments: moodMoments });
+    const keep = new Set((kept || []).map((k) => k.i));
+    events.forEach((e, i) => { if (!keep.has(i)) { delete e.x.library; info.picked.push(`dropped by the rules: ${e.sound.id}`); } });
+  } catch (e) { log(`sfx check: ${e.message}`); }
   info.n = (plan.sfx || []).filter((x) => x.library).length;
   return info;
 }

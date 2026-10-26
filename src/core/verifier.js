@@ -11,7 +11,7 @@ import { US } from "./util.js";
 
 export const VERIFY = {
   action: { speechShareMax: 0.45, minActionS: 20, keptShareMin: 0.4 }, // a mostly wordless video keeps ≥ 40 % of its action
-  tooShort: { minShare: 0.25, minActionS: 30 },                          // ≤ 25 % of the raw while ≥ 30 s of action happened
+  tooShort: { minShare: 0.25, minActionS: 30, speechShareMax: 0.6 },     // ≤ 25 % of the raw while ≥ 30 s of action happened
   hookSec: 3,
   line: { coverage: 0.6, lost: 0.34, windowUs: 4_000_000, minAgreement: 0.5 },
   joint: { windowUs: 700_000, margin: 0.3 },
@@ -31,10 +31,10 @@ export function keptIn(cuts, a, b) {
 /**
  * Guards on a plan, from the moments (core/treatments.js) and the virtual cuts the executor made. Works for any plan —
  * the old single-pass director too (no treatment): that is how the 02 failure is caught. input: { moments, links,
- * cuts, durationUs, treatment (optional) }. Returns { checks: [{ id, level, message, args }],
+ * cuts, durationUs, treatment (optional), targetUs (a reel's length: no «too short») }. Returns { checks: [{ id, level, message, args }],
  * passed: [ids], stats: { speechShare, actionS, keptActionS, keptShare } }.
  */
-export function verifyPlan({ moments = [], links = [], cuts = [], durationUs, treatment = null }, V = VERIFY) {
+export function verifyPlan({ moments = [], links = [], cuts = [], durationUs, treatment = null, targetUs = null }, V = VERIFY) {
   const checks = [], passed = [];
   const add = (id, level, message, args = {}) => checks.push({ id, level, message, args });
   const D = durationUs || (moments.length ? moments[moments.length - 1].e : 0);
@@ -48,8 +48,8 @@ export function verifyPlan({ moments = [], links = [], cuts = [], durationUs, tr
   if (speechShare <= V.action.speechShareMax && actionUs >= V.action.minActionS * US && keptShare < V.action.keptShareMin)
     add("action.cut", "fail", `most of the wordless action is cut: ${sec(keptActionUs)} of ${sec(actionUs)} s kept (${Math.round(100 * keptShare)} %) in a video that is ${Math.round(100 * (1 - speechShare))} % without words`, { kept: sec(keptActionUs), of: sec(actionUs), pct: Math.round(100 * keptShare) });
   else passed.push("action.cut");
-  // 2. An edit far too short for what happened in it.
-  if (D && editUs / D < V.tooShort.minShare && actionUs >= V.tooShort.minActionS * US)
+  // 2. An edit far too short for what happened in it (a video carried by its action; never when a length was asked).
+  if (!targetUs && D && editUs / D < V.tooShort.minShare && actionUs >= V.tooShort.minActionS * US && speechShare <= V.tooShort.speechShareMax)
     add("edit.tooShort", "fail", `the edit keeps ${sec(editUs)} s of ${sec(D)} s although ${sec(actionUs)} s of action happened`, { edit: sec(editUs), raw: sec(D), action: sec(actionUs) });
   else passed.push("edit.tooShort");
   // 3. A cause separated from its reaction (both kept, not side by side in the edit order).
@@ -76,14 +76,16 @@ export function verifyPlan({ moments = [], links = [], cuts = [], durationUs, tr
  * important(word span) → bool marks lines that must survive (the punch / setup / reaction moments).
  */
 export function expectedSpeech(plan, wordsByMedia, { important = () => false } = {}) {
-  const lines = [], joints = [], words = [];
+  const lines = [], joints = [], words = [], sounds = [];
   let t = 0;
   for (const [k, sg] of (plan.segments || []).entries()) {
     const ws = (wordsByMedia[sg.mediaId] || []).filter((w) => (w.startUs + w.endUs) / 2 >= sg.fromUs && (w.startUs + w.endUs) / 2 < sg.toUs);
     const at = (src) => t + (src - sg.fromUs);
     // Runs of words with no pause ≥ 0.7 s are one line.
     let run = [];
-    const flush = () => { if (run.length) lines.push({ text: run.map((w) => w.text).join(" "), editFromUs: at(run[0].startUs), editToUs: at(run[run.length - 1].endUs), important: !!important(sg.mediaId, run[0].startUs, run[run.length - 1].endUs), segment: k }); run = []; };
+    const flush = () => { if (run.length) lines.push({ text: run.map((w) => w.text).join(" "), editFromUs: at(run[0].startUs), editToUs: at(run[run.length - 1].endUs), important: !!important(sg.mediaId, run[0].startUs, run[run.length - 1].endUs), segment: k, first: run[0] === ws[0], last: run[run.length - 1] === ws[ws.length - 1] }); run = []; };
+    // The sounds the plan adds over this segment (their accent time; a library sound up to ~1.6 s, a bundled one ~1 s).
+    for (const x of plan.sfx || []) if (x.mediaId === sg.mediaId && x.atUs >= sg.fromUs && x.atUs < sg.toUs && !sounds.some((y) => y.editUs === at(x.atUs))) sounds.push({ editUs: at(x.atUs), what: x.library?.title || x.sound });
     for (const w of ws) { if (run.length && w.startUs - run[run.length - 1].endUs >= 700_000) flush(); run.push(w); }
     flush();
     ws.forEach((w, i) => words.push({ text: w.text, editUs: at(w.startUs), joint: (i === 0 && k > 0) || (i === ws.length - 1 && k < (plan.segments || []).length - 1) }));
@@ -92,7 +94,14 @@ export function expectedSpeech(plan, wordsByMedia, { important = () => false } =
     t += sg.toUs - sg.fromUs;
   }
   delete joints.pendingBefore;
-  return { lines, joints, words, editUs: t };
+  // A line next to a joint (the first or last words of a segment) or under an added sound is where the edit could
+  // have broken it; a line inside one continuous segment with nothing on it can only be heard differently.
+  const nSeg = (plan.segments || []).length;
+  for (const l of lines) {
+    l.atJoint = (l.first && l.segment > 0) || (l.last && l.segment < nSeg - 1);
+    l.masked = sounds.filter((x) => x.editUs > l.editFromUs - 1_600_000 && x.editUs < l.editToUs + 300_000).map((x) => x.what);
+  }
+  return { lines, joints, words, sounds, editUs: t };
 }
 
 /**
@@ -128,8 +137,11 @@ export function verifyOutput({ expected, outWords = [], loudness = null, black =
     const got = near(l.editFromUs - V.line.windowUs, l.editToUs + V.line.windowUs);
     const cov = (alignTokens(want, got)?.matches ?? 0) / want.length;
     if (cov >= V.line.coverage) { found++; if (l.important) impFound++; continue; }
-    const lost = trusted && l.important && want.length >= 4 && cov < V.line.lost;
-    add(lost ? "out.lineMissing" : "out.lineWeak", lost ? "fail" : "warn", `«${l.text.slice(0, 60)}» is not heard in the export around ${sec(l.editFromUs)} s (${Math.round(100 * cov)} % of its words)`, { text: l.text.slice(0, 60), at: sec(l.editFromUs), pct: Math.round(100 * cov) });
+    // Lost (a fail) only where the edit could have broken it: next to a joint or under a sound it added.
+    const could = l.atJoint === undefined || l.atJoint || l.masked?.length;
+    const lost = trusted && l.important && want.length >= 4 && cov < V.line.lost && could;
+    const why = l.masked?.length ? ` — under the sound «${l.masked[0]}»` : l.atJoint ? " — next to a cut" : "";
+    add(lost ? "out.lineMissing" : "out.lineWeak", lost ? "fail" : "warn", `«${l.text.slice(0, 60)}» is not heard in the export around ${sec(l.editFromUs)} s (${Math.round(100 * cov)} % of its words)${why}`, { text: l.text.slice(0, 60), at: sec(l.editFromUs), pct: Math.round(100 * cov) });
   }
   if (!checks.some((c) => c.id === "out.lineMissing")) passed.push("out.lineMissing");
   // 2. No word cut at a joint: the words on both sides of the joints come back about as often as the other words
