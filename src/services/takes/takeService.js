@@ -19,7 +19,8 @@ import { timelineSignals, takeFeatures } from "./features.js";
 import { PickStore, takeFromCoverage, rawSpansOf } from "./picks.js";
 import { fileHash } from "../perception/perceptionService.js";
 
-const HERE = path.dirname(fileURLToPath(import.meta.url));
+// The Python workers run from the unpacked copy in a packaged app (Python cannot read inside app.asar).
+const HERE = path.dirname(fileURLToPath(import.meta.url)).replace(/app\.asar([\\/])/, "app.asar.unpacked$1");
 const WORKERS = path.join(HERE, "workers");
 const REPO = path.resolve(HERE, "..", "..", "..");
 const US = 1e6;
