@@ -27,8 +27,8 @@
     "dist": "electron-builder --win nsis --publish never",
     "setup:graphics": "node src/graphics/setup.js",
     "build:graphics": "node src/graphics/build.js",
-    "predist": "node src/graphics/build.js",
-    "prepack": "node src/graphics/build.js"
+    "predist": "node src/graphics/setup.js && node src/graphics/build.js",
+    "prepack": "node src/graphics/setup.js && node src/graphics/build.js"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "1.32.0",
@@ -124,6 +124,15 @@
       "shortcutName": "Montaj Studio",
       "artifactName": "Montaj-Studio-Setup-${version}.${ext}"
     },
+    "extraResources": [
+      {
+        "from": "runtime/remotion",
+        "to": "runtime/remotion",
+        "filter": [
+          "chrome-headless-shell-*/**/*"
+        ]
+      }
+    ],
     "fileAssociations": [
       {
         "ext": "mstudio",

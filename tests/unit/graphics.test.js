@@ -16,7 +16,7 @@ import { platformZones, safeRect, placeY, faceUnion, overlapArea, inside } from 
 import { sentenceNeeds } from "../../src/graphics/needs.js";
 import { eligible, eligibleTemplates, fillParams, hardChecks, densityGuard, densityReport, planGraphics, frameCtx, rankNeed, clampParams, lengthFor, heuristicRanker, DENSITY } from "../../src/graphics/selection.js";
 import { remotionSegments, assetRefs, segmentJob, jobKey, groupJobs, bandOf, touchesEdge, GraphicsRenderer } from "../../src/graphics/render.js";
-import { alphaStats, measureAlpha, measureClip } from "../../src/graphics/measure.js";
+import { alphaStats, measureAlpha, measureClip, measuredChecks } from "../../src/graphics/measure.js";
 import { graphicsRuntime } from "../../src/graphics/setup.js";
 import { buildExport } from "../../src/core/exportGraph.js";
 import { newTimeline, newSegment } from "../../src/core/model.js";
@@ -334,6 +334,14 @@ test("real render (graphics runtime installed): a kit graphic renders transparen
     // It lands on its word: frame 0 is the word's frame (the motion blur's samples reach at most one frame ahead),
     // and it holds afterwards.
     assert.ok(m.coverage[10] > 0.01 && m.coverage[20] > 0.01, "it holds");
+    // Measured hard checks of a placed pick: on the real picture, a word above the face passes; over the face fails.
+    const fm = frameCtx({ width: 540, height: 960, fps: 30, faces: [{ x: 0.3, y: 0.42, w: 0.4, h: 0.2 }] });
+    const pick = { template: "kinetic-word", params: { text: "واااو!", y: 0.22 }, atUs: 2 * US, durUs: 1.2 * US, anchorUs: 2 * US };
+    const good = await measuredChecks(pick, r, fm);
+    assert.ok(good.ok, JSON.stringify(good.checks));
+    assert.ok(good.measured.entryFrame <= 1 && good.measured.bbox.y + good.measured.bbox.h < 0.42);
+    const bad = await measuredChecks({ ...pick, params: { text: "واااو!", y: 0.5 } }, r, fm);
+    assert.equal(bad.checks.face.ok, false, JSON.stringify(bad.measured));
     // Composite over a grey clip with FFmpeg as the exporter does and check the text is there.
     const out = path.join(dir, "comp.png");
     await run(binaries().ffmpeg, ["-hide_banner", "-y", "-f", "lavfi", "-i", "color=c=gray:s=540x960:r=30:d=1", "-i", clip, "-filter_complex", "[1:v]format=rgba[g];[0:v][g]overlay=format=auto", "-ss", "0.6", "-frames:v", "1", out], { timeoutMs: 60_000 });

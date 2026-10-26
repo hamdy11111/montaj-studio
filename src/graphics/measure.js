@@ -85,3 +85,22 @@ export function measureAlpha({ frames, w, h }, { fps, inUs = 0, outUs = 0, atUs 
 export async function measureClip(file, opts) {
   return measureAlpha(await decodeAlpha(file, opts), opts);
 }
+
+/**
+ * Hard checks on the real picture: render an item (selection.rankNeed's pick: { template, params, atUs, durUs,
+ * anchorUs }) with the graphics renderer at the frame's size, measure its clip and run selection.hardChecks with the
+ * measured entry, box, drawn pixels in the platform zones and face cover. Returns { ok, checks, measured, clip }.
+ */
+export async function measuredChecks(item, renderer, fctx) {
+  const { hardChecks } = await import("./selection.js");
+  const { segmentJob } = await import("./render.js");
+  const { KIT_TEMPLATES } = await import("../core/graphicsKit.js");
+  const tpl = KIT_TEMPLATES[item.template];
+  const job = segmentJob({ seg: { duration: item.durUs }, template: item.template, params: item.params, pack: item.pack || "punchy" }, { width: fctx.W, height: fctx.H, fps: fctx.fps });
+  const clip = await renderer.renderJob(job);
+  const w = 216, h = Math.round((216 * fctx.H) / fctx.W / 2) * 2;
+  const faces = (fctx.faces || []).map((f) => ({ ...f, t: f.t === undefined ? undefined : f.t }));
+  const measured = await measureClip(clip.path, { w, h, band: clip, W: fctx.W, H: fctx.H, fps: fctx.fps, inUs: tpl.inUs, outUs: tpl.outUs, atUs: item.atUs, zones: fctx.zones.block, faces });
+  const res = hardChecks(item, fctx, measured.entryFrame === null ? { ...measured, entryFrame: undefined } : measured);
+  return { ...res, measured: { entryFrame: measured.entryFrame, bbox: measured.bbox, zonePixels: measured.zonePixels, faceOverlap: measured.faceOverlap }, clip };
+}
