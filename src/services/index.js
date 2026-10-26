@@ -24,6 +24,9 @@ import { BackupService } from "./backupService.js";
 import { PackageService } from "./packageService.js";
 import { setBinaries } from "./ffmpeg.js";
 import { defaultBindings } from "../core/shortcuts.js";
+import path from "node:path";
+import { binaries } from "./ffmpeg.js";
+import { PerceptionService, makeGpuLock } from "./perception/perceptionService.js";
 
 export async function createServices({ root, appVersion = "1.0.0", notify = () => {}, log = () => {} }) {
   const paths = makePaths(root);
@@ -64,7 +67,11 @@ export async function createServices({ root, appVersion = "1.0.0", notify = () =
     onReopen: (r) => { Object.assign(repos, createRepositories(r)); timelines.open.clear(); },
   });
   const packages = new PackageService({ repos, paths, media });
+  // Perception (Phase 4): nothing runs until asked; its models take the shared GPU queue one stage at a time.
+  let ff = {};
+  try { ff = binaries(); } catch (e) { log("perception: ffmpeg missing", e.message); }
+  const perception = new PerceptionService({ userData: root, cacheDir: path.join(paths.cache, "perception"), ffmpeg: ff.ffmpeg, ffprobe: ff.ffprobe, gpuLock: makeGpuLock({ queue: gpu }), log: (l) => log("perception", l) });
   const purged = projects.purgeExpired();
   if (settings.get("draft").autoBackup) { try { backup.autoBackup(); } catch (e) { log("auto backup failed", e.message); } }
-  return { paths, repos, settings, media, analysis, timelines, exporter, projects, tts, captions, asrSetup, mattes, stabilizer, dubber, dubSetup, musicSetup, music, videoSetup, video, gpu, backup, packages, startup: { purged } };
+  return { paths, repos, settings, media, analysis, timelines, exporter, projects, tts, captions, asrSetup, mattes, stabilizer, dubber, dubSetup, musicSetup, music, videoSetup, video, gpu, backup, packages, perception, startup: { purged } };
 }

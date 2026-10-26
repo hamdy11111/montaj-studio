@@ -354,6 +354,15 @@ export function registerIpc({ getServices, getAgents = () => null, getWindow, ap
       for (const m of r.imported) S().media.generateDerivatives(m.id).then((x) => notifyAll("media:updated", x)).catch(() => {});
       return r.imported[0] || null;
     },
+
+    // ---------------------------------------------------------------- perception (Phase 4): one event timeline per media file
+    "perception.status": () => S().perception.status(),
+    "perception.analyze": (mid, o) => {
+      const m = S().repos.media.get(id(mid));
+      const q = obj(o);
+      return S().perception.analyze(m.path, { stages: q.stages ? arr(q.stages, "stages").map(String) : undefined, options: q.options ? obj(q.options) : {}, onProgress: (p) => notifyAll("perception:progress", { mediaId: m.id, ...p }) });
+    },
+    "perception.timeline": (mid) => S().perception.cached(S().repos.media.get(id(mid)).path),
   };
 
   function notifyAll(event, payload) {
