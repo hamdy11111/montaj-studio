@@ -147,6 +147,19 @@ where the baseline always opened at the start.
 | Qwen3.8-27B UD-Q4_K_M (GGUF) | `runtime\models\director\qwen3.8-27b\` | huggingface.co/unsloth/Qwen3.8-27B-GGUF (GGUF of the official Qwen/Qwen3.8-27B; Qwen publishes no GGUF), SHA-256 `322e194f…3482` = the repo's LFS hash | Apache-2.0 | 16.5 GB | ~18 GB with a 16k context |
 Qwen3.6-35B-A3B (perception's, `runtime\models\perception\qwen3.6-35b-a3b\`) is reused, nothing else downloaded.
 
+## Left on disk (after clean-up, 2026-10-26)
+| What | Where | Size |
+|---|---|---|
+| Qwen3.8-27B UD-Q4_K_M + its SHA-256 | `D:\capcut new\montaj-studio\runtime\models\director\qwen3.8-27b\` (shared by the worktrees' runtime junction; not copied) | 16 GB |
+| Final bench: 6 exports + quality/verify/plan/cut-sheet files per run | `D:\capcut new\montaj-bench\النتائج\director\rules\` and `local-qwen3.8-27b\` | 0.9 GB + 1.0 GB |
+| Earlier rounds (reports only, their videos deleted) | `…\director\rules-v1..v3\`, `local-qwen3.8-judge-v1\` | ~3 MB |
+| Planner comparison, scripts, `اقرأني.md` | `…\director\planners\`, `*.mjs` | < 1 MB |
+
+Deleted: the 26 intermediate exports of the earlier rounds (~3.1 GB on D:), the bench's temporary app profile
+`%TEMP%\montaj-director-ud` (1.8 GB on C:; `reverify.mjs` needed its transcript cache, so it can no longer re-check old
+runs — a new bench run recreates it), scratch audio clips. Qwen3.6-35B-A3B is perception's file, reused in place.
+Nothing was copied from `runtime\models\perception`; the raws were only read.
+
 ## Needs a practical test on the user's footage
 - The treatments and the chosen one, case by case (the cut sheets): is the hook the moment you would open on? The
   rubric is mine (measured, but its weights are a guess); the plan's "the critic agrees with you ≥ 70 %" test on 20 old
