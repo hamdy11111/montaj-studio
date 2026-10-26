@@ -15,6 +15,7 @@ import { parseJsonAnswer } from "./broll/llm.js";
 import { AppError } from "../core/validation.js";
 import { JUDGE_SYSTEM, JUDGE_SCHEMA } from "../core/critic.js";
 import { HOOK_KINDS, momentsTable } from "../core/treatments.js";
+import { BEATS, storyTable } from "../core/story.js";
 
 const exe = (p) => (process.platform === "win32" ? `${p}.exe` : p);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -50,8 +51,10 @@ export const PLAN_SCHEMA = {
     },
   },
 };
-export function planPrompt({ moments, links, durationS, targetS = null, kind = null }) {
-  return `Video: ${durationS.toFixed(0)} s${kind ? `, ${kind}` : ""}${targetS ? `; the user wants about ${targetS} s` : ""}. ${moments.length} moments.\n\nMoments (number | time | kind | role | energy | strength | reactions | what):\n${momentsTable(moments, links)}\n\nPropose the treatments.`;
+export function planPrompt({ moments, links, durationS, targetS = null, kind = null, storyOrder = null }) {
+  // Phase 8: footage shot out of order comes with its story order — the treatments start from it, not from the numbers.
+  const story = storyOrder?.length ? `\n\nStory order (the footage was shot or given out of order; this is the order the story is told in — build the treatments on it, a hook may still flash forward): ${storyOrder.join(", ")}` : "";
+  return `Video: ${durationS.toFixed(0)} s${kind ? `, ${kind}` : ""}${targetS ? `; the user wants about ${targetS} s` : ""}. ${moments.length} moments.\n\nMoments (number | time | kind | role | energy | strength | reactions | what):\n${momentsTable(moments, links)}${story}\n\nPropose the treatments.`;
 }
 /** The planner's answer → treatments for validateTreatment (core/treatments.js). */
 export function treatmentsFromAnswer(ans, source) {
@@ -60,6 +63,26 @@ export function treatmentsFromAnswer(ans, source) {
     hook: t.hook_kind && t.hook_kind !== "none" && t.hook_moment > 0 ? { kind: t.hook_kind, moment: t.hook_moment } : null,
     order: Array.isArray(t.order) ? t.order.map(Number).filter(Number.isInteger) : [], length: ["full", "medium", "short"].includes(t.length) ? t.length : "full", why: String(t.why || "").slice(0, 240),
   }));
+}
+
+// Phase 8: the story order of footage shot out of order — one call over numbered SEGMENTS (scenes), numbers only.
+export const STORY_SYSTEM = `You are the story editor of an automatic video editor for Egyptian Arabic creators (vlogs, challenges, pranks, cooking, interviews, explainers, comedy). The raw footage was shot out of order, or its clips were dropped in any order. You get it as numbered SEGMENTS (scenes): how long, which clip, where it happens, a rough guess of its story beat, and what is said (its first words … its last words). Put ALL the segments in the order that tells the story best, as a viewer should see it. A story: setup (greeting, who and where, what we are doing today) → the promise or the question (what the viewer will wait for) → build-up → the conflict or problem → the payoff / result → the ending (conclusion, thanks, goodbye, subscribe). In a talk (interview, explainer) follow the logic of the ideas: the introduction before the details, a question before its answer, a list in its order, the conclusion last; in a challenge or a recipe follow the steps of the action. Rules: use every segment number exactly once and invent none; keep every "Must" (a cause before its reaction, a promise before its payoff); segments of the same clip are usually in recording order. The beat guesses are only cue words — trust what is said. Write "why" in Egyptian Arabic (one sentence). Answer only JSON.`;
+export const STORY_SCHEMA = {
+  type: "object", additionalProperties: false, required: ["order", "beats", "why"],
+  properties: {
+    order: { type: "array", minItems: 1, maxItems: 300, items: { type: "integer", minimum: 1 }, description: "every segment number once, in story order" },
+    beats: { type: "array", maxItems: 300, items: { type: "object", additionalProperties: false, required: ["segment", "beat"], properties: { segment: { type: "integer", minimum: 1 }, beat: { enum: BEATS } } } },
+    why: { type: "string", maxLength: 300 },
+  },
+};
+export function storyPrompt({ segments, constraints = { hard: [], soft: [] }, kind = null, durationS = null, listOrder = null }) {
+  return `Footage: ${segments.length} segments${durationS ? `, ${Math.round(durationS)} s in all` : ""}${kind ? `, ${kind}` : ""}.\n\nSegments (number | length | clip | beat guess | reactions | place | what is said):\n${storyTable(segments, constraints, { listOrder })}\n\nGive the story order.`;
+}
+/** The story order a model proposes: { order: [segment numbers, 1-based, raw], beats: Map(index → beat), why, ms, tokens }. */
+export async function llmStoryOrder(llm, ctx) {
+  const r = await llm.json({ system: STORY_SYSTEM, prompt: storyPrompt(ctx), schema: STORY_SCHEMA, maxTokens: llm.think ? 12000 : 2500, temperature: 0 });
+  const beats = new Map((r.json?.beats || []).filter((b) => BEATS.includes(b.beat)).map((b) => [Number(b.segment) - 1, b.beat]));
+  return { order: Array.isArray(r.json?.order) ? r.json.order.map(Number) : [], beats, why: String(r.json?.why || "").slice(0, 300), ms: r.ms, tokens: r.tokens, raw: r.json ? null : r.text.slice(0, 500) };
 }
 
 export const GRAPHICS_SYSTEM = `You pick on-screen graphics for an Egyptian Arabic video. For each moment (a sentence said, or a wordless action) you get the eligible templates already filled from what was said. Rank at most 3 templates per moment, best first, by how well the graphic serves the MEANING of the moment (a number becomes a counter, a list a montage, a punchline a stamp, a laugh a sticker…), never because a word merely appears. Skip moments where nothing fits (empty list). Answer only JSON.`;

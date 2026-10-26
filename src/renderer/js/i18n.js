@@ -668,6 +668,22 @@ const D = {
   "qa.links.apart": ["Moment {cause} and its reaction {reaction} are not side by side", "لحظة {cause} ورد فعلها {reaction} مش جنب بعض"],
   "qa.links.lost": ["The reaction in moment {reaction} is kept without its cause (moment {cause})", "رد الفعل في لحظة {reaction} فضل من غير سببه (لحظة {cause})"],
   "qa.hook.empty": ["Nothing said or happening in the first {sec} s", "مفيش كلام ولا حاجة بتحصل في أول {sec} ث"],
+  // Phase 8 — the story order for footage shot out of order
+  "dir.story": ["Story order", "ترتيب القصة"],
+  "dir.storyAuto": ["Automatic (with two clips or more)", "تلقائي (لو فيه كليبين أو أكتر)"],
+  "dir.storyOn": ["Build the story (also one long raw)", "رتّب الحكاية (ولو خام واحد طويل)"],
+  "dir.storyOff": ["Keep the timeline order", "سيبه بترتيب التايملاين"],
+  "dir.folder": ["A folder of clips", "فولدر كليبات"],
+  "dir.folderHint": ["Puts every clip of a folder on the timeline; the story order arranges them", "بيحط كل كليبات الفولدر على التايملاين، وترتيب القصة بيرتّبهم"],
+  "dir.folderImporting": ["Importing the clips…", "بنستورد الكليبات…"],
+  "dir.folderDone": ["{n} clip(s) on the timeline — press Start", "{n} كليب على التايملاين — دوس ابدأ"],
+  "dir.sheetStory": ["Story order ({source}): {list}", "ترتيب القصة ({source}): {list}"],
+  "dir.sheetScene": ["Scene {k} (clip {clip}, {at} s, {len} s): {why}{text}", "مشهد {k} (كليب {clip}، {at} ث، {len} ث): {why}{text}"],
+  "dir.sheetShooting": ["Alternative — the shooting order: {list}", "البديل — بترتيب التصوير: {list}"],
+  "dir.sheetStorySame": ["The story order is the shooting order", "ترتيب القصة هو نفسه ترتيب التصوير"],
+  "dir.stage.story": ["Story order", "ترتيب القصة"],
+  "dec.story": ["Story order of {segments} scenes ({source}): {order}", "ترتيب القصة لـ{segments} مشهد ({source}): {order}"],
+  "dec.storySame": ["{segments} scenes: the story order is the shooting order", "{segments} مشهد: ترتيب القصة هو نفسه ترتيب التصوير"],
 };
 
 let lang = "ar";
