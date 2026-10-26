@@ -235,7 +235,7 @@ junctions or links inside, no reference in `src/`, `bench/`, `scripts/`.
 - Intermediate exports whose numbers equal phase 7's: `rules\02/03/04/06.mp4` (~597 MB) and
   `keep-ambience\03/04.mp4` (~355 MB). Phase 7's own videos stay in `director\rules\`.
 - My first, stopped bench run's partial files (01's export and plan).
-- The merged-code check's two exports (same numbers as `keep-ambience` / `05`, which are kept) and its profile
+- The merged-code check's two exports (same numbers as `keep-ambience\02-تحدي.mp4` / `05-شرح.mp4`, which are kept) and its profile
   `%TEMP%\montaj-director2-merged-ud`.
 
 **Kept** (`montaj-bench\النتائج\director2\`, 0.93 GB):
