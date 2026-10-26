@@ -7,6 +7,7 @@ const { contextBridge, ipcRenderer, webUtils } = require("electron");
 const EVENTS = new Set(["export:progress", "export:done", "export:error", "media:updated", "app:openFile", "timeline:changed", "agents:approval", "agents:job", "agents:connected", "agents:activity",
   "director:progress", "derived:progress", "matte:ready", "stab:ready", "asr:setup", "dub:progress", "dub:setup", "update:status", "music:setup", "music:job", "music:engine", "video:setup", "video:job", "video:engine",
   "imagegen:engine"]);
+EVENTS.add("perception:progress"); // perception (Phase 4)
 
 contextBridge.exposeInMainWorld("api", {
   async call(method, ...args) {

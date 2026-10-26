@@ -29,6 +29,8 @@ import { SfxLibraryService } from "./sfxLibrary.js";
 import { BrollService } from "./brollService.js";
 import { ImagegenService } from "./imagegenService.js";
 import { defaultBindings } from "../core/shortcuts.js";
+import { binaries } from "./ffmpeg.js";
+import { PerceptionService, makeGpuLock } from "./perception/perceptionService.js";
 
 export async function createServices({ root, appVersion = "1.0.0", notify = () => {}, log = () => {} }) {
   const paths = makePaths(root);
@@ -76,7 +78,11 @@ export async function createServices({ root, appVersion = "1.0.0", notify = () =
   const sfxLib = new SfxLibraryService({ dir: path.join(libDir, "sfx"), userData: paths.root, log });
   const broll = new BrollService({ dir: path.join(libDir, "broll-index"), userData: paths.root, gpu, log });
   const imagegen = new ImagegenService({ paths, gpu, log, notify });
+  // Perception (Phase 4): nothing runs until asked; its models take the shared GPU queue one stage at a time.
+  let ff = {};
+  try { ff = binaries(); } catch (e) { log("perception: ffmpeg missing", e.message); }
+  const perception = new PerceptionService({ userData: root, cacheDir: path.join(paths.cache, "perception"), ffmpeg: ff.ffmpeg, ffprobe: ff.ffprobe, gpuLock: makeGpuLock({ queue: gpu }), log: (l) => log("perception", l) });
   const purged = projects.purgeExpired();
   if (settings.get("draft").autoBackup) { try { backup.autoBackup(); } catch (e) { log("auto backup failed", e.message); } }
-  return { paths, repos, settings, media, analysis, timelines, exporter, projects, tts, captions, asrSetup, mattes, stabilizer, dubber, dubSetup, musicSetup, music, videoSetup, video, gpu, backup, packages, sfxLib, broll, imagegen, startup: { purged } };
+  return { paths, repos, settings, media, analysis, timelines, exporter, projects, tts, captions, asrSetup, mattes, stabilizer, dubber, dubSetup, musicSetup, music, videoSetup, video, gpu, backup, packages, sfxLib, broll, imagegen, perception, startup: { purged } };
 }

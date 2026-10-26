@@ -399,6 +399,14 @@ export function registerIpc({ getServices, getAgents = () => null, getWindow, ap
     "imagegen.stop": () => S().imagegen.stop(),
     "mattes.pointTracks": (mid, points, o) => S().mattes.pointTracks(id(mid), arr(points, "points"), obj(o)),
     "mattes.objectTrack": (mid, concept, o) => S().mattes.objectTrack(id(mid), str(concept, "concept"), obj(o)),
+    // ---------------------------------------------------------------- perception (Phase 4): one event timeline per media file
+    "perception.status": () => S().perception.status(),
+    "perception.analyze": (mid, o) => {
+      const m = S().repos.media.get(id(mid));
+      const q = obj(o);
+      return S().perception.analyze(m.path, { stages: q.stages ? arr(q.stages, "stages").map(String) : undefined, options: q.options ? obj(q.options) : {}, onProgress: (p) => notifyAll("perception:progress", { mediaId: m.id, ...p }) });
+    },
+    "perception.timeline": (mid) => S().perception.cached(S().repos.media.get(id(mid)).path),
   };
   // The VFX library service of this window's services (created on first use).
   let vfxLibInstance = null;
