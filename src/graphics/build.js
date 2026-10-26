@@ -27,7 +27,8 @@ export async function buildRemotion({ onProgress = () => {} } = {}) {
   const publicDir = stagePublic();
   try {
     fs.rmSync(REMOTION_OUT, { recursive: true, force: true });
-    await bundle({ entryPoint: path.join(HERE, "remotion", "index.jsx"), outDir: REMOTION_OUT, publicDir, enableCaching: true, onProgress });
+    // No source maps: the installer leaves *.map out, and the renderer would look for the one bundle.js names.
+    await bundle({ entryPoint: path.join(HERE, "remotion", "index.jsx"), outDir: REMOTION_OUT, publicDir, enableCaching: true, onProgress, webpackOverride: (c) => ({ ...c, devtool: false }) });
   } finally {
     fs.rmSync(publicDir, { recursive: true, force: true });
   }

@@ -132,7 +132,7 @@ Plan: `D:\capcut new\PLAN_editor_and_graphics.md` v3, item 10 and §5.
 
 ## Tests
 
-- `npm test`: **RESULT_PLACEHOLDER**.
+- `npm test`: **136/136 pass** (191 s).
   - `graphics.test.js` has 15 tests, including a real render that is measured, band-checked and composited.
   - `vfx.test.js` has 4 tests.
 - `node --test tests/e2e/graphics.e2e.test.mjs`: **pass**. It runs the real app:
@@ -140,8 +140,29 @@ Plan: `D:\capcut new\PLAN_editor_and_graphics.md` v3, item 10 and §5.
   - the Remotion Player layer shows "فراخ" over the canvas;
   - the export composites the rendered clips (a frame difference against the source); there are no page or CSP
     errors.
+- The same e2e against the **packaged app**: `npm run pack`, then
+  `MONTAJ_E2E_EXE="…\dist\win-unpacked\Montaj Studio.exe"`. Result: **pass**.
+  - The worker forks from the asar with `ELECTRON_RUN_AS_NODE`, the bundle and compositor are unpacked, the browser
+    is in `resourcesuntimeemotion`, and nothing is downloaded.
+  - The first packaged run failed because Remotion looks for `bundle.js.map` and the installer drops `*.map`. The
+    bundle is now built without source maps.
 - Speed (`tests/bench/graphicsExport.bench.mjs`): 1080×1920, 30 s, 10 graphics × 3 s covering the whole video,
-  H.264 1080p export in the app, the fastest of 3 rounds. **BENCH_PLACEHOLDER**
+  H.264 1080p export in the app, the fastest of 3 rounds, on a quiet i9-13900K:
+
+  | Case | Whole export | Graphics share (above the 1.9 s plain export) |
+  |---|---|---|
+  | No graphics | 1.9 s | — |
+  | Canvas graphics (PNG per frame state) | 9.7 s | 7.8 s |
+  | Remotion layer, cold (nothing cached) | 14.5 s | 12.7 s |
+  | Remotion layer, warm (cached clips) | 3.7 s | 1.9 s |
+
+  The cold render is 1.6× the old path: it captures 900 animated 1080×1920 frames, about 71 fps after the speed-ups.
+  The old path only drew each graphic's held frame once. Before the band and packing speed-ups the cold render took
+  48.5 s on the same test (on a busier machine).
+  - Warm, which is every re-export after an edit that leaves a graphic unchanged, it is 4× faster than the old path.
+  - The editor never waits for it: the preview is the live Player.
+  - Raw numbers: `D:\capcut new\montaj-bench\النتائج\graphics\bench\export-bench.json`, with one export frame per
+    path next to it.
 - Sample videos, with a contact sheet and README listing what is when: `D:\capcut new\montaj-bench\النتائج\graphics\`.
   - `01-punchy-vertical` on the comedy case
   - `02-numbers-vertical` and `03-story-vertical` on the vlog
@@ -174,8 +195,8 @@ The user can drop their own clips into a category folder and run `vfx.rescan`.
 - The preview layer while playing long timelines with many graphics: each visible graphic is one Player.
   - Known approximation: in the preview, kit graphics are drawn above every canvas layer.
   - Text behind the person is not supported for kit graphics yet: they render on top.
-- The packaged installer (`npm run dist`). The asar paths are coded for (unpacked bundle, compositor, worker fork with
-  `ELECTRON_RUN_AS_NODE`, browser under `resources/runtime`), but **no packaged build was run**.
+- The NSIS installer itself (`npm run dist`) was not built. The unpacked packaged app (`npm run pack` →
+  `dist\win-unpacked`) **was** tested (see Tests).
 - Speed on a busy machine: the CPU was at 100 % from other sessions during part of the runs.
 
 ## Needs from other phases / the coordinator

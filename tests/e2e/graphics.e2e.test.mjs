@@ -42,7 +42,9 @@ before(async () => {
   fs.mkdirSync(mediaDir, { recursive: true });
   fs.mkdirSync(exportDir, { recursive: true });
   await run(binaries().ffmpeg, ["-hide_banner", "-y", "-f", "lavfi", "-i", "testsrc2=size=640x360:rate=30:duration=4", "-f", "lavfi", "-i", "sine=frequency=440:duration=4", "-shortest", "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac", path.join(mediaDir, "a.mp4")], { timeoutMs: 120_000 });
-  app = await electron.launch({ args: [APP], cwd: APP, env: { ...process.env, MONTAJ_USER_DATA: ud, REALM_DISABLE_ANALYTICS: "1" } });
+  // MONTAJ_E2E_EXE: run the packaged app instead (e.g. dist\win-unpacked\Montaj Studio.exe after npm run pack).
+  const exe = process.env.MONTAJ_E2E_EXE;
+  app = await electron.launch({ ...(exe ? { executablePath: exe, args: [] } : { args: [APP] }), cwd: exe ? path.dirname(exe) : APP, env: { ...process.env, MONTAJ_USER_DATA: ud, REALM_DISABLE_ANALYTICS: "1" } });
   win = await app.firstWindow();
   win.on("pageerror", (e) => pageErrors.push(e.message));
   win.on("console", (m) => { if (m.type() === "error") pageErrors.push(m.text()); });
