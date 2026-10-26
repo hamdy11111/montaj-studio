@@ -168,10 +168,15 @@ export async function llmTreatments(llm, ctx) {
   return { treatments: treatmentsFromAnswer(r.json, llm.info?.id === "claude" ? "claude" : "local"), ms: r.ms, tokens: r.tokens, raw: r.json ? null : r.text.slice(0, 500) };
 }
 
-/** A judge for core/critic.js rankTreatments. */
-export function llmJudge(llm) {
+/**
+ * A judge for core/critic.js rankTreatments. ask: { durationS (the raw), targetS (a reel's length, or null: a full
+ * edit) } — said to the judge, which otherwise picks the shortest cut almost every time ("watched to the end"): on the
+ * six bench cases Qwen3.8 chose a 47–55 s version of 3–5 min videos nobody asked to shorten.
+ */
+export function llmJudge(llm, { durationS = null, targetS = null } = {}) {
+  const ask = targetS ? `The user asked for a reel of about ${Math.round(targetS)} s.` : `The user asked for an edit of the whole video${durationS ? ` (the raw is ${Math.round(durationS)} s)` : ""}, not a short reel: prefer the cut that keeps the story and its best moments with a good pace; never prefer a cut only because it is shorter.`;
   return async ({ aText, bText }) => {
-    const r = await llm.json({ system: JUDGE_SYSTEM, prompt: `Cut A:\n${aText}\n\nCut B:\n${bText}\n\nWhich cut is better?`, schema: JUDGE_SCHEMA, maxTokens: 300, temperature: 0 });
+    const r = await llm.json({ system: JUDGE_SYSTEM, prompt: `${ask}\n\nCut A:\n${aText}\n\nCut B:\n${bText}\n\nWhich cut is better?`, schema: JUDGE_SCHEMA, maxTokens: 300, temperature: 0 });
     return r.json || { winner: "tie", why: "no answer" };
   };
 }

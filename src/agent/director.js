@@ -242,7 +242,7 @@ export async function autoEdit(ctx, timelineId, opts = {}, job = null) {
     // A treatment that fails a guard never wins over one that passes.
     const passing = items.filter((x) => x.guards.ok && (x.qa?.ok ?? true));
     const pool = passing.length ? passing : items;
-    const ranked = await rankTreatments(pool, { judge: llmJudge ? llmJudge(planner) : null, moments });
+    const ranked = await rankTreatments(pool, { judge: llmJudge ? llmJudge(planner, { durationS: durationUs / US, targetS: opts.targetSec || null }) : null, moments });
     const chosenId = opts.treatment && items.some((x) => x.id === opts.treatment) ? opts.treatment : ranked.ranking[0].id;
     const chosen = items.find((x) => x.id === chosenId);
     // 4. Graphics and sounds by meaning on the winner (a second, deterministic pass of the executor).

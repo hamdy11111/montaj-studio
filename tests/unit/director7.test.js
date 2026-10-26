@@ -11,7 +11,7 @@ import { verifyPlan, verifyOutput, expectedSpeech, parseFfmpegChecks, cutSheet, 
 import { directPlan, withSpans, toPlanV2 } from "../../src/core/director.js";
 import { retakeGroups } from "../../src/core/speech.js";
 import { EDIT_PLAN_SCHEMA } from "../../src/core/editPlan.js";
-import { treatmentsFromAnswer, llmGraphicsRanker, ClaudeDirectorLLM, PLAN_SCHEMA, planPrompt } from "../../src/services/directorLLM.js";
+import { treatmentsFromAnswer, llmGraphicsRanker, llmJudge, ClaudeDirectorLLM, PLAN_SCHEMA, planPrompt } from "../../src/services/directorLLM.js";
 import { fileGpuLock } from "../../src/agent/director.js";
 import { US } from "../../src/core/util.js";
 
@@ -317,4 +317,23 @@ test("the machine-wide GPU lock runs its script as Node even inside Electron (el
   await release(); await release();
   assert.deepEqual(seen.map((x) => x.args.slice(1, 3)), [["acquire", "director"], ["release", "director"]], "released once");
   assert.ok(seen.every((x) => x.env.ELECTRON_RUN_AS_NODE === "1" && x.bin === process.execPath));
+});
+
+test("the judge is told what was asked: a full edit (never shorter for its own sake) or a reel of a length", async () => {
+  const prompts = [];
+  const fake = { json: async ({ prompt }) => { prompts.push(prompt); return { json: { winner: "A", why: "x" } }; } };
+  await llmJudge(fake, { durationS: 300 })({ aText: "A", bText: "B" });
+  await llmJudge(fake, { targetS: 60 })({ aText: "A", bText: "B" });
+  assert.match(prompts[0], /whole video \(the raw is 300 s\).*never prefer a cut only because it is shorter/s);
+  assert.match(prompts[1], /a reel of about 60 s/);
+});
+
+test("a cut the treatment adds never touches a kept word (found by the verifier on the short cuts)", () => {
+  const words = [W("الاكل", 1.0, 1.6), W("جاهز.", 1.6, 2.2), W("ودي", 2.9, 3.2), W("جملة", 3.2, 3.6), W("زيادة.", 3.6, 4.2), W("وبعدين", 5.0, 5.5), W("خلصنا.", 5.5, 6.1)];
+  const ms = buildMoments({ words, events: [], durationUs: 7 * US });
+  const drop = ms.find((m) => m.kind === "speech" && words[m.w0].text === "ودي");
+  const spec = executionSpec({ order: ms.filter((m) => m !== drop).map((m) => m.n), hook: null, length: "full" }, ms, words);
+  const kept = words.filter((w) => !["ودي", "جملة", "زيادة."].includes(w.text));
+  for (const c of spec.cutSpans) for (const w of kept) assert.ok(c.toUs <= w.startUs - 80_000 || c.fromUs >= w.endUs + 120_000, `cut ${c.fromUs}–${c.toUs} touches «${w.text}»`);
+  assert.ok(spec.cutSpans.some((c) => c.fromUs <= 2.9 * US && c.toUs >= 4.2 * US), "the dropped sentence is still cut");
 });

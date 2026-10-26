@@ -18,6 +18,7 @@ import { storyRole, ROLE_VALUE } from "./reel.js";
 import { US } from "./util.js";
 
 const S = (s) => Math.round(s * US);
+const WORD_TAIL = 120_000, WORD_HEAD = 80_000; // what a kept word keeps around it when the treatment cuts next to it
 const r2 = (x) => Math.round(x * 100) / 100;
 
 // ------------------------------------------------------------------ perception events on the virtual axis
@@ -421,6 +422,20 @@ export function executionSpec(treatment, moments, words, { angleEveryUs = 2_500_
     // A laugh, applause or a scream in the action gets a sound of the same meaning (the library picks the file).
     if (r && r.t >= a && r.t < b) reactionSfx.push({ atUs: r.t, sound: r.type === "applause" ? "ding" : "pop", query: { laughter: "قفشة", applause: "هيصة", scream: "صدمة", gasp: "صدمة" }[r.type], mood: r.type === "laughter" ? "comic" : r.type === "applause" ? "joy" : "shock", why: `${r.type} in moment ${m.n}` });
   }
+  // A cut the treatment adds never touches a kept word: a moment's edge is the previous sentence's recognised last-word
+  // end, and cutting there ate that word's release (the verifier heard it: in the short cuts the words at the joints
+  // came back 34–45 % of the time against 78–80 % for the others). The kept words keep their pads.
+  const keptWords = words.filter((_, i) => !dropWords.has(i));
+  const safe = (c) => {
+    let { fromUs: a, toUs: b } = c;
+    for (const w of keptWords) {
+      if (w.startUs < a + 1 && w.endUs + WORD_TAIL > a) a = w.endUs + WORD_TAIL;
+      if (w.endUs > b - 1 && w.startUs - WORD_HEAD < b) b = w.startUs - WORD_HEAD;
+    }
+    return b - a > 40_000 ? { ...c, fromUs: Math.round(a), toUs: Math.round(b) } : null;
+  };
+  const safeCuts = cutSpans.map(safe).filter(Boolean);
+  cutSpans.splice(0, cutSpans.length, ...safeCuts);
   const order = treatment.order.map((n) => [moments[n - 1].s, moments[n - 1].e]);
   let hook = null;
   if (treatment.hook && treatment.hook.kind !== "none") {
