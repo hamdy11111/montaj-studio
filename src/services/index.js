@@ -31,6 +31,7 @@ import { ImagegenService } from "./imagegenService.js";
 import { defaultBindings } from "../core/shortcuts.js";
 import { binaries } from "./ffmpeg.js";
 import { PerceptionService, makeGpuLock } from "./perception/perceptionService.js";
+import { TakeService } from "./takes/takeService.js";
 
 export async function createServices({ root, appVersion = "1.0.0", notify = () => {}, log = () => {} }) {
   const paths = makePaths(root);
@@ -82,7 +83,10 @@ export async function createServices({ root, appVersion = "1.0.0", notify = () =
   let ff = {};
   try { ff = binaries(); } catch (e) { log("perception: ffmpeg missing", e.message); }
   const perception = new PerceptionService({ userData: root, cacheDir: path.join(paths.cache, "perception"), ffmpeg: ff.ffmpeg, ffprobe: ff.ffprobe, gpuLock: makeGpuLock({ queue: gpu }), log: (l) => log("perception", l) });
+  // Best take (Phase 5): scores the takes of every retake group; reads perception's cached timelines; the AI judge
+  // (close calls only) takes the shared GPU queue. The user's picks and learned weights live in the data folder.
+  const takes = new TakeService({ userData: root, cacheDir: path.join(paths.cache, "takes"), storeDir: path.join(root, "takes-picks"), ffmpeg: ff.ffmpeg, ffprobe: ff.ffprobe, perception, gpuLock: makeGpuLock({ queue: gpu, name: "takes" }), log: (l) => log("takes", l) });
   const purged = projects.purgeExpired();
   if (settings.get("draft").autoBackup) { try { backup.autoBackup(); } catch (e) { log("auto backup failed", e.message); } }
-  return { paths, repos, settings, media, analysis, timelines, exporter, projects, tts, captions, asrSetup, mattes, stabilizer, dubber, dubSetup, musicSetup, music, videoSetup, video, gpu, backup, packages, sfxLib, broll, imagegen, perception, startup: { purged } };
+  return { paths, repos, settings, media, analysis, timelines, exporter, projects, tts, captions, asrSetup, mattes, stabilizer, dubber, dubSetup, musicSetup, music, videoSetup, video, gpu, backup, packages, sfxLib, broll, imagegen, perception, takes, startup: { purged } };
 }
