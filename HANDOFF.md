@@ -107,6 +107,23 @@ one link per reaction is `best`.
 - By default only «متأكد» links are protected / checked (`includeUnsure: true` widens it); show the «مش متأكد» ones
   on the cut sheet (`label_ar`).
 
+**Mapping to the shape the `director` adapter expects** (its `director-notes.md`, "montaj.links/1"), from
+`directorView(doc)` (seconds, `scale` 1):
+
+| director's field | here |
+|---|---|
+| `links[].cause {t0, t1, text, eventIds}` | `links[].cause {t0, t1, text}`; event ids: `doc.causes[id].evidence` |
+| `links[].reaction {t0, t1, type, eventIds}` | `links[].reaction {t0, t1, kind, kinds}` — `type` = `kind` (laughter, applause, cheer, scream, gasp, verbal, sudden_silence, face_change, loud_spike, pitch_spike); event ids: `doc.reactions[id].evidence[].id` |
+| `links[].direction` | same (`after` = cause first, `before` = reaction first) |
+| `links[].gapS` | `gap` (seconds when `scale` 1) |
+| `links[].confidence` | same |
+| `links[].unsure` | `status !== "sure"` (also `label_ar`); reactions the check judged not real: `reaction.real === false` |
+| `links[].why` | `doc.links[].checks.semantic.reason` |
+| `roles[] {t0, t1, role, confidence}` | `moments[] {t0, t1, role, roleConfidence}`; role `build` = `build_up`, the others are the same words |
+| `promises[] {t0, t1, text, payoff}` | `doc.causes` with `kind: "promise"`; the payoff = the reaction of a link whose cause is that promise |
+
+`directorView` returns only the best link of each reaction; the alternatives are in `doc.links` (`best: false`).
+
 Service: `LinkService.cached(mediaPath | timeline)` → the last document; `analyze(...)` makes one (needs perception's
 timeline in its cache). Cache: `<runtime>/links-cache/<media hash>/` (`links.json`, `links.<engine>.json`,
 `answers.<engine>.json` — one cached answer per exact question, so re-scoring with new knobs needs no GPU).
