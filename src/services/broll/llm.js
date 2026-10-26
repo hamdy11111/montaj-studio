@@ -18,9 +18,10 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 export function findVlm(runtime) {
   const m = path.join(runtime, "models");
   const pick = (dir, re) => { try { const f = fs.readdirSync(dir).filter((x) => re.test(x)).sort()[0]; return f ? path.join(dir, f) : null; } catch { return null; } };
-  // perception keeps it in a folder of its own (runtime/models/perception/qwen3.6-35b-a3b); the top level is looked at too
+  // perception keeps it in a folder of its own (runtime/models/perception/qwen3.6-35b-a3b, maybe a junction made by the
+  // AI set-up's import); the top level is looked at too
   const per = path.join(m, "perception");
-  const dirs = [per, ...(() => { try { return fs.readdirSync(per, { withFileTypes: true }).filter((d) => d.isDirectory() && /qwen3\.6/i.test(d.name)).map((d) => path.join(per, d.name)); } catch { return []; } })()];
+  const dirs = [per, ...(() => { try { return fs.readdirSync(per).filter((n) => /qwen3\.6/i.test(n) && fs.statSync(path.join(per, n)).isDirectory()).map((n) => path.join(per, n)); } catch { return []; } })()];
   const q36 = dirs.map((d) => ({ name: "Qwen3.6-35B-A3B", model: pick(d, /^Qwen3\.6-35B-A3B.*Q4_K_M.*\.gguf$/i) || pick(d, /^Qwen3\.6-35B-A3B.*\.gguf$/i), mmproj: pick(d, /mmproj.*(3\.6|F16|BF16).*\.gguf$/i) }));
   const candidates = [
     ...q36,
