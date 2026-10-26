@@ -143,9 +143,7 @@ Plan: `D:\capcut new\PLAN_editor_and_graphics.md` v3, item 10 and §5.
 - The same e2e against the **packaged app**: `npm run pack`, then
   `MONTAJ_E2E_EXE="…\dist\win-unpacked\Montaj Studio.exe"`. Result: **pass**.
   - The worker forks from the asar with `ELECTRON_RUN_AS_NODE`, the bundle and compositor are unpacked, the browser
-    is in `resources
-untime
-emotion`, and nothing is downloaded.
+    is in `resources\runtime\remotion`, and nothing is downloaded.
   - The first packaged run failed because Remotion looks for `bundle.js.map` and the installer drops `*.map`. The
     bundle is now built without source maps.
 - Speed (`tests/bench/graphicsExport.bench.mjs`): 1080×1920, 30 s, 10 graphics × 3 s covering the whole video,
