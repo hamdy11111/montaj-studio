@@ -4,6 +4,7 @@
 #   2. the pinned requirements are installed at their versions (missing or other versions are listed);
 #   3. the layer's imports work (each module imported in turn; the first error per module is kept).
 # Usage: python -I venv_check.py <requirements.txt> <module,module,…>   →  one JSON line on stdout.
+import csv
 import json
 import os
 import re
@@ -21,19 +22,27 @@ def check_files(dist, shared):
     installed distribution also lists (opencv-python-headless and opencv-contrib-python both write cv2/; two packages
     shipping docs/conf.py) belongs to whichever was installed last: not a breakage."""
     bad = []
-    for f in dist.files or []:
-        s = str(f)
-        if "__pycache__" in s or s.endswith(".pyc") or f.size is None or s in shared:
+    for s, size in record(dist):
+        if "__pycache__" in s or s.endswith(".pyc") or not size or s in shared:
             continue
-        p = f.locate()
         try:
-            if os.path.getsize(p) != int(f.size):
+            if os.path.getsize(dist.locate_file(s)) != int(size):
                 bad.append(s)
         except OSError:
             bad.append(s)
         if len(bad) >= 5:
             break
     return bad
+
+
+def record(dist):
+    """(path, size) of every RECORD row, read directly: Distribution.files leaves out the files that no longer exist,
+    which are exactly the ones this check is looking for."""
+    try:
+        text = dist.read_text("RECORD") or ""
+    except OSError:
+        return []
+    return [(row[0], row[2] if len(row) > 2 else "") for row in csv.reader(text.splitlines()) if row]
 
 
 def main():
@@ -43,8 +52,7 @@ def main():
     dists = [d for d in md.distributions() if d.metadata["Name"]]
     seen, shared = set(), set()
     for dist in dists:
-        for f in dist.files or []:
-            s = str(f)
+        for s, _ in record(dist):
             (shared if s in seen else seen).add(s)
     for dist in dists:
         name = dist.metadata["Name"]
@@ -64,14 +72,22 @@ def main():
             missing.append(m.group(1))
         elif want and have != want and have.split("+")[0] != want.split("+")[0]:
             other.append({"name": m.group(1), "want": want, "have": have})
-    errors = {}
+    errors, lost = {}, set()
+    # Some wheels do not list their own package in RECORD (opensmile 2.6.0 lists only docs/ and tests/), so a deleted
+    # package folder shows only as a failed import: the distribution that provides the missing module is named here.
+    providers = md.packages_distributions()
     for mod in modules:
         try:
             importlib.import_module(mod)
+        except ModuleNotFoundError as e:
+            errors[mod] = f"{type(e).__name__}: {e}"[:300]
+            lost.update(providers.get((e.name or mod).split(".")[0], []))
         except BaseException as e:  # noqa: BLE001 — a broken native module can raise anything
             errors[mod] = f"{type(e).__name__}: {e}"[:300]
+    named = {b["name"] for b in broken}
+    lost_dists = [{"name": n, "version": installed.get(norm(n))} for n in sorted(lost) if n not in named and installed.get(norm(n))]
     print(json.dumps({"python": sys.version.split()[0], "broken": broken, "missing": missing, "other": other,
-                      "imports": errors, "ok": not (broken or missing or other or errors)}))
+                      "imports": errors, "lost": lost_dists, "ok": not (broken or missing or other or errors)}))
 
 
 if __name__ == "__main__":

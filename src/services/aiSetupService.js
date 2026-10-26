@@ -155,12 +155,13 @@ export class AiSetupService extends EngineSetupService {
   async checkEnv(env, { python = this.envPython(env), signal } = {}) {
     if (!fs.existsSync(python)) return { ok: false, notInstalled: true };
     const req = path.join(AI_SETUP_DIR, ENVS[env].requirements);
-    let out = "";
+    let out = "", line = null;
     try {
-      out = await runProc(python, ["-I", path.join(AI_SETUP_DIR, "venv_check.py"), req, ENVS[env].imports.join(",")], { signal });
+      // The report is one JSON line on stdout; it can be long, so the whole line is kept (runProc returns a tail).
+      out = await runProc(python, ["-I", path.join(AI_SETUP_DIR, "venv_check.py"), req, ENVS[env].imports.join(",")], { signal, onLine: (l) => { if (l.startsWith("{")) line = l; } });
     } catch (e) { const h = { ok: false, error: String(e?.details?.output || e.message).slice(-1500) }; if (python === this.envPython(env)) this.saveHealth(env, h); return h; }
-    const line = out.split(/\r?\n/).reverse().find((l) => l.startsWith("{"));
-    const h = line ? JSON.parse(line) : { ok: false, error: out.slice(-1500) };
+    let h;
+    try { h = JSON.parse(line); } catch { h = { ok: false, error: out.slice(-1500) }; }
     if (python === this.envPython(env)) this.saveHealth(env, h);
     return h;
   }
@@ -242,8 +243,9 @@ export class AiSetupService extends EngineSetupService {
     if (h.ok) return { ...h, repaired: [] };
     const text = fs.readFileSync(path.join(AI_SETUP_DIR, E.requirements), "utf8");
     const cuda = hasNvidia();
-    const wheels = E.torch && cuda && (h.broken || []).some((b) => /^torch(audio|vision)?$/i.test(b.name)) ? await this.torchWheels(signal, 0.1, 0.3) : {};
-    const lines = (h.broken || []).map((b) => (wheels[b.name.toLowerCase()] ? `${b.name.toLowerCase()} @ ${wheels[b.name.toLowerCase()]}` : requirementOf(text, b.name) || `${b.name}==${b.version}`));
+    const wheels = E.torch && cuda && [...(h.broken || []), ...(h.lost || [])].some((b) => /^torch(audio|vision)?$/i.test(b.name)) ? await this.torchWheels(signal, 0.1, 0.3) : {};
+    // Packages whose files are gone (by RECORD), and those providing a module that no longer imports at all.
+    const lines = [...(h.broken || []), ...(h.lost || [])].map((b) => (wheels[b.name.toLowerCase()] ? `${b.name.toLowerCase()} @ ${wheels[b.name.toLowerCase()]}` : requirementOf(text, b.name) || `${b.name}==${b.version}`));
     const extra = E.torch && cuda ? ["--extra-index-url", TORCH_INDEX] : [];
     this.emit({ step: "packages", progress: 0.5 });
     if (lines.length) {
