@@ -207,6 +207,9 @@ export function buildExport(tl, o) {
       if (/\.ffconcat$/i.test(file)) { // word-timed caption: a timed image sequence from the segment start
         const ii = addInput(["-f", "concat", "-safe", "0", "-i", file]);
         chains.push(`[${ii}:v]format=rgba,fps=${FPS},${at(visStart)}${toWindow}[${out}]`);
+      } else if (/\.(mov|webm|mkv)$/i.test(file)) { // Remotion graphic: a transparent clip from the segment start
+        const ii = addInput(["-i", file]);
+        chains.push(`[${ii}:v]format=rgba,fps=${FPS},${at(visStart)}${toWindow}[${out}]`);
       } else if (/\.gif$/i.test(file)) { // animated: keep its own clock from the visible start
         const ii = addInput(["-ignore_loop", "0", "-t", String(s(visEnd - visStart)), "-i", file]);
         chains.push(`[${ii}:v]fps=${FPS},${at(visStart)}${toWindow}[${out}]`);

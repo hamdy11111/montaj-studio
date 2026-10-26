@@ -24,10 +24,15 @@
     "traceability": "node scripts/traceability.js",
     "setup:asr": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/setup-asr.ps1",
     "pack": "electron-builder --dir",
-    "dist": "electron-builder --win nsis --publish never"
+    "dist": "electron-builder --win nsis --publish never",
+    "setup:graphics": "node src/graphics/setup.js",
+    "build:graphics": "node src/graphics/build.js",
+    "predist": "node src/graphics/build.js",
+    "prepack": "node src/graphics/build.js"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "1.32.0",
+    "@remotion/renderer": "4.0.538",
     "ajv": "8.17.1",
     "electron-updater": "6.8.11",
     "ffmpeg-static": "5.3.0",
@@ -36,9 +41,28 @@
     "zod": "4.6.5"
   },
   "devDependencies": {
+    "@remotion/animated-emoji": "4.0.538",
+    "@remotion/bundler": "4.0.538",
+    "@remotion/fonts": "4.0.538",
+    "@remotion/gsap": "4.0.538",
+    "@remotion/layout-utils": "4.0.538",
+    "@remotion/lottie": "4.0.538",
+    "@remotion/motion-blur": "4.0.538",
+    "@remotion/noise": "4.0.538",
+    "@remotion/paths": "4.0.538",
+    "@remotion/player": "4.0.538",
+    "@remotion/rough-notation": "4.0.538",
+    "@remotion/shapes": "4.0.538",
+    "@remotion/transitions": "4.0.538",
     "electron": "45.0.0",
     "electron-builder": "26.15.3",
-    "playwright-core": "1.64.1"
+    "esbuild": "0.28.2",
+    "gsap": "3.15.0",
+    "lottie-web": "5.13.0",
+    "playwright-core": "1.64.1",
+    "react": "18.3.1",
+    "react-dom": "18.3.1",
+    "remotion": "4.0.538"
   },
   "build": {
     "appId": "studio.montaj.desktop",
@@ -69,7 +93,9 @@
       "src/services/music/**",
       "src/services/video/**",
       "node_modules/ffmpeg-static/**",
-      "node_modules/ffprobe-static/bin/win32/x64/**"
+      "node_modules/ffprobe-static/bin/win32/x64/**",
+      "src/graphics/build/**",
+      "node_modules/@remotion/compositor-win32-x64-msvc/**"
     ],
     "win": {
       "target": [

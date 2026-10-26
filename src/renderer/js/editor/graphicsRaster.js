@@ -597,6 +597,8 @@ export function graphicCanvas(graphic, W, H, tUs, durationUs) {
 
 /** Export: every distinct frame state as a PNG plus the timed sequence ({ caption: true, images, frames }). */
 export async function graphicFrames(graphic, W, H, durationUs, fps) {
+  // Remotion graphics are rendered by the main process into a transparent clip (src/graphics/render.js), not here.
+  if (GRAPHIC_TEMPLATES[graphic?.template]?.engine === "remotion") return { remotion: true };
   await preloadGraphic(graphic);
   const states = graphicStates(graphic, durationUs, fps);
   const index = new Map(), images = [], frames = [];

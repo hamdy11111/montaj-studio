@@ -11,6 +11,7 @@ import { AppError, validateName, validateEnum } from "../core/validation.js";
 import { uid, US, deepClone } from "../core/util.js";
 import { timelineDuration } from "../core/model.js";
 import { cutoutLayers } from "../core/cutout.js";
+import { GraphicsRenderer, remotionSegments } from "../graphics/render.js";
 
 // RNNoise speech model ("somnolent-hogwash": speech in recording noise; GregorR/rnnoise-models, not copyrightable).
 const RNN_MODEL = path.join(path.dirname(fileURLToPath(import.meta.url)), "audio", "models", "sh.rnnn").replace(/app\.asar([\\/])/, "app.asar.unpacked$1");
@@ -43,6 +44,34 @@ export class ExportService {
     this.rasterize = null;
   }
 
+  /**
+   * The Remotion graphics layer (src/graphics): renders the kit's graphics of a timeline into transparent clips that
+   * are overlaid like the rasterized ones. Created on first use (it starts a worker and a headless browser).
+   */
+  get graphics() {
+    if (!this._graphics) {
+      this._graphics = new GraphicsRenderer({ cacheDir: path.join(this.paths.cache, "graphics"), userData: this.paths.root || null, resolveAsset: (ref) => this.resolveMediaRef(ref) });
+    }
+    return this._graphics;
+  }
+
+  /** media://asset/<id> · media://lib/<id> · media://thumb/<id> → the file on disk (null when unknown). */
+  resolveMediaRef(ref) {
+    try {
+      const u = new URL(ref), id = decodeURIComponent(u.pathname.replace(/^\/+/, ""));
+      if (u.hostname === "asset") return this.repos.media.get(id)?.path || null;
+      if (u.hostname === "thumb") return this.repos.media.get(id)?.thumbPath || null;
+      if (u.hostname === "lib") return this.repos.library.list().find((i) => i.id === id)?.path || null;
+    } catch { /* not a media link */ }
+    return null;
+  }
+
+  /** Transparent clips of the timeline's Remotion graphics at the export size: { segId: file } (empty when none). */
+  async graphicsOverlays(timeline, { width, height, fps, range = null, onProgress = () => {}, job = null } = {}) {
+    if (!remotionSegments(timeline).length) return {};
+    return this.graphics.renderTimeline(timeline, { width, height, fps, range, onProgress, isCancelled: () => !!job?.cancelled });
+  }
+
   /** Is an export running (other heavy GPU work, such as music generation, waits for it)? */
   busy() { return this.jobs.size > 0; }
 
@@ -63,6 +92,7 @@ export class ExportService {
     for (const [segId, b64] of Object.entries(overlays)) {
       if (!/^[A-Za-z0-9-]+$/.test(segId)) continue;
       if (b64 && typeof b64 === "object" && b64.caption) { out[segId] = this.writeCaptionSequence(jobDir, segId, b64); continue; }
+      if (!b64 || (typeof b64 === "object" && b64.remotion)) continue; // a Remotion graphic: rendered by graphicsOverlays
       const data = String(b64).replace(/^data:image\/png;base64,/, "");
       const file = path.join(jobDir, `${segId}.png`);
       fs.writeFileSync(file, Buffer.from(data, "base64"));
@@ -337,8 +367,10 @@ export class ExportService {
       // Started without the editor's rasters (agents, compounds): rasterize here with the same drawing code.
       if ((!overlays || !Object.keys(overlays).length) && this.rasterize && needsRaster(timeline)) overlays = await this.rasterize(timeline, size.width, size.height);
       // Renderer rasters (text, stickers at the export size) win; original sticker files are the fallback.
-      const files = { ...this.stickerFiles(timeline), ...this.writeOverlays(jobDir, overlays) };
       const fps = Number(opts.fps) || timeline.fps || 30;
+      // Remotion graphics: one transparent clip each, rendered (or reused from the cache) before the FFmpeg graph.
+      const gfx = await this.graphicsOverlays(timeline, { width: size.width, height: size.height, fps, range: opts.range || null, job, onProgress: (p) => notify("export:progress", { jobId, progress: 0, stage: "graphics", stageProgress: p }) });
+      const files = { ...this.stickerFiles(timeline), ...this.writeOverlays(jobDir, overlays), ...gfx };
       const common = {
         media: this.mediaMap(projectId), overlays: files, luts: this.lutMap(timeline), compoundFiles, mattes, stabilized, caps, ...voice,
         width: size.width, height: size.height, fps, range: opts.range || null, mode,
