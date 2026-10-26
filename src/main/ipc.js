@@ -354,7 +354,39 @@ export function registerIpc({ getServices, getAgents = () => null, getWindow, ap
       for (const m of r.imported) S().media.generateDerivatives(m.id).then((x) => notifyAll("media:updated", x)).catch(() => {});
       return r.imported[0] || null;
     },
+
+    // ---------------------------------------------------------------- graphics layer + VFX library (phase 3)
+    // Remotion runtime (headless browser + bundle), the VFX/overlay library and its picks, a VFX clip placed on a
+    // timeline with its blend mode, and the graphics selection for a list of words (the director phase calls it).
+    "graphics.runtime": async () => (await import("../graphics/setup.js")).graphicsRuntime(S().paths.root),
+    "graphics.setup": async () => { const g = await import("../graphics/setup.js"); await g.installBrowser(); return g.graphicsRuntime(S().paths.root); },
+    "graphics.plan": async (o) => {
+      const q = obj(o), { planGraphics } = await import("../graphics/selection.js"), { animatedFor } = await import("../graphics/emoji.js"), v = await vfxLib();
+      const words = arr(q.words, "words").slice(0, 20_000).map((w) => ({ text: String(w.text ?? ""), startUs: Number(w.startUs) || 0, endUs: Number(w.endUs) || 0 }));
+      return planGraphics(words, { width: Number(q.width) || 1080, height: Number(q.height) || 1920, fps: Number(q.fps) || 30, totalUs: Number(q.totalUs) || undefined, faces: Array.isArray(q.faces) ? q.faces : [], keywords: Array.isArray(q.keywords) ? q.keywords : [], names: Array.isArray(q.names) ? q.names : [],
+        ctx: { emojiFor: (e, tpl) => v.emojiRef(e, { video: tpl === "animated-emoji" }), emojiName: (e) => animatedFor(e)?.name || null } });
+    },
+    "vfx.list": async (o) => { const q = obj(o), idx = await (await vfxLib()).load(); return idx.items.filter((i) => (!q.category || i.category === q.category) && (q.footage || i.overlay)); },
+    "vfx.rescan": async () => { const v = await vfxLib(); v.index = null; const idx = await v.buildIndex(); return { items: idx.items.length, registered: v.registerInLibrary(S().repos), emoji: v.registerEmoji(S().repos) }; },
+    "vfx.pick": async (o) => (await vfxLib()).pick(obj(o)),
+    "vfx.place": async (tid, o) => {
+      const q = obj(o), v = await vfxLib(), tl = S().timelines.get(id(tid)).timeline;
+      const it = (await v.load()).items.find((i) => i.id === str(q.itemId, "itemId"));
+      if (!it) throw new AppError("VALIDATION", "err.notFound", { field: "itemId" });
+      const r = await S().media.importFiles(tl.projectId, [v.file(it)], { origin: "vfx" });
+      const m = r.imported[0] || S().repos.media.listByProject(tl.projectId).find((x) => x.path === v.file(it));
+      const atUs = Math.max(0, Number(q.atUs) || 0), durationUs = Math.min(it.durationUs, Math.max(200_000, Number(q.durationUs) || it.durationUs));
+      const segId = (await S().timelines.exec(id(tid), "addSegment", { kind: "video", mediaId: m.id, atUs, durationUs })).result;
+      await S().timelines.exec(id(tid), "updateSegment", { segId, patch: { ...v.segmentPatch(it), volumeDb: -60 } });
+      return { segId, item: it.id, blend: it.blend };
+    },
   };
+  // The VFX library service of this window's services (created on first use).
+  let vfxLibInstance = null;
+  async function vfxLib() {
+    if (!vfxLibInstance) { const { VfxLibraryService } = await import("../services/vfxLibraryService.js"); vfxLibInstance = new VfxLibraryService({ repos: S().repos }); }
+    return vfxLibInstance;
+  }
 
   function notifyAll(event, payload) {
     for (const w of BrowserWindow.getAllWindows()) if (!w.isDestroyed()) w.webContents.send("api:event", event, payload);
