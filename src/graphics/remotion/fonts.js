@@ -9,9 +9,10 @@ import { BUNDLED_FONTS } from "../../core/fonts.js";
 const SYSTEM = new Set(["Calibri", "Segoe UI", "Tahoma", "Arial"]);
 let registered = false;
 
-/** Register every bundled face once (files load lazily, on first use). base: URL prefix of the font files. */
+/** Register every bundled face once (files load lazily, on first use). base: URL prefix of the font files;
+ * false when the page has registered them already (the editor). */
 export function registerFonts(base) {
-  if (registered || typeof document === "undefined") return;
+  if (registered || base === false || typeof document === "undefined") return;
   registered = true;
   const root = base ?? staticFile("fonts/");
   for (const f of BUNDLED_FONTS) {

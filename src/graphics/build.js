@@ -3,6 +3,7 @@
 //                                             with the app's bundled fonts in its public/fonts
 //   src/renderer/js/editor/graphicsPlayer.js  the editor's Player module (esbuild, ES module, React + @remotion/player
 //                                             + the same components) — loaded by graphicsRaster.js
+//   src/renderer/assets/graphics/<id>.png      a poster per kit template for the graphics tiles (needs the browser)
 // Both are build outputs (git-ignored); the packaged app carries them (package.json build: src/** + asarUnpack).
 import fs from "node:fs";
 import os from "node:os";
@@ -44,6 +45,23 @@ export async function buildPlayer() {
   return PLAYER_OUT;
 }
 
+export const POSTERS_OUT = path.join(ROOT, "src", "renderer", "assets", "graphics");
+
+/** A transparent poster per kit template (its defaults, mid-animation, 16:9) for the editor's graphics tiles. */
+export async function buildPosters() {
+  const { GraphicsRenderer } = await import("./render.js");
+  const { KIT_TEMPLATES, kitParams } = await import("../core/graphicsKit.js");
+  const r = new GraphicsRenderer({ cacheDir: path.join(os.tmpdir(), "montaj-gfx-posters") });
+  fs.mkdirSync(POSTERS_OUT, { recursive: true });
+  try {
+    for (const [id, tpl] of Object.entries(KIT_TEMPLATES)) {
+      const n = Math.max(2, Math.round((tpl.durUs / 1e6) * 30));
+      await r.still({ template: id, params: kitParams(id), pack: "punchy", width: 640, height: 360, fps: 30, durationInFrames: n }, Math.min(n - 1, Math.round(n * 0.55)), path.join(POSTERS_OUT, `${id}.png`));
+    }
+  } finally { await r.close(); }
+  return POSTERS_OUT;
+}
+
 if (import.meta.url === pathToFileURL(process.argv[1] || "").href) {
   const what = process.argv[2] || "all";
   const t0 = Date.now();
@@ -52,6 +70,10 @@ if (import.meta.url === pathToFileURL(process.argv[1] || "").href) {
     if (what === "all" || what === "remotion") {
       let last = -1;
       console.log("remotion:", await buildRemotion({ onProgress: (p) => { if (p - last >= 25) { last = p; console.log(`  ${p}%`); } } }), `${Date.now() - t0} ms`);
+    }
+    // Posters need the browser (npm run setup:graphics); without it the tiles show the template's name only.
+    if (what === "all" || what === "posters") {
+      try { console.log("posters:", await buildPosters(), `${Date.now() - t0} ms`); } catch (e) { console.warn("posters skipped:", e.message); }
     }
   })().catch((e) => { console.error(e); process.exit(1); });
 }

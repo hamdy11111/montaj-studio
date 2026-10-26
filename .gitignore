@@ -14,3 +14,4 @@ __pycache__/
 src/graphics/build/
 src/renderer/js/editor/graphicsPlayer.js
 src/renderer/js/editor/graphicsPlayer.js.LEGAL.txt
+src/renderer/assets/graphics/
