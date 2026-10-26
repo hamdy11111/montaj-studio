@@ -44,7 +44,7 @@ export function aiSetupView() {
     st = s;
     const g = s.gpu;
     mount(head,
-      h("div", { class: "row", style: { gap: "8px", flexWrap: "wrap" } }, ic("sparkle"), h("b", {}, t("ai.title"))),
+      h("div", { class: "row", style: { gap: "8px", flexWrap: "wrap" } }, ic("sparkle"), h("b", {}, t("ai.setupTitle"))),
       h("p", { class: "muted small", style: { margin: 0, lineHeight: 1.8 } }, t("ai.intro")),
       h("div", { class: "row small", style: { gap: "8px", flexWrap: "wrap" } }, ic(g.nvidia && g.driverOk ? "check" : "warning"),
         g.nvidia ? t("ai.gpu", { name: g.name, vram: (g.vramMB / 1024).toFixed(0), driver: g.driver }) : t("ai.noGpu"),

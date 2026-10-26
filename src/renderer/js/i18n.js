@@ -690,7 +690,7 @@ const D = {
   // Round 4 — set-up of the AI layers (perception, best take, links, B-roll index): «تجهيز الذكاء»
   "nav.ai": ["AI set-up", "تجهيز الذكاء"],
   "ai.pageTitle": ["AI set-up", "تجهيز الذكاء"],
-  "ai.title": ["The tools that make the smart edit understand your video", "الأدوات اللي بتخلّي المونتاج الذكي يفهم الفيديو"],
+  "ai.setupTitle": ["The tools that make the smart edit understand your video", "الأدوات اللي بتخلّي المونتاج الذكي يفهم الفيديو"],
   "ai.intro": ["They find who speaks and who is on screen, the best of several takes, what made people laugh, and the shots in your own footage that match a sentence. Everything runs on this PC. A tool that is missing is skipped: the smart edit still works, with less understanding.", "بتعرف مين بيتكلم ومين في الكادر، وأحسن إعادة لنفس الجملة، والضحكة جت بسبب إيه، وتدوّر في لقطاتك على لقطة بالوصف. كله بيشتغل على جهازك. لو أداة مش موجودة بتتساب: المونتاج الذكي بيكمّل عادي بس بفهم أقل."],
   "ai.gpu": ["Graphics card: {name} · {vram} GB · driver {driver}", "كارت الشاشة: {name} · {vram} جيجا · التعريف {driver}"],
   "ai.noGpu": ["No NVIDIA graphics card found: most of these tools need one.", "مفيش كارت شاشة NVIDIA: أغلب الأدوات دي محتاجاه."],
