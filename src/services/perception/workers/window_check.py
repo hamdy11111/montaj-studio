@@ -21,6 +21,8 @@ import pcommon as pc  # noqa: E402
 import llama  # noqa: E402
 
 ENGINES = {
+    # The eye alone (the vision stage's model): sees the keyframes, cannot hear — the baseline the ear is measured against.
+    "qwen3.6": {"dir": "qwen3.6-35b-a3b", "model": "Qwen3.6-35B-A3B-UD-IQ4_XS.gguf", "mmproj": "mmproj-F16.gguf", "audio": False},
     "qwen3-omni": {"dir": "qwen3-omni-30b-a3b", "model": "Qwen3-Omni-30B-A3B-Instruct-Q4_K_M.gguf", "mmproj": "mmproj-Qwen3-Omni-30B-A3B-Instruct-Q8_0.gguf", "audio": True},
     "keye": {"dir": "keye-vl-2.0-30b-a3b", "model": "Keye-VL-2.0-30B-A3B-Q4_K_M.gguf", "mmproj": "mmproj-Keye-VL-2.0-30B-A3B-Q8_0.gguf", "audio": False, "server": os.path.join("llama-keye", "llama-server.exe")},
 }

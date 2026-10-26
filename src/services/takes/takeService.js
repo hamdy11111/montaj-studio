@@ -88,6 +88,9 @@ function runWorker(python, script, job, { outFile, onProgress, log = () => {}, s
   });
 }
 
+/** The AI judge used on close calls (measured in round 4, see HANDOFF): "qwen3-omni" | "qwen2.5-omni". */
+export const JUDGE_ENGINE = "qwen2.5-omni";
+
 /** The judge model folder: runtime/models/takes/qwen2.5-omni-7b, else the local Hugging Face cache (never downloaded). */
 export function judgeModelPath(models, home = process.env.USERPROFILE || process.env.HOME || "") {
   const own = path.join(models, "qwen2.5-omni-7b");
@@ -116,11 +119,26 @@ export class TakeService {
     this.log = log;
   }
 
+  /**
+   * The judge's worker and its arguments, or null when that engine is not installed: "qwen3-omni" (perception's
+   * Qwen3-Omni GGUF on llama.cpp, judge_omni.py) or "qwen2.5-omni" (Qwen2.5-Omni-7B on transformers, judge.py).
+   */
+  judgeJob(engine = JUDGE_ENGINE) {
+    if (engine === "qwen3-omni") {
+      const models = path.join(this.runtime, "models", "perception"), llama = path.join(this.runtime, "llama", process.platform === "win32" ? "llama-server.exe" : "llama-server");
+      const ok = [llama, path.join(models, "qwen3-omni-30b-a3b", "Qwen3-Omni-30B-A3B-Instruct-Q4_K_M.gguf"), path.join(models, "qwen3-omni-30b-a3b", "mmproj-Qwen3-Omni-30B-A3B-Instruct-Q8_0.gguf")].every((p) => fs.existsSync(p));
+      return ok ? { script: "judge_omni.py", args: { llama, modelsDir: models, frames: 6, side: 448 } } : null;
+    }
+    const mp = judgeModelPath(this.models);
+    return mp ? { script: "judge.py", args: { modelPath: mp } } : null;
+  }
+
   status() {
     const has = (...p) => fs.existsSync(path.join(this.models, ...p));
     return {
       runtime: this.runtime, env: fs.existsSync(venvPython(this.runtime, "takes")),
-      models: { dnsmos: has("dnsmos", "sig_bak_ovr.onnx"), mediapipe: has("mediapipe", "face_landmarker.task"), libreface: has("libreface", "LibreFace_AU_Encoder.onnx"), l2cs: has("l2cs", "l2cs_gaze360_resnet50.safetensors"), judge: !!judgeModelPath(this.models) },
+      models: { dnsmos: has("dnsmos", "sig_bak_ovr.onnx"), mediapipe: has("mediapipe", "face_landmarker.task"), libreface: has("libreface", "LibreFace_AU_Encoder.onnx"), l2cs: has("l2cs", "l2cs_gaze360_resnet50.safetensors"), judge: !!this.judgeJob() },
+      judgeEngine: JUDGE_ENGINE,
     };
   }
 
@@ -181,14 +199,15 @@ export class TakeService {
     let judged = scored;
     const close = scored.map((g, i) => ({ g, i })).filter((x) => x.g.closeCall);
     if (o.judge && close.length) {
-      const mp = judgeModelPath(this.models);
-      if (!mp) missing.push("judge: Qwen2.5-Omni-7B not found locally");
+      const engine = o.judgeEngine || JUDGE_ENGINE;
+      const job = this.judgeJob(engine);
+      if (!job) missing.push(`judge: ${engine} not installed`);
       else {
         const pairs = close.map(({ g, i }) => ({ id: String(i), a: { t0: g.takes[g.kept].fromUs / US, t1: g.takes[g.kept].toUs / US }, b: { t0: g.takes[g.runnerUp].fromUs / US, t1: g.takes[g.runnerUp].toUs / US }, type, line: String(g.line).slice(0, 120) }));
         const release = await this.gpuLock.acquire(`takes-judge-${hash.slice(0, 8)}`);
         let res;
         try {
-          res = await runWorker(venvPython(this.runtime, "takes"), path.join(WORKERS, "judge.py"), { media, ffmpeg: this.ffmpeg, modelPath: mp, pairs },
+          res = await runWorker(venvPython(this.runtime, "takes"), path.join(WORKERS, job.script), { media, ffmpeg: this.ffmpeg, pairs, ...job.args, workDir: path.join(this.cacheDir, hash, "judge") },
             { outFile: path.join(this.cacheDir, hash, `judge-${Date.now()}.json`), onProgress: (p) => o.onProgress?.({ stage: "judge", progress: p }), log: (l) => this.log(`[takes-judge] ${l}`), signal: o.signal });
         } finally { await Promise.resolve(release()).catch(() => {}); }
         judged = scored.map((g, i) => (res.answers?.[String(i)] ? applyJudge(g, { ...res.answers[String(i)], model: res.model }) : g));

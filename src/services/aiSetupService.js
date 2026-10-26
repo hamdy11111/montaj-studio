@@ -361,19 +361,29 @@ export class AiSetupService extends EngineSetupService {
    * runtime folder, or the Hugging Face cache): every file's SHA-256 is checked; a set folder found complete in place is
    * linked (junction, no copy); single files are hard-linked on the same drive, copied otherwise.
    */
-  async #importSet(set, folder, signal, { copy = false } = {}) {
+  async #importSet(set, folder, signal, { copy = false, noCopy = false } = {}) {
     const roots = [...new Set([folder, path.join(folder, "models", set.root), path.join(folder, set.root)])].filter((d) => fs.existsSync(d));
     const hf = set.files[0]?.source?.match(/^huggingface\.co\/([^@]+)@/)?.[1];
     if (hf) roots.push(...hfCacheSnapshots(hf));
-    let located = set.files.map((file) => ({ file, path: null, how: null }));
-    let base = null;
+    // By place first (the set's folders where they belong: these can be linked whole), in each candidate root…
+    let best = null;
     for (const r of roots) {
-      const tryLoc = locateFiles(set, r, findByName(r, new Set(set.files.map((f) => f.file)), r === folder ? 8 : 4));
-      if (tryLoc.filter((x) => x.path).length > located.filter((x) => x.path).length) { located = tryLoc; base = r; }
-      if (located.every((x) => x.path)) break;
+      const loc = locateFiles(set, r);
+      const n = loc.filter((x) => x.path).length;
+      if (!best || n > best.n) best = { loc, n, base: r };
+      if (n === set.files.length) break;
     }
-    // The Hugging Face cache keeps every file once under blobs/<its SHA-256 (LFS) or git id> — also when the
-    // snapshot folder that names them was emptied.
+    let located = best ? best.loc : set.files.map((file) => ({ file, path: null, how: null }));
+    const base = best?.base || null;
+    // …then the gaps by name and size anywhere under the picked folder (every same-sized candidate is kept: the hash
+    // check below takes the one that matches — two sets may both have a LICENSE of the same size)…
+    if (located.some((x) => !x.path)) {
+      const found = findByName(folder, new Set(located.filter((x) => !x.path).map((x) => x.file.file)), 8);
+      located = located.map((x) => (x.path ? x : { ...x, how: "name", cands: (found.get(x.file.file) || []).filter((p) => fs.statSync(p).size === x.file.size) }))
+        .map((x) => (x.how === "name" ? { ...x, path: x.cands[0] || null, how: x.cands.length ? "name" : null } : x));
+    }
+    // …and the Hugging Face cache, which keeps every file once under blobs/<its SHA-256 (LFS) or git id> — also when
+    // the snapshot folder that names them was emptied.
     if (hf) {
       const blobs = path.join(hfCacheDir(hf), "blobs");
       for (const x of located) {
@@ -391,6 +401,7 @@ export class AiSetupService extends EngineSetupService {
       if (!x.path) continue;
       this.emit({ step: `check ${x.file.file}`, bytes: done, total, progress: total ? (0.8 * done) / total : 0 });
       x.ok = (await sha256File(x.path)) === x.file.sha256;
+      for (const c of x.cands || []) { if (x.ok) break; if (c !== x.path && (await sha256File(c)) === x.file.sha256) Object.assign(x, { path: c, ok: true }); }
       done += x.file.size;
     }
     const tops = copy ? {} : linkableTops(set, located.filter((x) => x.ok));
@@ -417,6 +428,8 @@ export class AiSetupService extends EngineSetupService {
       fs.rmSync(dest, { force: true });
       let how = "hardlinked";
       try { if (copy) throw new Error("copy asked"); fs.linkSync(x.path, dest); } catch {
+        // Another drive: a copy. "Import everything" never copies (it reports the size instead): no data twice.
+        if (noCopy) { report.push({ file: x.file.file, result: "copyNeeded", from: x.path, size: x.file.size }); continue; }
         how = "copied";
         await new Promise((resolve, reject) => fs.createReadStream(x.path).pipe(fs.createWriteStream(`${dest}.part`)).on("finish", resolve).on("error", reject));
         fs.renameSync(`${dest}.part`, dest);
@@ -468,21 +481,24 @@ export class AiSetupService extends EngineSetupService {
 
   /**
    * Import everything a folder already has (a development checkout's runtime/, a backup…): every runtime that passes
-   * its check, llama.cpp, and every model set — linked in place when possible. Nothing is downloaded.
+   * its check, llama.cpp, and every model set — linked in place, or hard-linked file by file. Nothing is downloaded or
+   * copied (a set that would need a copy from another drive says how much; its own import button copies it).
    */
   importAll(folder) {
     this.#folder(folder);
     return this.run("importAll", async (signal) => {
       const out = { envs: [], deps: [], sets: [] };
       for (const env of Object.keys(ENVS)) out.envs.push(await this.#importEnv(env, folder, signal));
+      const asr = path.join(folder, "asr");
+      if (!fs.existsSync(this.depPath("asr")) && fs.existsSync(path.join(asr, bin, exe("python")))) { this.link(asr, path.join(this.root, "asr")); out.deps.push({ dep: "asr", result: "linked" }); }
       const llama = path.join(folder, "llama");
       if (!fs.existsSync(this.depPath("llama")) && fs.existsSync(path.join(llama, exe("llama-server")))) { this.link(llama, path.join(this.root, "llama")); out.deps.push({ dep: "llama", result: "linked" }); }
       const seen = new Set();
       for (const L of LAYERS) for (const s of layerSets(L.id)) {
         if (seen.has(s.key)) continue;
         seen.add(s.key);
-        const r = await this.#importSet(s, folder, signal);
-        out.sets.push({ set: s.key, linked: r.report.filter((x) => x.result === "linked").length, already: r.report.filter((x) => x.result === "already").length, copied: r.report.filter((x) => /copied|hardlinked/.test(x.result)).length, notFound: r.report.filter((x) => x.result === "notFound").length, mismatch: r.report.filter((x) => x.result === "mismatch").length });
+        const r = await this.#importSet(s, folder, signal, { noCopy: true });
+        out.sets.push({ set: s.key, copyNeeded: r.report.filter((x) => x.result === "copyNeeded").reduce((n, x) => n + x.size, 0), linked: r.report.filter((x) => x.result === "linked").length, already: r.report.filter((x) => x.result === "already").length, copied: r.report.filter((x) => /copied|hardlinked/.test(x.result)).length, notFound: r.report.filter((x) => x.result === "notFound").length, mismatch: r.report.filter((x) => x.result === "mismatch").length });
       }
       return out;
     });

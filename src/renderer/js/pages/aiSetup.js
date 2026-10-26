@@ -11,7 +11,9 @@ import { toast } from "../ui/toast.js";
 import { confirmDialog } from "../ui/modal.js";
 
 const guard = async (fn) => { try { return await fn(); } catch (e) { if (!e?.details?.cancelled) toast(errorText(e), "error"); return undefined; } };
-const size = (b) => (b >= 1e9 ? t("ai.gb", { n: (b / 1e9).toFixed(1) }) : t("ai.mb", { n: Math.max(1, Math.round(b / 1e6)) }));
+const size = (b) => (b >= 1e9 ? t("ai.gb", { n: (b / 1e9).toFixed(1) }) : t("ai.mb", { n: b > 0 ? Math.max(1, Math.round(b / 1e6)) : 0 }));
+/** An icon outside a button (the app's CSS sizes only button icons). */
+const ic = (name) => { const s = icon(name); Object.assign(s.style, { width: "16px", height: "16px", flex: "none" }); return s; };
 const STATE_BADGE = { ready: "local", partial: "na", missing: "na" };
 
 export function aiSetupView() {
@@ -42,15 +44,15 @@ export function aiSetupView() {
     st = s;
     const g = s.gpu;
     mount(head,
-      h("div", { class: "row", style: { gap: "8px", flexWrap: "wrap" } }, icon("sparkle"), h("b", {}, t("ai.title"))),
+      h("div", { class: "row", style: { gap: "8px", flexWrap: "wrap" } }, ic("sparkle"), h("b", {}, t("ai.title"))),
       h("p", { class: "muted small", style: { margin: 0, lineHeight: 1.8 } }, t("ai.intro")),
-      h("div", { class: "row small", style: { gap: "8px", flexWrap: "wrap" } }, icon(g.nvidia && g.driverOk ? "check" : "warning"),
+      h("div", { class: "row small", style: { gap: "8px", flexWrap: "wrap" } }, ic(g.nvidia && g.driverOk ? "check" : "warning"),
         g.nvidia ? t("ai.gpu", { name: g.name, vram: (g.vramMB / 1024).toFixed(0), driver: g.driver }) : t("ai.noGpu"),
         g.nvidia && !g.driverOk ? h("span", { class: "field-error" }, t("ai.driverOld", { need: g.minDriver })) : null),
       h("div", { class: "row", style: { gap: "8px", flexWrap: "wrap" } },
         h("button", { class: "btn small", title: t("ai.importAllHint"), onclick: async () => {
           const d = await pickFolder();
-          if (d) act(() => call("ai.importAll", d), (r) => toast(t("ai.importedAll", { envs: r.envs.filter((x) => ["linked", "already"].includes(x.result)).length, sets: r.sets.filter((x) => !x.notFound && !x.mismatch).length, all: r.sets.length }), "success"));
+          if (d) act(() => call("ai.importAll", d), (r) => toast(t("ai.importedAll", { envs: r.envs.filter((x) => ["linked", "already"].includes(x.result)).length, sets: r.sets.filter((x) => !x.notFound && !x.mismatch && !x.copyNeeded).length, all: r.sets.length }), "success"));
         } }, icon("folder"), t("ai.importAll")),
         h("span", { class: "muted small" }, t("ai.importAllHint"))),
       h("div", { class: "muted small ltr" }, s.root));
@@ -82,7 +84,7 @@ export function aiSetupView() {
       ...Object.entries(L.env.problems.imports || {}).map(([m, e]) => `import ${m}: ${e}`),
       L.env.problems.error || ""].filter(Boolean).slice(0, 6).join("\n")) : null;
     const deps = L.deps.map((d) => h("div", { class: "row small", style: { gap: "8px", flexWrap: "wrap" } },
-      icon(d.ok ? "check" : "warning"), h("span", {}, t(`ai.dep.${d.id}`)), h("span", { class: ["badge", d.ok ? "local" : "na"] }, d.ok ? t("ai.installedShort") : t("ai.notInstalled")),
+      ic(d.ok ? "check" : "warning"), h("span", {}, t(`ai.dep.${d.id}`)), h("span", { class: ["badge", d.ok ? "local" : "na"] }, d.ok ? t("ai.installedShort") : t("ai.notInstalled")),
       d.ok ? null : d.installable ? h("button", { class: "btn small", onclick: () => act(() => call("ai.installLlama")) }, icon("download"), t("ai.install"))
         : d.setup === "asr" ? h("button", { class: "btn small", onclick: async () => { const { openAsrSetup } = await import("../dialogs/asrSetup.js"); openAsrSetup({ onReady: draw }); } }, t("ai.openSetup"))
           : h("span", { class: "muted" }, t(`ai.depHow.${d.id}`))));

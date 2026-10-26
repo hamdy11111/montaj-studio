@@ -16,12 +16,14 @@ def norm(name):
     return re.sub(r"[-_.]+", "-", name).lower()
 
 
-def check_files(dist):
-    """Files of the distribution that are missing or have the wrong size (compiled caches skipped)."""
+def check_files(dist, shared):
+    """Files of the distribution that are missing or have the wrong size (compiled caches skipped). A file that another
+    installed distribution also lists (opencv-python-headless and opencv-contrib-python both write cv2/; two packages
+    shipping docs/conf.py) belongs to whichever was installed last: not a breakage."""
     bad = []
     for f in dist.files or []:
         s = str(f)
-        if "__pycache__" in s or s.endswith(".pyc") or f.size is None:
+        if "__pycache__" in s or s.endswith(".pyc") or f.size is None or s in shared:
             continue
         p = f.locate()
         try:
@@ -38,12 +40,16 @@ def main():
     req_file, modules = sys.argv[1], [m for m in sys.argv[2].split(",") if m]
     installed = {}
     broken = []
-    for dist in md.distributions():
+    dists = [d for d in md.distributions() if d.metadata["Name"]]
+    seen, shared = set(), set()
+    for dist in dists:
+        for f in dist.files or []:
+            s = str(f)
+            (shared if s in seen else seen).add(s)
+    for dist in dists:
         name = dist.metadata["Name"]
-        if not name:
-            continue
         installed[norm(name)] = dist.version
-        bad = check_files(dist)
+        bad = check_files(dist, shared)
         if bad:
             broken.append({"name": name, "version": dist.version, "files": bad})
     missing, other = [], []
