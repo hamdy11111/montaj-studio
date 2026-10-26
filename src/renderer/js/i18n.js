@@ -430,7 +430,7 @@ const D = {
   "mu.s6": ["Generated music library", "مكتبة الموسيقى المولّدة"], "mu.s6Hint": ["Listen without starting the engine, drag onto a timeline from the editor's Audio panel, or save and add to projects.", "اسمع من غير ما المحرك يشتغل، واسحب للتايم لاين من لوحة الصوت في المحرر، أو احفظ وضيف لمشاريع."],
   "mu.path.compose": ["Compose new music for a video", "تأليف موسيقى جديدة للفيديو"], "mu.path.composeDesc": ["A new tune from a description and a style", "لحن جديد خالص من وصف وطابع"],
   "mu.path.inspired": ["New music inspired by a reference", "موسيقى جديدة مستوحاة من مرجع"], "mu.path.inspiredDesc": ["A new tune that takes the reference's sound, not its notes", "لحن جديد بياخد روح صوت المرجع، مش نوتاته"],
-  "mu.path.cover": ["Re-arrangement / cover", "إعادة توزيع / كافر"], "mu.path.coverDesc": ["Keeps the song's melody and changes the arrangement — being moved into the app", "بيحافظ على لحن الأغنية ويغيّر التوزيع — لسه بيتنقل للبرنامج"],
+  "mu.path.cover": ["Re-arrangement / cover", "إعادة توزيع / كافر"],
   "mu.path.tools": ["Audio tools", "أدوات الصوت"], "mu.path.toolsDesc": ["Speed without changing pitch, loudness, cleanup — being moved into the app", "السرعة من غير ما الطبقة تتغير، والجهارة، والتنقية — لسه بتتنقل للبرنامج"],
   "mu.experimental": ["experimental", "تجريبي"], "mu.notYet": ["not yet", "لسه"],
   "mu.newVsKeep": ["“New tune” = the model writes a melody of its own. “Keep the song's melody” (cover) = the original melody stays and only the arrangement changes.", "«لحن جديد» يعني النموذج بيكتب لحن من عنده. «الحفاظ على لحن الأغنية» (الكافر) يعني اللحن الأصلي بيفضل وبيتغير التوزيع بس."],
@@ -596,7 +596,6 @@ const D = {
   "set.matteQuality.pro": ["Professional (GPU)", "احترافي (كارت الشاشة)"], "set.matteQuality.fast": ["Fast (CPU)", "سريع (المعالج)"],
   "set.libraryDir": ["Sound and B-roll library folder", "فولدر مكتبة الأصوات والبي-رول"],
   // Phase 10 (studio links): Easy Cover, music under speech, J/L handle, media picker, library browsers.
-  // (mu.path.coverDesc is defined again here on purpose: the cover is no longer "being moved"; the later key wins.)
   "mu.path.coverDesc": ["Keeps the song's melody and changes the arrangement (YuE2 on the song's own score)", "بيحافظ على لحن الأغنية ويغيّر التوزيع (YuE2 على نوتة الأغنية نفسها)"],
   "mu.cover.rangeShort": ["Choose at least 8 seconds of the song.", "اختار 8 ثواني على الأقل من الأغنية."],
   "mu.cover.rangeLong": ["Up to 20 minutes at a time.", "لحد 20 دقيقة في المرة."],
