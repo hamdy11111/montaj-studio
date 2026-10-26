@@ -25,6 +25,8 @@ function decisionText(d) {
     case "kept": case "ending": case "cta": case "silenced": case "noPersonModel": case "personOff": case "noSpeech": case "noPerception": return t(`dec.${d.k}`, d);
     case "retakes": case "jl": case "clips": case "treatment": case "hook": return t(`dec.${d.k}`, d);
     case "story": return t(d.same ? "dec.storySame" : "dec.story", d);
+    case "noSpoiler": return t("dec.noSpoiler", d);
+    case "keepAmbience": return t("dec.keepAmbience", d);
     default: return null;
   }
 }
@@ -89,6 +91,9 @@ export function openDirector(ed) {
   // The story order (phase 8): automatic with two clips or more; "on" for one long raw shot out of order.
   const storySel = h("select", {}, [["auto", t("dir.storyAuto")], ["on", t("dir.storyOn")], ["off", t("dir.storyOff")]].map(([v, l]) => h("option", { value: v }, l)));
   storySel.onchange = () => { opts.story = storySel.value; };
+  // No spoiler (round 4): automatic for the explain style and explainers; or always / never.
+  const spoilerSel = h("select", {}, [["auto", t("dir.spoilerAuto")], ["avoid", t("dir.spoilerAvoid")], ["allow", t("dir.spoilerAllow")]].map(([v, l]) => h("option", { value: v }, l)));
+  spoilerSel.onchange = () => { opts.spoiler = spoilerSel.value; };
   // A folder of clips shot in any order: every video and picture in it goes on the main track (by file name — on a
   // phone, the shooting order), then the story order puts them in the order of the story.
   const folderBtn = h("button", { class: "btn", title: t("dir.folderHint") }, icon("folder"), t("dir.folder"));
@@ -185,7 +190,7 @@ export function openDirector(ed) {
   return modal({ title: t("dir.title"), width: 540, className: "pilot-modal",
     body: h("div", { class: "col" }, h("p", { class: "muted small" }, t("dir.hint")),
       h("div", { class: "row" }, folderBtn, h("span", { class: "muted small" }, t("dir.folderHint"))),
-      row(t("dir.style"), style), row(t("dir.length"), length), row(t("dir.planner"), planner), claudeKey, row(t("dir.story"), storySel), row(t("lib.animatedCaptions"), tplSel), row(t("dir.cta"), cta), keywords, fixes,
+      row(t("dir.style"), style), row(t("dir.length"), length), row(t("dir.planner"), planner), claudeKey, row(t("dir.story"), storySel), row(t("dir.spoiler"), spoilerSel), row(t("lib.animatedCaptions"), tplSel), row(t("dir.cta"), cta), keywords, fixes,
       h("div", { class: "row", style: { gap: "16px", flexWrap: "wrap" } }, stabBox, personBox, perceiveBox),
       estimate, h("div", { class: "row" }, go, status), progress, log) });
 }

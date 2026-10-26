@@ -51,10 +51,12 @@ export const PLAN_SCHEMA = {
     },
   },
 };
-export function planPrompt({ moments, links, durationS, targetS = null, kind = null, storyOrder = null }) {
+export function planPrompt({ moments, links, durationS, targetS = null, kind = null, storyOrder = null, noSpoiler = false }) {
   // Phase 8: footage shot out of order comes with its story order — the treatments start from it, not from the numbers.
   const story = storyOrder?.length ? `\n\nStory order (the footage was shot or given out of order; this is the order the story is told in — build the treatments on it, a hook may still flash forward): ${storyOrder.join(", ")}` : "";
-  return `Video: ${durationS.toFixed(0)} s${kind ? `, ${kind}` : ""}${targetS ? `; the user wants about ${targetS} s` : ""}. ${moments.length} moments.\n\nMoments (number | time | kind | role | energy | strength | reactions | what):\n${momentsTable(moments, links)}${story}\n\nPropose the treatments.`;
+  // Round 4: an explainer's conclusion must not be given away in the first seconds (the validator drops such a hook).
+  const spoil = noSpoiler ? "\n\nNo spoilers: this video explains something, so never open on its ending — no result or reaction hook from the last 40 % of the video or from the answer to a promise; open on the question, a striking moment from the first half, or no hook." : "";
+  return `Video: ${durationS.toFixed(0)} s${kind ? `, ${kind}` : ""}${targetS ? `; the user wants about ${targetS} s` : ""}. ${moments.length} moments.\n\nMoments (number | time | kind | role | energy | strength | reactions | what):\n${momentsTable(moments, links)}${story}${spoil}\n\nPropose the treatments.`;
 }
 /** The planner's answer → treatments for validateTreatment (core/treatments.js). */
 export function treatmentsFromAnswer(ans, source) {

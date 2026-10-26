@@ -124,7 +124,7 @@ const clean = (t) => String(t).replace(/[.،,!?؟…:;"«»]+$/u, "").replace(/^
 export const DIRECTOR_STYLES = {
   // rhythm: the pacing preset (POLICY.pace.rhythm); gapUs: least time between two graphics in the EDIT.
   energetic: { rhythm: "mrbeast", gapUs: 2_600_000, transitionsEvery: 9_000_000 },
-  explain: { rhythm: "normal", gapUs: 3_500_000, transitionsEvery: 12_000_000 },
+  explain: { rhythm: "normal", gapUs: 3_500_000, transitionsEvery: 12_000_000, noSpoiler: true }, // the opening never shows the ending
   calm: { rhythm: "calm", gapUs: 4_500_000, transitionsEvery: 16_000_000 },
 };
 
@@ -571,7 +571,7 @@ export function directPlan(input) {
   const qa = qaPlan(plan, { words, removed, durationUs, track, style, numbers: nums.numbers, fit, actionAt: spec?.actionAt });
   const fails = qa.checks.filter((c) => c.level === "fail");
   notes.push(qa.ok ? `quality guards: all ${qa.passed.length} passed` : `quality guards: ${fails.length} problem(s) — ${fails.slice(0, 3).map((c) => c.message).join("; ")}`);
-  const out = toPlanV2(plan, { clips, durationUs, groups, order: spec?.order, hook: spec?.hook });
+  const out = toPlanV2(plan, { clips, durationUs, groups, order: spec?.order, hook: spec?.hook, ambience: spec?.ambience });
   const jl = out.segments.filter((x) => x.jl).length;
   if (jl) { notes.push(`${jl} J cut(s) of ${POLICY.jl.leadMs} ms where the scene changes (the next sound starts before its picture)`); decisions.push({ k: "jl", n: jl, ms: POLICY.jl.leadMs }); }
   if (clips.length > 1) { notes.push(`${clips.length} clips planned as one story, ${spec?.story ? "in the story order (phase 8)" : "in their timeline order"}`); decisions.unshift({ k: "clips", n: clips.length }); }
@@ -611,7 +611,7 @@ function wordlessPlan(input, { clips, durationUs, spec, title, stabilize }) {
   }
   const plan = { schema: "montaj.editplan/1", title, cuts: cuts.map((c) => ({ mediaId: "virtual", ...c })), zooms, transitions: [], graphics: [], sfx: [], stabilize: !!stabilize, audio: { denoise: false, enhanceVoice: false, normalizeLufs: -14 } };
   const decisions = [{ k: "pacing", rhythm: "action", cuts: cuts.length, before: Math.round(durationUs / 1e5) / 10, after: Math.round(total / 1e5) / 10, removed: { treatment: cuts.length } }];
-  return { plan: toPlanV2(plan, { clips, durationUs, order: spec.order, hook: spec.hook }), notes: [`no speech kept: ${cuts.length} cuts by the treatment, ${(durationUs / US).toFixed(1)} → ${(total / US).toFixed(1)} s`], decisions, qa: null, virtual: { cuts, durationUs, kept: [], removed: new Map(), total } };
+  return { plan: toPlanV2(plan, { clips, durationUs, order: spec.order, hook: spec.hook, ambience: spec.ambience }), notes: [`no speech kept: ${cuts.length} cuts by the treatment, ${(durationUs / US).toFixed(1)} → ${(total / US).toFixed(1)} s`], decisions, qa: null, virtual: { cuts, durationUs, kept: [], removed: new Map(), total } };
 }
 
 /**
@@ -620,7 +620,7 @@ function wordlessPlan(input, { clips, durationUs, spec, title, stabilize }) {
  * mapped back to its file, a small J lead where the scene changes (POLICY.jl), and the retake groups for the cut sheet.
  * clips: [{ mediaId, srcStart, srcEnd, vStart, speed }] (one clip = the media itself from 0); groups: retakeGroups.
  */
-export function toPlanV2(vplan, { clips, durationUs, groups = [], J = POLICY.jl, order = null, hook = null }) {
+export function toPlanV2(vplan, { clips, durationUs, groups = [], J = POLICY.jl, order = null, hook = null, ambience = null }) {
   const C = clips.map((c, i) => ({ ...c, i, speed: c.speed || 1, vEnd: i + 1 < clips.length ? clips[i + 1].vStart : Math.max(c.vStart, durationUs) }));
   const clipOf = (v) => C.find((c) => v >= c.vStart && v < c.vEnd) || (v >= C[C.length - 1].vEnd ? C[C.length - 1] : C[0]);
   const src = (c, v) => Math.max(0, Math.round(c.srcStart + (Math.min(Math.max(v, c.vStart), c.vEnd) - c.vStart) * c.speed));
@@ -689,6 +689,16 @@ export function toPlanV2(vplan, { clips, durationUs, groups = [], J = POLICY.jl,
     ...(groups.length ? { retakes: groups.map((g) => ({ line: String(g.line).slice(0, 300), kept: g.kept, reason: g.reason, takes: g.takes.map((tk) => { const c = clipOf(tk.fromUs); return { mediaId: c.mediaId, fromUs: src(c, tk.fromUs), toUs: Math.max(src(c, tk.fromUs) + 1, src(c, tk.toUs)), text: String(tk.text).slice(0, 300), complete: tk.complete, kind: tk.kind }; }) })) } : {}),
   };
   for (const k of ["stabilize", "filter", "audio", "captions", "canvas"]) if (vplan[k] !== undefined) plan[k] = vplan[k];
+  // Kept wordless action whose own sound the export keeps under the voice clean-up (round 4, the contract with
+  // audio-export): SOURCE spans of the real files, split at the clips' joints. Only when the clean-up is on.
+  if (ambience?.length && plan.audio?.denoise) {
+    const keep = [];
+    for (const [a, b] of ambience) for (const c of C) {
+      const x = Math.max(a, c.vStart), y = Math.min(b, c.vEnd);
+      if (y - x >= 100_000) keep.push({ mediaId: c.mediaId, fromUs: src(c, x), toUs: src(c, y) });
+    }
+    if (keep.length) plan.audio = { ...plan.audio, keepAmbience: keep };
+  }
   return plan;
 }
 

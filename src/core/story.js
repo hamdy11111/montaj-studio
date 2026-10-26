@@ -134,7 +134,7 @@ export function segmentMoments(moments, { events = [], links = [], minUs = 8 * U
  * moment numbers. Adds: text, head, tail, tokens, place, looks, indoor, night, people, summary, beat, beatConf,
  * beatScores, cues, timeUs, mediaId, lengthUs, reactions.
  */
-export function describeSegments(segments, { moments, events = [], clips = [], promises = [], links = [] }) {
+export function describeSegments(segments, { moments, events = [], clips = [], promises = [], links = [], people: same = null }) {
   const byN = (n) => moments[n - 1];
   const promiseSeg = new Set(promises.map((p) => p.promise)), payoffSeg = new Set(promises.map((p) => p.payoff).filter(Boolean));
   return segments.map((g) => {
@@ -146,8 +146,10 @@ export function describeSegments(segments, { moments, events = [], clips = [], p
     const clip = clips[g.clip] || {};
     const people = new Set();
     // People ids (faces P1…, voices S1…) are per file: `fileKey` scopes them (a file split into pieces keeps one scope).
+    // `same` (crossFilePeople) names one person across files — and a face with its own voice — with one id.
     const scope = clip.fileKey ?? clip.mediaId ?? "?";
-    for (const e of events) if ((e.type === "face_track" || e.type === "utterance") && overlap(g.s, g.e, e.t0, e.t1) > 0.3 * (e.t1 - e.t0)) { const id = e.entity || e.speaker; if (id) people.add(`${scope}:${id}`); }
+    const who = (id) => same?.get(`${scope}:${id}`) ?? `${scope}:${id}`;
+    for (const e of events) if ((e.type === "face_track" || e.type === "utterance") && overlap(g.s, g.e, e.t0, e.t1) > 0.3 * (e.t1 - e.t0)) { const id = e.entity || e.speaker; if (id) people.add(who(id)); }
     const where = logs.map((l) => [l.where, ...(l.objects || [])].join(" ")).join(" ");
     const looks = logs.flatMap((l) => (l.who || []).map((w) => w.looks || "")).join(" ");
     const indoorVotes = logs.filter((l) => typeof l.indoor === "boolean");
@@ -366,14 +368,54 @@ export function violations(order, hard = []) {
  * minUs, maxUs, W }. Returns { segments (described), constraints, order (indices, the rules' best), shooting (indices
  * in the footage's order), matrices, rank: Map(moment → place) for core/treatments.js, moments: [n in story order] }.
  */
-export function storyPlan({ moments, links = [], promises = [], events = [], clips = [] }, { useTime = true, minUs, maxUs, W } = {}) {
+export function storyPlan({ moments, links = [], promises = [], events = [], clips = [], people = null }, { useTime = true, minUs, maxUs, W } = {}) {
   const raw = segmentMoments(moments, { events, links, ...(minUs ? { minUs } : {}), ...(maxUs ? { maxUs } : {}) });
-  const segments = describeSegments(raw, { moments, events, clips, promises, links });
+  const segments = describeSegments(raw, { moments, events, clips, promises, links, people });
   const constraints = storyConstraints(segments, { links, promises });
   const M = storyMatrices(segments, constraints, { useTime, ...(W ? { W } : {}) });
   const shooting = segments.map((_, i) => i);
   const order = bestOrder(segments.length, M, { starts: [shooting] });
   return { segments, constraints, matrices: M, order, shooting, ...expand(segments, order) };
+}
+
+// ------------------------------------------------------------------ the same people across clips (round 4)
+// Perception names people per file (faces P1…, voices S1…), so «the same people» could only match inside one file.
+// Its diarization keeps one voice embedding per speaker (pyannote community-1, 256-d): voices of different files are
+// the same person when their cosine is ≥ SAME_VOICE and each is the other's best match. On the six bench raws the
+// pairs that look like one woman in the face thumbnails scored 0.82 and 0.95; different people at most 0.59, two
+// speakers of one file at most 0.44. Faces carry no cached embedding (only their crops): a face joins its person
+// through its own file's face ↔ voice link (faces[].voice).
+export const SAME_VOICE = 0.75;
+const cosine = (a, b) => { let d = 0, x = 0, y = 0; for (let i = 0; i < Math.min(a.length, b.length); i++) { d += a[i] * b[i]; x += a[i] * a[i]; y += b[i] * b[i]; } return x && y ? d / Math.sqrt(x * y) : 0; };
+
+/**
+ * One id per person across files. files: [{ key (the clip's fileKey / mediaId), speakers: [{ id: "S1", embedding }],
+ * faces: [{ id: "P1", voice: "S1" | null }] }]. Returns { map: Map(`${key}:${id}` → "G<n>") (only people that join
+ * something: a face and its voice, or voices of two files), pairs: [{ a, b, cos }] (the cross-file matches) }.
+ */
+export function crossFilePeople(files, { same = SAME_VOICE } = {}) {
+  const parent = new Map();
+  const find = (x) => { while (parent.get(x) !== x) { parent.set(x, parent.get(parent.get(x))); x = parent.get(x); } return x; };
+  const add = (x) => { if (!parent.has(x)) parent.set(x, x); };
+  const union = (a, b) => { add(a); add(b); const ra = find(a), rb = find(b); if (ra !== rb) parent.set(rb, ra); };
+  for (const f of files) for (const p of f.faces || []) if (p.voice) union(`${f.key}:${p.id}`, `${f.key}:${p.voice}`);
+  const pairs = [];
+  for (let i = 0; i < files.length; i++) for (let j = i + 1; j < files.length; j++) {
+    const A = (files[i].speakers || []).filter((x) => x.embedding?.length), B = (files[j].speakers || []).filter((x) => x.embedding?.length);
+    if (files[i].key === files[j].key || !A.length || !B.length) continue;
+    const C = A.map((a) => B.map((b) => cosine(a.embedding, b.embedding)));
+    A.forEach((a, x) => {
+      const y = C[x].indexOf(Math.max(...C[x]));
+      const back = C.map((row) => row[y]);
+      if (C[x][y] >= same && back.indexOf(Math.max(...back)) === x) { union(`${files[i].key}:${a.id}`, `${files[j].key}:${B[y].id}`); pairs.push({ a: `${files[i].key}:${a.id}`, b: `${files[j].key}:${B[y].id}`, cos: Math.round(C[x][y] * 1000) / 1000 }); }
+    });
+  }
+  const groups = new Map();
+  for (const x of parent.keys()) { const r = find(x); if (!groups.has(r)) groups.set(r, []); groups.get(r).push(x); }
+  const map = new Map();
+  let n = 0;
+  for (const members of groups.values()) if (members.length > 1) { n++; for (const m of members) map.set(m, `G${n}`); }
+  return { map, pairs };
 }
 
 /**

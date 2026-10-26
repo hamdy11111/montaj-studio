@@ -16,6 +16,7 @@ import { sentences, alignToken, alignTokens } from "./speech.js";
 import { detectMoments, isPunch, isReaction } from "./moments.js";
 import { storyRole, ROLE_VALUE } from "./reel.js";
 import { directorView } from "./causeLinks.js";
+import { typeFromName } from "./takeScore.js";
 import { US } from "./util.js";
 
 const S = (s) => Math.round(s * US);
@@ -335,7 +336,7 @@ const lenOf = (moments, ns) => ns.reduce((n, k) => n + (moments[k - 1].e - momen
  * (put right before it; a "before" link: right after), a promise its payoff, and the hook must be a moment. Returns
  * { treatment, fixes: [text] } — the fixes go on the cut sheet. Never adds a time that is not a moment.
  */
-export function validateTreatment(t, moments, links = [], promises = [], { rank = null } = {}) {
+export function validateTreatment(t, moments, links = [], promises = [], { rank = null, noSpoiler = false, durationUs = null } = {}) {
   const fixes = [], N = moments.length;
   // Sorting puts moments in the story's order when there is one (phase 8), else in the footage's.
   const byRank = (a, b) => (rank ? (rank.get(a) ?? 1e6 + a) - (rank.get(b) ?? 1e6 + b) : a - b);
@@ -362,14 +363,45 @@ export function validateTreatment(t, moments, links = [], promises = [], { rank 
   if (fixes.some((f) => f.endsWith("a clip without speech"))) order.sort(byRank);
   let hook = t.hook && ok(t.hook.moment) && HOOK_KINDS.includes(t.hook.kind) && t.hook.kind !== "none" ? { kind: t.hook.kind, moment: t.hook.moment } : null;
   if (t.hook?.moment && !hook) fixes.push(`hook moment ${t.hook.moment} is not valid`);
+  // No spoiler: a flash-forward of the ending is dropped (the treatment keeps its order, without the hook).
+  if (noSpoiler && hook && hook.kind !== "question" && hook.kind !== "action" && spoils(moments[hook.moment - 1], moments, { durationUs: durationUs ?? moments[N - 1]?.e ?? 0, pos: rank ? (n) => rank.get(n) ?? 1e6 + n : null, promises })) {
+    fixes.push(`hook moment ${hook.moment} would give away the ending: no flash-forward`);
+    hook = null;
+  }
   if (hook && !order.includes(hook.moment)) { order.push(hook.moment); order.sort(byRank); fixes.push(`hook moment ${hook.moment} also kept in its place`); }
   return { treatment: { ...t, order, hook }, fixes };
 }
 
+// ------------------------------------------------------------------ no spoiler (round 4)
+// A flash-forward of the result keeps people watching a challenge, but it gives away an explainer's ending (05 opened
+// on the last minute's conclusion). With «no spoiler» a hook never comes from the ending part of the story: a result or
+// reaction flash-forward must come from before SPOILER_AT of the way through, and never from the payoff of a promise
+// («هقولكم في الآخر…» → the answer). The question hook (the question the video answers) is untouched.
+export const SPOILER_AT = 0.6;
+
+/**
+ * Whether this run avoids spoilers: spoiler "avoid" | "allow" | "auto" (default: on for the explain style — the style's
+ * `noSpoiler` — and for an explainer by its content type or name, e.g. «شرح …»).
+ */
+export function avoidSpoilers({ spoiler = "auto", style = null, styles = {}, contentType = null, name = "" } = {}) {
+  if (spoiler === "avoid" || spoiler === true) return true;
+  if (spoiler === "allow" || spoiler === false) return false;
+  return !!styles[style]?.noSpoiler || (contentType || typeFromName(name)) === "explainer";
+}
+
+/** How far into the story a moment is (0–1): its place in the story order (phase 8), else its time. */
+const storyAt = (moments, { durationUs, pos = null }) => (m) => (pos ? pos(m.n) / Math.max(1, moments.length - 1) : m.s / Math.max(1, durationUs)); // pos: 0-based
+
+/** Whether showing moment m first would give away the ending: in its last part, or the payoff of a promise. */
+export function spoils(m, moments, { durationUs, pos = null, promises = [] } = {}) {
+  if (!m) return false;
+  return storyAt(moments, { durationUs, pos })(m) >= SPOILER_AT || promises.some((p) => p.payoff === m.n);
+}
+
 /** The strongest moment of a kind that is worth showing first (null when none). */
-function hookMoment(moments, kind, { durationUs, pos = null }) {
-  // How far into the story a moment is (0–1): its place in the story order (phase 8), else its time.
-  const at = (m) => (pos ? pos(m.n) / Math.max(1, moments.length) : m.s / Math.max(1, durationUs));
+function hookMoment(moments, kind, { durationUs, pos = null, noSpoiler = false, promises = [] }) {
+  const at = storyAt(moments, { durationUs, pos });
+  if (noSpoiler && (kind === "result" || kind === "reaction")) moments = moments.filter((m) => !spoils(m, moments, { durationUs, pos, promises }));
   // A moment people react to (laughter, applause, a scream) opens better than a line alone.
   const pull = (m) => m.strength + (m.reactions.some((r) => BIG.has(r.type)) ? 1.5 : 0);
   const by = (list) => [...list].sort((a, b) => pull(b) - pull(a))[0] || null;
@@ -404,7 +436,7 @@ function pickWithin(moments, budgetUs, must = [], pos = (n) => n) {
  * treatments then follow the story order instead of the footage's, the pure story is one of them, and the footage's
  * own order comes last as an alternative (`alternative: true`: listed on the cut sheet, not a candidate).
  */
-export function ruleTreatments(moments, { durationUs, targetUs = null, links = [], promises = [], story = null } = {}) {
+export function ruleTreatments(moments, { durationUs, targetUs = null, links = [], promises = [], story = null, noSpoiler = false } = {}) {
   const D = durationUs ?? (moments.length ? moments[moments.length - 1].e : 0);
   const rank = story?.rank || null;
   const pos = rank ? (n) => rank.get(n) ?? 1e6 + n : (n) => n;
@@ -415,20 +447,21 @@ export function ruleTreatments(moments, { durationUs, targetUs = null, links = [
   const medium = targetUs ? Math.min(fullUs, targetUs * 1.4) : 0.68 * fullUs;
   const out = [];
   const add = (t, r = rank) => {
-    const v = validateTreatment(t, moments, links, promises, { rank: r });
+    const v = validateTreatment(t, moments, links, promises, { rank: r, noSpoiler, durationUs: D });
     const key = JSON.stringify([v.treatment.order, v.treatment.hook]);
     if (out.some((x) => x.key === key)) return;
     out.push({ ...v.treatment, fixes: v.fixes, source: "rules", key });
   };
-  const hp = { durationUs: D, pos: rank ? pos : null };
+  const hp = { durationUs: D, pos: rank ? pos : null, noSpoiler, promises };
   const result = hookMoment(moments, "result", hp), reaction = hookMoment(moments, "reaction", hp), question = hookMoment(moments, "question", hp);
   const first = useful[0];
   const pick = (budget, must) => pickWithin(moments, budget, must, pos);
   if (targetUs) {
-    add({ id: "reel-result", title: "ريل: النتيجة الأول", length: "short", hook: result && { kind: "result", moment: result.n }, order: pick(targetUs, [first, result?.n]), why: `the strongest moments within ${Math.round(targetUs / US)} s, opened by the result`, whyAr: `أقوى اللحظات في ${Math.round(targetUs / US)} ث، وبتفتح بالنتيجة` });
+    add({ id: "reel-result", title: result ? "ريل: النتيجة الأول" : "ريل: أقوى اللحظات", length: "short", hook: result && { kind: "result", moment: result.n }, order: pick(targetUs, [first, result?.n]), why: `the strongest moments within ${Math.round(targetUs / US)} s${result ? ", opened by the result" : ""}`, whyAr: `أقوى اللحظات في ${Math.round(targetUs / US)} ث${result ? "، وبتفتح بالنتيجة" : ""}` });
     if (reaction) add({ id: "reel-reaction", title: "ريل: رد الفعل الأول", length: "short", hook: { kind: "reaction", moment: reaction.n }, order: pick(targetUs, [reaction.n]), why: "the reaction first, then the moments that lead to it", whyAr: "رد الفعل الأول، وبعده اللحظات اللي وصّلت له" });
   }
-  add({ id: "result-full", title: "النتيجة الأول، الحكاية كاملة", length: "full", hook: result && { kind: "result", moment: result.n }, order: useful, why: `a flash-forward of the strongest late moment, then everything worth keeping in ${rank ? "story " : ""}order`, whyAr: `فلاش قدام من أقوى لحظة متأخرة، وبعده كل اللي يستاهل ${rank ? "بترتيب القصة" : "بالترتيب"}` });
+  if (result) add({ id: "result-full", title: "النتيجة الأول، الحكاية كاملة", length: "full", hook: { kind: "result", moment: result.n }, order: useful, why: `a flash-forward of the strongest ${noSpoiler ? "moment before the ending" : "late moment"}, then everything worth keeping in ${rank ? "story " : ""}order`, whyAr: `فلاش قدام من أقوى لحظة ${noSpoiler ? "قبل النهاية (من غير حرق الآخر)" : "متأخرة"}، وبعده كل اللي يستاهل ${rank ? "بترتيب القصة" : "بالترتيب"}` });
+  else add({ id: "plain-full", title: "الحكاية كاملة بترتيبها", length: "full", hook: null, order: useful, why: `everything worth keeping in ${rank ? "story" : "shooting"} order${noSpoiler ? ", no flash-forward (it would give away the ending)" : ""}`, whyAr: `كل اللي يستاهل ${rank ? "بترتيب القصة" : "بترتيب التصوير"}${noSpoiler ? "، من غير فلاش قدام (عشان ما نحرقش النهاية)" : ""}` });
   if (rank) add({ id: "story-full", title: "ترتيب القصة", length: "full", hook: null, order: useful, why: "the story order (setup, promise, build-up, conflict, payoff, ending), no flash-forward", whyAr: "بترتيب الحكاية (تمهيد، وعد، تصاعد، مشكلة، نتيجة، نهاية) من غير فلاش قدام" });
   if (reaction) add({ id: "reaction-medium", title: "رد الفعل الأول، نسخة متوسطة", length: "medium", hook: { kind: "reaction", moment: reaction.n }, order: pick(medium, [first, reaction.n]), why: "the biggest reaction as the cold open, the strongest two thirds of the story", whyAr: "أكبر رد فعل في الأول، وأقوى تلتين الحكاية" });
   if (question) add({ id: "question-medium", title: "سؤال في الأول", length: "medium", hook: { kind: "question", moment: question.n }, order: pick(medium, [question.n]), why: `opens on «${question.text.slice(0, 40)}» — the question the video answers`, whyAr: `بيفتح بـ«${question.text.slice(0, 40)}»: السؤال اللي الفيديو بيجاوبه` });
@@ -479,9 +512,11 @@ export function hookSpan(m, words, kind, { maxUs = 3_200_000, lead = 1_000_000, 
  * wordless run: the angle changes there), order: [[s, e]] (kept moments in edit order), hook: { fromUs, toUs, kind,
  * moment } | null (a flash-forward; null when the hook moment opens the edit anyway), actionAt: [µs] (kept action:
  * reasons to keep watching), reactionSfx: [{ atUs, sound, query, mood, why }] (sounds by meaning on wordless reactions),
- * actionVideo + audio (a mostly wordless video keeps its own sound: no voice clean-up) }.
+ * actionVideo + audio (a mostly wordless video keeps its own sound: no voice clean-up), ambience: [[a, b]] (kept
+ * wordless action whose own sound the export keeps under the clean-up — the plan's audio.keepAmbience; only with
+ * opts.ambience, when the export honours it) }.
  */
-export function executionSpec(treatment, moments, words, { angleEveryUs = 2_500_000 } = {}) {
+export function executionSpec(treatment, moments, words, { angleEveryUs = 2_500_000, ambience = false } = {}) {
   const kept = new Set(treatment.order);
   const dropWords = new Map(), cutSpans = [], keepSpans = [], angleBreaks = [], actionAt = [], reactionSfx = [];
   // A kept wordless moment is cut to its core — the reaction with its lead-in, the middle of a long action stretch —
@@ -491,19 +526,26 @@ export function executionSpec(treatment, moments, words, { angleEveryUs = 2_500_
   // lowers everything between words (it made the 02 challenge's crowd silent: dead air, −17.5 LUFS). In a talking
   // video the clean-up stays, so a wordless moment kept there is a short beat (< 2 s): longer, it reads as dead air
   // (01 and 05: 2–15 silences ≥ 2 s).
+  // Round 4: when the export keeps the sound of the spans the plan marks (`ambience`: audio.keepAmbience, honoured by
+  // the export's clean-up), both work-arounds go: the clean-up stays on in an action video (the speech in it is cleaned,
+  // the action keeps its sound), and a talking video keeps longer action beats, one after another.
   const D = moments.length ? moments[moments.length - 1].e : 0;
   const speechUs = moments.filter((m) => m.kind === "speech").reduce((n, m) => n + m.e - m.s, 0);
   const actionUs = moments.filter((m) => m.kind === "action").reduce((n, m) => n + m.e - m.s, 0);
   const actionVideo = D > 0 && speechUs / D < 0.45 && actionUs >= 20 * US;
-  const CORE = !actionVideo ? { core: 1_800_000, lead: 1_200_000, tail: 600_000 } : ({ full: { core: 5_000_000, lead: 3_000_000 }, medium: { core: 4_000_000, lead: 2_500_000 }, short: { core: 3_000_000, lead: 2_000_000 } }[treatment.length] || { core: 5_000_000, lead: 3_000_000 });
+  const CORE0 = !actionVideo ? { core: 1_800_000, lead: 1_200_000, tail: 600_000 } : ({ full: { core: 5_000_000, lead: 3_000_000 }, medium: { core: 4_000_000, lead: 2_500_000 }, short: { core: 3_000_000, lead: 2_000_000 } }[treatment.length] || { core: 5_000_000, lead: 3_000_000 });
+  const heard = (m) => ambience && (m.kind === "action" || m.reactions.length > 0); // its own sound is kept: never dead air
+  const coreOf = (m) => (!actionVideo && heard(m) ? AMBIENT_CORE : CORE0);
+  const keepSound = [];
   let lastKept = null;
   for (const m of moments) {
     // A sentence left out: its words go (the pacing then closes the gap) and its whole stretch is cut.
     if (m.kind === "speech") { if (!kept.has(m.n)) { for (let i = m.w0; i <= m.w1; i++) dropWords.set(i, "treatment"); cutSpans.push({ fromUs: m.s, toUs: m.e, reason: `treatment: moment ${m.n} (speech)` }); } else lastKept = "speech"; continue; }
     if (!kept.has(m.n)) { cutSpans.push({ fromUs: m.s, toUs: m.e, reason: `treatment: moment ${m.n} (${m.kind})` }); continue; }
     // In a talking video one beat per wordless run: two beats side by side are 3–4 s of near silence (05's dead air).
-    if (!actionVideo && lastKept === "wordless" && !m.reactions.some((x) => BIG.has(x.type)) && !m.protected) { cutSpans.push({ fromUs: m.s, toUs: m.e, reason: `treatment: one beat per quiet stretch (moment ${m.n})` }); continue; }
-    lastKept = "wordless";
+    if (!actionVideo && lastKept === "wordless" && !m.reactions.some((x) => BIG.has(x.type)) && !m.protected && !heard(m)) { cutSpans.push({ fromUs: m.s, toUs: m.e, reason: `treatment: one beat per quiet stretch (moment ${m.n})` }); continue; }
+    lastKept = heard(m) ? "heard" : "wordless";
+    const CORE = coreOf(m);
     let a = m.s, b = m.e;
     const r = m.reactions.find((x) => BIG.has(x.type));
     if (m.peak && r) { a = Math.max(m.s, r.t - CORE.lead); b = Math.min(m.e, Math.max(r.t1 ?? r.t, r.t) + (CORE.tail ?? 1_500_000)); }
@@ -514,6 +556,7 @@ export function executionSpec(treatment, moments, words, { angleEveryUs = 2_500_
     if (a > m.s) cutSpans.push({ fromUs: m.s, toUs: a, reason: `treatment: the quiet start of moment ${m.n}` });
     if (b < m.e) cutSpans.push({ fromUs: b, toUs: m.e, reason: `treatment: the quiet end of moment ${m.n}` });
     keepSpans.push([a, b]);
+    if (heard(m)) keepSound.push([a, b]);
     for (let t = a; t < b - 1_200_000; t += angleEveryUs) angleBreaks.push(Math.round(t));
     if (m.kind === "action") actionAt.push(a, ...m.reactions.filter((x) => x.t >= a && x.t < b).map((x) => x.t));
     // A laugh, applause or a scream in the action gets a sound of the same meaning (the library picks the file).
@@ -542,8 +585,14 @@ export function executionSpec(treatment, moments, words, { angleEveryUs = 2_500_
     if (m && !(firstKept === m.n && treatment.hook.kind !== "reaction")) hook = { ...hookSpan(m, words, treatment.hook.kind), kind: treatment.hook.kind, moment: m.n };
     if (m && treatment.hook.kind === "action") hook = null; // «من وسط الأحداث»: the order itself is the hook
   }
-  return { dropWords, cutSpans, keepSpans, angleBreaks, order, hook, actionAt, reactionSfx, actionVideo, ...(actionVideo ? { audio: { denoise: false, enhanceVoice: false, normalizeLufs: -14 } } : {}) };
+  // An action video: the clean-up stays on for its speech when the export keeps the action's sound (no voice
+  // enhancement: that EQ is for a voice, not a crowd); off as before when it cannot.
+  const audio = !actionVideo ? null : keepSound.length ? { denoise: true, enhanceVoice: false, normalizeLufs: -14 } : { denoise: false, enhanceVoice: false, normalizeLufs: -14 };
+  return { dropWords, cutSpans, keepSpans, angleBreaks, order, hook, actionAt, reactionSfx, actionVideo, ambience: keepSound, ...(audio ? { audio } : {}) };
 }
+
+/** A talking video's kept action beat when its sound is kept (ambience): up to 3.5 s, the reaction with 2 s before it. */
+export const AMBIENT_CORE = { core: 3_500_000, lead: 2_000_000, tail: 1_200_000 };
 
 /** Do two lines say the same thing? (≥ 70 % of the shorter one aligns) — the critic's repetition check. */
 export function sameLine(a, b) {

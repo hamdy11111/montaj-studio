@@ -38,7 +38,9 @@ export const EDIT_PLAN_SCHEMA_V1 = {
       library: { type: "object", additionalProperties: false, required: ["id", "file"], description: "A sound of the sound library (sfx_search) played instead of the bundled `sound` (the fallback when the file is missing)", properties: { id: { type: "string", maxLength: 200 }, file: { type: "string", maxLength: 1000 }, leadUs: { type: "integer", minimum: 0, maximum: 10_000_000, description: "where its accent is, from its start" }, title: { type: "string", maxLength: 120 } } } } }, description: "Sound effects whose accent lands on a SOURCE moment (see sfx_list)" },
     stabilize: { type: "boolean", description: "Stabilize the handheld main-track video (a stabilized copy is made once)" },
     filter: { type: "object", additionalProperties: false, required: ["preset"], properties: { preset: { enum: Object.keys(FILTER_PRESETS) }, intensity: { type: "number", minimum: 0, maximum: 100 } } },
-    audio: { type: "object", additionalProperties: false, properties: { enhanceVoice: { type: "boolean" }, denoise: { type: "boolean" }, normalizeLufs: { type: "number", minimum: -30, maximum: -9 } } },
+    audio: { type: "object", additionalProperties: false, properties: { enhanceVoice: { type: "boolean" }, denoise: { type: "boolean" }, normalizeLufs: { type: "number", minimum: -30, maximum: -9 },
+      keepAmbience: { type: "array", maxItems: 2000, items: { type: "object", additionalProperties: false, required: ["mediaId", "fromUs", "toUs"], properties: { mediaId: { type: "string", pattern: "^[A-Za-z0-9-]+$" }, fromUs: { type: "integer", minimum: 0 }, toUs: { type: "integer", minimum: 0 } } },
+        description: "SOURCE spans of kept wordless action whose own sound the voice clean-up leaves alone (no denoise, no between-words lowering)" } } },
     captions: { type: "object", description: "Animated word-timed captions (see captions_templates)" },
   },
 };
@@ -183,8 +185,9 @@ export const EDIT_PLAN_SCHEMA_V2 = {
     sfx: { ...v1.sfx, items: pinned(v1.sfx.items) },
     music: { type: "array", maxItems: 20, items: { type: "object", additionalProperties: false, required: ["mediaId", "editFromUs"], properties: {
       mediaId: MEDIA_ID, editFromUs: { type: "integer", minimum: 0, description: "EDIT time (after the segments are laid out) where it starts" }, editToUs: { type: "integer", minimum: 1, description: "EDIT time where it ends (default: the end of the edit or of the file)" },
-      offsetUs: { type: "integer", minimum: 0, description: "Where in the music file it starts" }, volumeDb: { type: "number", minimum: -40, maximum: 6 }, fadeUs: { type: "integer", minimum: 0, maximum: 5_000_000 }, reason: { type: "string", maxLength: 200 },
-    } }, description: "Music beds (later phases choose them)" },
+      offsetUs: { type: "integer", minimum: 0, description: "Where in the music file it starts" }, volumeDb: { type: "number", minimum: -40, maximum: 6, description: "Its own level (dB); without it the level is measured against the speech" }, fadeUs: { type: "integer", minimum: 0, maximum: 5_000_000, description: "Fade in and out (default: 10 % / 20 % of its length, at most 1.5 s / 3 s)" },
+      duckDb: { type: "number", minimum: 0, maximum: 40, description: "How much it is lowered under the speech (dB, default 12; 0 = no ducking)" }, autoLevel: { type: "boolean", description: "Level measured against the speech, 16 LU under it (default: true when volumeDb is not set)" }, reason: { type: "string", maxLength: 200 },
+    } }, description: "Music beds: each on its own music track, lowered under the speech (ducking) at a level measured against it" },
     broll: { type: "array", maxItems: 300, items: { type: "object", additionalProperties: false, required: ["mediaId", "fromUs", "toUs", "brollMediaId"], properties: {
       mediaId: MEDIA_ID, fromUs: { type: "integer", minimum: 0 }, toUs: { type: "integer", minimum: 1 }, ...PIN, brollMediaId: MEDIA_ID, brollFromUs: { type: "integer", minimum: 0, description: "Where in the b-roll file it starts" },
       mode: { enum: ["cover", "pip"] }, ...ANCHOR, reason: { type: "string", maxLength: 200 },
@@ -308,11 +311,11 @@ function checkPlanV2(plan, tl, { media = {}, mediaDurations = {} } = {}) {
   for (const x of plan.broll || []) push(at(x), `b-roll ${names[x.brollMediaId] || x.brollMediaId} ${when(at(x))} (${((x.toUs - x.fromUs) / US).toFixed(1)}s, ${x.mode || "cover"})${x.anchor ? ` on «${x.anchor.word}»` : ""}${x.reason ? ` — ${x.reason}` : ""}`);
   for (const x of plan.transitions || []) { const t = Number.isInteger(x.segment) ? pieces[x.segment]?.start ?? null : at(x); push(t, `transition ${x.type} ${when(t)}${x.reason ? ` — ${x.reason}` : ""}`); }
   for (const x of plan.sfx || []) push(at(x), `sound ${x.sound} ${when(at(x))}`);
-  for (const x of plan.music || []) push(x.editFromUs, `music ${names[x.mediaId] || x.mediaId} ${fmtTime(x.editFromUs)}–${fmtTime(x.editToUs ?? afterUs)}${x.volumeDb !== undefined ? ` ${x.volumeDb} dB` : ""}${x.reason ? ` — ${x.reason}` : ""}`);
+  for (const x of plan.music || []) push(x.editFromUs, `music ${names[x.mediaId] || x.mediaId} ${fmtTime(x.editFromUs)}–${fmtTime(x.editToUs ?? afterUs)}${(x.autoLevel ?? x.volumeDb === undefined) ? " (level by the speech)" : ` ${x.volumeDb ?? -18} dB`}, ducked ${x.duckDb ?? 12} dB under the speech${x.reason ? ` — ${x.reason}` : ""}`);
   sheet.sort((a, b) => a.at - b.at || a.n - b.n);
   for (const g of plan.retakes || []) sheet.push({ text: retakeLine(g, names) });
   if (plan.filter) sheet.push({ text: `look ${plan.filter.preset} ${plan.filter.intensity ?? 80}%` });
-  if (plan.audio) sheet.push({ text: `audio${plan.audio.denoise || plan.audio.enhanceVoice ? " clean-up" : ""}${plan.audio.normalizeLufs ? ` ${plan.audio.normalizeLufs} LUFS` : ""}` });
+  if (plan.audio) sheet.push({ text: `audio${plan.audio.denoise || plan.audio.enhanceVoice ? " clean-up" : ""}${plan.audio.normalizeLufs ? ` ${plan.audio.normalizeLufs} LUFS` : ""}${plan.audio.keepAmbience?.length ? `, the action's own sound kept in ${plan.audio.keepAmbience.length} span(s)` : ""}` });
   if (plan.captions) sheet.push({ text: `captions ${plan.captions.template || ""}`.trim() });
   return {
     errors, warnings,

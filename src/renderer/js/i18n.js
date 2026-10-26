@@ -684,6 +684,13 @@ const D = {
   "dir.stage.story": ["Story order", "ترتيب القصة"],
   "dec.story": ["Story order of {segments} scenes ({source}): {order}", "ترتيب القصة لـ{segments} مشهد ({source}): {order}"],
   "dec.storySame": ["{segments} scenes: the story order is the shooting order", "{segments} مشهد: ترتيب القصة هو نفسه ترتيب التصوير"],
+  // Round 4 — director2: no spoiler, the kept action's own sound
+  "dir.spoiler": ["Opening", "الافتتاحية"],
+  "dir.spoilerAuto": ["Automatic (no spoiler for explainers)", "تلقائي (من غير حرق النهاية في الشرح)"],
+  "dir.spoilerAvoid": ["Never give away the ending", "ما تحرقش النهاية أبدًا"],
+  "dir.spoilerAllow": ["The result first is allowed", "مسموح النتيجة الأول"],
+  "dec.noSpoiler": ["No spoiler: the opening never shows the ending", "من غير حرق: الافتتاحية مش بتوري النهاية"],
+  "dec.keepAmbience": ["The action keeps its own sound in {n} spans ({sec} s) under the voice clean-up", "الأكشن محتفظ بصوته الأصلي في {n} حتة ({sec} ث) تحت تنضيف الصوت"],
 };
 
 let lang = "ar";

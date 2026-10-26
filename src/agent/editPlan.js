@@ -18,6 +18,7 @@ import { planSchemaOf, checkPlan, mainPieces, mapSpan, mapPoint, normalizeCuts, 
 import { OPERATION_INDEX } from "./operations.js";
 import { ajv } from "./skills/registry.js";
 import { applyCaptions, checkCaptions } from "./captions.js";
+import { placeMusicBed, DUCK_DEFAULT_DB } from "../core/musicBed.js";
 
 const validators = new Map(); // compiled lazily (module cycle: operations → editPlan → registry → operations)
 const TEXT_Y = { top: -0.32, center: 0, bottom: 0.3 };
@@ -213,22 +214,38 @@ export async function applyPlan(ctx, timelineId, plan, { expectedRevision, job }
     }
     if (sounds) done.push(`sound effects (${sounds})`);
 
-    // Music beds (v2), in EDIT time, on audio tracks.
+    // Music beds (v2), in EDIT time: each on its own music track that ducks under the speech (core/musicBed.js), at a
+    // level measured against the speech (MusicBedService.levelFor: 16 LU under it between phrases) unless the plan
+    // sets its own volumeDb (or autoLevel false).
     let music = 0;
     const endUs = () => { const ps = pieces(); return ps.length ? ps[ps.length - 1].end : 0; };
     for (const x of plan.music || []) {
       const m = ctx.services.repos.media.get(x.mediaId);
       const until = Math.min(x.editToUs ?? endUs(), x.editFromUs + Math.max(0, (m.durationUs || Infinity) - (x.offsetUs || 0)));
       if (until - x.editFromUs < 100_000) { skipped.push(`music: ${m.name} too short`); continue; }
-      const fade = x.fadeUs ?? 0;
-      await commit("music", (t) => ops.addSegment(t, newSegment("audio", { mediaId: m.id, name: m.name, start: x.editFromUs, duration: until - x.editFromUs, sourceStart: x.offsetUs || 0, sourceDuration: until - x.editFromUs, volumeDb: x.volumeDb ?? -18, fadeInUs: fade, fadeOutUs: fade })).id);
+      const bed = ctx.services.music?.bed;
+      let level = { volumeDb: x.volumeDb ?? -18, measured: null };
+      if ((x.autoLevel ?? x.volumeDb === undefined) && bed?.levelFor) { try { level = await bed.levelFor(T.get(timelineId).timeline, m, x.offsetUs || 0); } catch { /* the default level */ } }
+      await commit("music", (t) => {
+        const id = placeMusicBed(t, m, { fromUs: x.editFromUs, toUs: until, offsetUs: x.offsetUs || 0, duckDb: x.duckDb ?? DUCK_DEFAULT_DB, volumeDb: level.volumeDb });
+        if (x.fadeUs !== undefined) { const seg = t.tracks.flatMap((k) => k.segments).find((sg) => sg.id === id); const f = Math.min(x.fadeUs, Math.round(seg.duration / 2)); seg.fadeInUs = f; seg.fadeOutUs = f; }
+        return id;
+      });
       music++;
     }
-    if (music) done.push(`music (${music})`);
+    if (music) done.push(`music under the speech (${music})`);
 
     step(0.8, "look & audio");
     if (plan.filter) { await op("timeline_add_layer", { kind: "filter", settings: { preset: plan.filter.preset, intensity: plan.filter.intensity ?? 80 } }); done.push(`look ${plan.filter.preset}`); }
     if (plan.audio?.denoise || plan.audio?.enhanceVoice) { await op("audio_enhance_voice", { denoise: !!plan.audio.denoise, enhanceVoice: !!plan.audio.enhanceVoice }); done.push("voice clean-up"); }
+    // Kept wordless action keeps its own sound under the clean-up: the export reads the spans stored per timeline
+    // (exportService.setKeepAmbience, round 4). A plan without them clears earlier ones; an export service without
+    // the method (before audio-export) simply ignores the field.
+    const ex = ctx.services.exporter;
+    if (typeof ex?.setKeepAmbience === "function" && (plan.audio?.keepAmbience?.length || ex.keepAmbience?.(timelineId)?.length)) {
+      const kept = ex.setKeepAmbience(timelineId, plan.audio?.keepAmbience || []);
+      if (kept?.length) done.push(`action sound kept (${kept.length})`);
+    }
     if (plan.audio?.normalizeLufs) { await op("audio_normalize", { targetLufs: plan.audio.normalizeLufs }); done.push(`loudness ${plan.audio.normalizeLufs} LUFS`); }
     if (plan.captions) { step(0.85, "captions"); const c = await applyCaptions(ctx, timelineId, plan.captions); done.push(`captions (${c.pages} pages, ${c.words} words)`); }
     if (plan.retakes?.length) done.push(`retakes (${plan.retakes.length} lines, ${plan.retakes.reduce((n, g) => n + g.takes.length - 1, 0)} takes left out)`);
