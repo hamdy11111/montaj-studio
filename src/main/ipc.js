@@ -407,6 +407,14 @@ export function registerIpc({ getServices, getAgents = () => null, getWindow, ap
       return S().perception.analyze(m.path, { stages: q.stages ? arr(q.stages, "stages").map(String) : undefined, options: q.options ? obj(q.options) : {}, onProgress: (p) => notifyAll("perception:progress", { mediaId: m.id, ...p }) });
     },
     "perception.timeline": (mid) => S().perception.cached(S().repos.media.get(id(mid)).path),
+    // ---------------------------------------------------------------- links (Phase 6): cause ↔ reaction links + moment roles
+    "links.status": () => S().links.status(),
+    "links.analyze": (mid, o) => {
+      const m = S().repos.media.get(id(mid));
+      const q = obj(o);
+      return S().links.analyze(m.path, { verify: q.verify ? str(q.verify, "verify") : undefined, hint: q.hint ? str(q.hint, "hint") : null, options: q.options ? obj(q.options) : {}, onProgress: (p) => notifyAll("links:progress", { mediaId: m.id, progress: p }) });
+    },
+    "links.get": (mid) => S().links.cached(S().repos.media.get(id(mid)).path),
   };
   // The VFX library service of this window's services (created on first use).
   let vfxLibInstance = null;
