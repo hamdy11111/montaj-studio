@@ -2,11 +2,14 @@
 //   app://bundle/...   the renderer (HTML/CSS/JS) and the shared core modules, with a strict CSP
 //   media://asset/<id>[?proxy=1], media://thumb/<id>, media://cover/<projectId>, media://lib/<libraryItemId>,
 //   media://sticker/<builtin>, media://compound/<timelineId>, media://matte/<mediaId>[?v=stab], media://stab/<mediaId>, media://export/<recordId> — streamed from disk with HTTP Range support (needed for <video> seeking)
+//   media://libfile/<base64url path>: a file of the sound library or the B-roll index, for the library browsers'
+//   previews — read-only, real path checked against the libraries (main/libraryFiles.js)
 import { protocol, net } from "electron";
 import fs from "node:fs";
 import path from "node:path";
 import { Readable } from "node:stream";
 import { pathToFileURL } from "node:url";
+import { servicesLibraryFiles, libraryFileFromId } from "./libraryFiles.js";
 
 const MIME = {
   ".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8", ".css": "text/css; charset=utf-8", ".json": "application/json",
@@ -71,7 +74,9 @@ export function handleProtocols(o) {
     return new Response(fs.readFileSync(file), { headers });
   });
 
+  const libFiles = servicesLibraryFiles(o.getServices);
   protocol.handle("media", async (request) => {
+    if (request.method !== "GET" && request.method !== "HEAD") return new Response("method not allowed", { status: 405 });
     const url = new URL(request.url);
     const kind = url.hostname;
     const id = decodeURIComponent(url.pathname.replace(/^\/+/, ""));
@@ -94,6 +99,7 @@ export function handleProtocols(o) {
       if (kind === "vidsrc") return fileResponse(url.searchParams.get("thumb") === "1" ? s.video?.sourceThumb(id) : s.video?.sourcePath(id), request); // a video studio source (or its picture)
       if (kind === "vidthumb") return fileResponse(s.video?.thumbPath(id), request); // a generated video's picture
       if (kind === "vidinput") { const w = url.searchParams.get("w"); return fileResponse(/^(source|ref[1-3])$/.test(w || "") ? s.video?.inputPath(id, w) : null, request); } // what a result was made from
+      if (kind === "libfile") { const f = libraryFileFromId(id); const real = f && libFiles.resolve(f); return real ? fileResponse(real, request) : new Response("forbidden", { status: 403 }); } // library browsers' previews
       if (kind === "export") { const r = s.repos.exports.list().find((x) => x.id === id); return fileResponse(r?.path, request); }
     } catch {
       return new Response("not found", { status: 404 });

@@ -2,7 +2,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { buildExport, planSegments, outputSize, videoBitrateKbps, estimateSizeBytes, pickVideoEncoder } from "../core/exportGraph.js";
+import { buildExport, planSegments, outputSize, videoBitrateKbps, estimateSizeBytes, pickVideoEncoder, ambienceByMedia } from "../core/exportGraph.js";
 import { fileURLToPath } from "node:url";
 import { capabilities, ffmpegJob, run, binaries } from "./ffmpeg.js";
 import { speechRegions } from "../core/speech.js";
@@ -274,15 +274,43 @@ export class ExportService {
       && mattedMedia(timeline).every(([id, stab]) => this.mattes?.ready(id, stab && this.stabilizer ? "stab" : ""));
   }
 
-  /** Voice clean-up data for the export: the RNNoise model and, per media, where its words are (cached transcripts). */
-  voiceFor(tl) {
+  /**
+   * Voice clean-up data for the export: the RNNoise model, per media where its words are (cached transcripts), and
+   * the kept action whose own sound the clean-up leaves alone (keepAmbience, source µs per media; `override` = an
+   * export request's own list, else what the edit plan stored for this timeline).
+   */
+  voiceFor(tl, override = null) {
     const speech = {};
     for (const t of tl.tracks) for (const s of t.segments) {
       if (!s.mediaId || !s.audioFx?.denoise?.enabled || speech[s.mediaId] !== undefined) continue;
       const words = this.captions?.cachedWords?.(s.mediaId);
       speech[s.mediaId] = words?.length ? speechRegions(words) : null;
     }
-    return { speech, rnnModel: fs.existsSync(RNN_MODEL) ? RNN_MODEL : null };
+    const keepAmbience = ambienceByMedia(override || this.keepAmbience(tl.id));
+    return { speech, rnnModel: fs.existsSync(RNN_MODEL) ? RNN_MODEL : null, ...(keepAmbience ? { keepAmbience } : {}) };
+  }
+
+  /** Where a timeline's kept-action spans are stored (one small JSON per timeline, beside the app's other caches). */
+  ambienceFile(timelineId) { return path.join(this.paths.cache, "ambience", `${String(timelineId).replace(/[^\w.-]/g, "_")}.json`); }
+
+  /**
+   * Stores the edit plan's `audio.keepAmbience` (`[{ mediaId, fromUs, toUs }]`, SOURCE time) for a timeline: every
+   * later export of it keeps those spans' own sound under the voice clean-up. An empty list removes it. Returns the
+   * spans kept (merged, malformed ones dropped). Called when a plan is applied (agent/editPlan.js).
+   */
+  setKeepAmbience(timelineId, list) {
+    const file = this.ambienceFile(timelineId);
+    const by = ambienceByMedia(list);
+    const flat = by ? Object.entries(by).flatMap(([mediaId, sp]) => sp.map(([fromUs, toUs]) => ({ mediaId, fromUs, toUs }))) : [];
+    if (!flat.length) { fs.rmSync(file, { force: true }); return []; }
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, JSON.stringify({ schema: "montaj.keepAmbience/1", spans: flat }), "utf8");
+    return flat;
+  }
+
+  /** The kept-action spans stored for a timeline (`[{ mediaId, fromUs, toUs }]`), [] when none. */
+  keepAmbience(timelineId) {
+    try { return JSON.parse(fs.readFileSync(this.ambienceFile(timelineId), "utf8")).spans || []; } catch { return []; }
   }
 
   /** Static gain (dB) that brings the mix to `target` LUFS: renders the audio once and measures it (EBU R128). */
@@ -363,7 +391,7 @@ export class ExportService {
       }
       const { stabilized, mattes } = await this.prepareDerived(timeline, (stage, p) => notify("export:progress", { jobId, progress: 0, stage, stageProgress: p }));
       const size = outputSize(timeline.canvas, opts.resolution || "1080p");
-      const voice = this.voiceFor(timeline);
+      const voice = this.voiceFor(timeline, opts.keepAmbience);
       // Started without the editor's rasters (agents, compounds): rasterize here with the same drawing code.
       if ((!overlays || !Object.keys(overlays).length) && this.rasterize && needsRaster(timeline)) overlays = await this.rasterize(timeline, size.width, size.height);
       // Renderer rasters (text, stickers at the export size) win; original sticker files are the fallback.

@@ -25,12 +25,20 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { buildTimeline, speakerNames, wordsWithSpeakers, utterances, DEFAULTS as FUSE } from "./fuse.js";
 import { nemoModel } from "../captionService.js";
+import { modelSet, layerDef } from "../aiSetup/catalog.js";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url)).replace(/app\.asar([\\/])/, "app.asar.unpacked$1");
 const WORKERS = path.join(HERE, "workers");
 const ASR_DIR = path.join(HERE, "..", "asr");
 const REPO = path.resolve(HERE, "..", "..", "..");
 
+const PERCEPTION_SETS = layerDef("perception").sets;
+/**
+ * windowCheck's default model. Round 4 measured both on phase 6's labelled spans (02, 06; 29 yes/no questions):
+ * Qwen3.6 (sees keyframes) 25/29, Qwen3-Omni (sees and hears) 21/29 — Omni missed 4 of 8 real reactions and called every
+ * wrong cause candidate the cause (0/3), though it rejected all 12 calm decoys. "qwen3-omni" stays selectable.
+ */
+export const WINDOW_CHECK_ENGINE = "qwen3.6";
 export const STAGES = Object.freeze(["words", "speakers", "audio", "emotion", "shots", "faces", "asd", "vision"]);
 // Which stages read which earlier ones (a re-run of one makes these re-run too).
 export const NEEDS = Object.freeze({ words: [], speakers: [], audio: [], emotion: ["words", "speakers"], shots: [], faces: ["shots"], asd: ["faces"], vision: ["shots", "words"] });
@@ -204,6 +212,7 @@ export class PerceptionService {
         vision: has(this.models, "qwen3.6-35b-a3b"),
       },
       llama: has(this.runtime, "llama", process.platform === "win32" ? "llama-server.exe" : "llama-server"),
+      missing: Object.fromEntries(STAGES.map((st) => [st, this.missing(st)]).filter(([, why]) => why)),
     };
   }
 
@@ -221,6 +230,22 @@ export class PerceptionService {
     };
   }
 
+  /**
+   * Why a stage cannot run here (its runtime, llama.cpp or a required model file of the AI set-up's catalog is not
+   * installed — checked by name and size, no hashing), or null when it can.
+   */
+  missing(stage) {
+    if (!fs.existsSync(venvPython(this.runtime, stage === "words" ? "asr" : "perception"))) return `${stage === "words" ? "asr" : "perception"} runtime not installed`;
+    if (stage === "vision" && !fs.existsSync(path.join(this.runtime, "llama", process.platform === "win32" ? "llama-server.exe" : "llama-server"))) return "llama.cpp not installed";
+    for (const id of PERCEPTION_SETS) {
+      const set = modelSet("perception", id);
+      if (!set || set.optional || !set.stages.includes(stage)) continue;
+      const bad = set.files.find((f) => { const p = path.join(this.models, ...f.dir.split("/"), f.file); return !fs.existsSync(p) || fs.statSync(p).size !== f.size; });
+      if (bad) return `model not installed: ${set.name} (${bad.file})`;
+    }
+    return null;
+  }
+
   /** The last timeline made for this file's content, or null. */
   cached(file) {
     if (!fs.existsSync(file)) return null;
@@ -233,7 +258,7 @@ export class PerceptionService {
    * phase 6 (is this reaction caused by that event?). checks: [{t0, t1, question}]. engine: "qwen3-omni" | "keye".
    * Answers {available: false, reason} while that model is not installed.
    */
-  async windowCheck(file, checks, { engine = "qwen3-omni", signal } = {}) {
+  async windowCheck(file, checks, { engine = WINDOW_CHECK_ENGINE, signal } = {}) {
     const hash = fileHash(file);
     const dir = path.join(this.cacheDir, hash, "window-check");
     const release = await this.gpuLock.acquire(`perception-window-${hash.slice(0, 8)}`);
@@ -277,6 +302,9 @@ export class PerceptionService {
 
     for (const stage of todo) {
       if (signal?.aborted) throw Object.assign(new Error("cancelled"), { cancelled: true });
+      // A stage whose runtime or models are not installed is skipped (the AI set-up page installs them).
+      const lack = asr === "file" && stage === "words" ? null : this.missing(stage);
+      if (lack) { report[stage] = { skipped: lack }; doneW += WEIGHT[stage]; continue; }
       const def = this.#stage(stage, { media, audio, dir, results, asr, o });
       if (def.skip) { report[stage] = { skipped: def.skip }; doneW += WEIGHT[stage]; continue; }
       keys[stage] = stageKey(stage, { ...def.params, needs: NEEDS[stage].map((n) => keys[n] || null) });

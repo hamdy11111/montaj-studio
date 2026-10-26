@@ -58,26 +58,25 @@ test("captions: JSON from the model (fenced, with thinking, or bare) cleaned to 
   assert.equal(cleanCaption({ ar: "x" }), null, "no English description → no caption");
 });
 
-test("VLM lookup: Qwen3.6 from perception first, else Qwen3.5 + its mmproj", () => {
+test("VLM lookup: Qwen3.5 + its mmproj first (measured better in round 4), else Qwen3.6 from perception", () => {
   const rt = path.join(dir, "runtime");
-  fs.mkdirSync(path.join(rt, "models", "translate"), { recursive: true });
-  fs.mkdirSync(path.join(rt, "models", "media", "unsloth__Qwen3.5-35B-A3B-GGUF"), { recursive: true });
   assert.equal(findVlm(rt), null);
-  fs.writeFileSync(path.join(rt, "models", "translate", "Qwen3.5-35B-A3B-Q4_K_M.gguf"), "");
-  fs.writeFileSync(path.join(rt, "models", "media", "unsloth__Qwen3.5-35B-A3B-GGUF", "mmproj-F16.gguf"), "");
-  assert.equal(findVlm(rt).name, "Qwen3.5-35B-A3B");
-  fs.mkdirSync(path.join(rt, "models", "perception"), { recursive: true });
-  fs.writeFileSync(path.join(rt, "models", "perception", "Qwen3.6-35B-A3B-UD-Q4_K_M.gguf"), "");
-  assert.equal(findVlm(rt).name, "Qwen3.5-35B-A3B", "no mmproj for 3.6 yet → stays on 3.5");
-  fs.writeFileSync(path.join(rt, "models", "perception", "mmproj-F16.gguf"), "");
-  assert.equal(findVlm(rt).name, "Qwen3.6-35B-A3B");
-  // perception's own layout: a folder of its own
-  fs.rmSync(path.join(rt, "models", "perception"), { recursive: true });
+  // perception's layout: a folder of its own; alone, it is used (the fallback)
   const sub = path.join(rt, "models", "perception", "qwen3.6-35b-a3b");
   fs.mkdirSync(sub, { recursive: true });
   fs.writeFileSync(path.join(sub, "Qwen3.6-35B-A3B-UD-IQ4_XS.gguf"), "");
+  assert.equal(findVlm(rt), null, "no mmproj for 3.6 yet");
   fs.writeFileSync(path.join(sub, "mmproj-F16.gguf"), "");
+  assert.equal(findVlm(rt).name, "Qwen3.6-35B-A3B");
   assert.equal(findVlm(rt).model, path.join(sub, "Qwen3.6-35B-A3B-UD-IQ4_XS.gguf"));
+  // the dubbing translator + its projector: preferred as soon as both are there
+  fs.mkdirSync(path.join(rt, "models", "translate"), { recursive: true });
+  fs.mkdirSync(path.join(rt, "models", "media", "unsloth__Qwen3.5-35B-A3B-GGUF"), { recursive: true });
+  fs.writeFileSync(path.join(rt, "models", "translate", "Qwen3.5-35B-A3B-Q4_K_M.gguf"), "");
+  assert.equal(findVlm(rt).name, "Qwen3.6-35B-A3B", "no projector for 3.5 yet → stays on 3.6");
+  fs.writeFileSync(path.join(rt, "models", "media", "unsloth__Qwen3.5-35B-A3B-GGUF", "mmproj-F16.gguf"), "");
+  assert.equal(findVlm(rt).name, "Qwen3.5-35B-A3B");
+  fs.rmSync(path.join(rt, "models"), { recursive: true });
 });
 
 test("index bookkeeping: a stable media key, status counts", () => {

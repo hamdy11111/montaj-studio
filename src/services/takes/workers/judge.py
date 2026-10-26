@@ -2,7 +2,7 @@
 #
 #     python -X utf8 judge.py --job <job.json> --out <result.json>
 #
-# job: { media, ffmpeg, modelPath, fps (2), side (320), pairs: [{ id, a: {t0, t1}, b: {t0, t1}, type, line }] }
+# job: { media, ffmpeg, modelPath, fps (2), side (320), pairs: [{ id, a: {t0, t1, media?}, b: {t0, t1, media?}, type, line }] }
 # result: { answers: { <id>: { ab, ba, rawAb, rawBa } }, model, ms, torchPeakMB }
 #   ab: the answer ("A" | "B" | "?") with take a shown first, ba: with take b shown first — the scorer
 #   (core/takeScore.js judgeVerdict) counts the judgement only when both orders name the same take.
@@ -72,8 +72,8 @@ def main():
         return (letter if letter in ("A", "B") else "?"), reply
 
     for n, p in enumerate(pairs):
-        a = clip(job["ffmpeg"], job["media"], p["a"]["t0"], p["a"]["t1"], fps, side)
-        b = clip(job["ffmpeg"], job["media"], p["b"]["t0"], p["b"]["t1"], fps, side)
+        a = clip(job["ffmpeg"], p["a"].get("media") or job["media"], p["a"]["t0"], p["a"]["t1"], fps, side)
+        b = clip(job["ffmpeg"], p["b"].get("media") or job["media"], p["b"]["t0"], p["b"]["t1"], fps, side)
         ab, raw_ab = ask(a, b, p.get("type"), p.get("line", ""))
         ba, raw_ba = ask(b, a, p.get("type"), p.get("line", ""))
         answers[str(p["id"])] = {"ab": ab, "ba": ba, "rawAb": raw_ab, "rawBa": raw_ba}
