@@ -31,6 +31,7 @@ const CHUNK_MIN_S = 4;
 const GPU_PARTS = 4;
 const PRO_VERSION = "pro1";
 const PRO_SHORT_SIDE = 720;
+const PRO_AUTO_MAX_US = 5 * 60 * US; // "auto": longer media get the fast matte (see make)
 const SAM_CKPT = "sam3.1_multiplex_fp16.safetensors";
 
 /**
@@ -75,7 +76,19 @@ export class MatteService {
   proFile(mediaId, variant = "") { return path.join(this.dir, `${mediaId}${variant ? `-${variant}` : ""}-${PRO_VERSION}.mp4`); }
   /** The matte file the app uses: the pro one when that recipe is wanted, else the fast one. */
   file(mediaId, variant = "") { return this.wantPro() ? this.proFile(mediaId, variant) : this.fastFile(mediaId, variant); }
-  ready(mediaId, variant = "") { return fs.existsSync(this.file(mediaId, variant)); }
+  ready(mediaId, variant = "") {
+    const f = this.file(mediaId, variant);
+    // A fast matte kept under the pro name ("auto" on long media, or a failed pro run) is not ready when "pro" is asked.
+    return fs.existsSync(f) && !(this.quality() === "pro" && fs.existsSync(`${f}.fast`));
+  }
+
+  /** Keep a fast matte under the pro name (marked, so asking for "pro" later makes the real one). */
+  keepFastAsPro(fastFile, mediaId, variant = "") {
+    const pro = this.proFile(mediaId, variant);
+    fs.copyFileSync(fastFile, pro);
+    fs.writeFileSync(`${pro}.fast`, "");
+    return pro;
+  }
 
   /** "auto" (pro when installed), "pro" or "fast": settings media.matteQuality. */
   quality() { try { return this.settings.get("media").matteQuality || "auto"; } catch { return "auto"; } }
@@ -129,13 +142,16 @@ export class MatteService {
   }
 
   async make(mediaId, opts) {
-    if (!this.wantPro()) return this.makeFast(mediaId, opts);
+    // "auto" keeps long media on the fast recipe: the pro one runs ~5.5 frames a second (a 5-minute clip ≈ 27 min).
+    const long = (this.repos.media.get(mediaId)?.durationUs || 0) > PRO_AUTO_MAX_US;
+    if (!this.wantPro() || (long && this.quality() === "auto")) {
+      const f = await this.makeFast(mediaId, opts);
+      return this.wantPro() ? this.keepFastAsPro(f, mediaId, opts.variant) : f; // in pro/auto mode the app reads the pro name
+    }
     try { return await this.makePro(mediaId, opts); } catch (e) {
       if (opts.signal?.aborted || this.quality() === "pro") throw e;
       this.log("matte: pro recipe failed, fast recipe instead", String(e.details?.stderr || e.message).slice(-400));
-      const f = await this.makeFast(mediaId, opts);
-      fs.copyFileSync(f, this.proFile(mediaId, opts.variant)); // this media keeps the fast matte under the pro name
-      return this.proFile(mediaId, opts.variant);
+      return this.keepFastAsPro(await this.makeFast(mediaId, opts), mediaId, opts.variant);
     }
   }
 
@@ -161,6 +177,7 @@ export class MatteService {
       "--ffmpeg", binaries().ffmpeg, "--ffprobe", binaries().ffprobe, "--comfy", pr.comfy, "--sam", pr.sam, "--matanyone", pr.matanyone,
       "--short", String(PRO_SHORT_SIDE), "--fps", String(fps), "--stats", `${out}.stats.json`], { signal, onLine: (l) => l.progress != null && onProgress?.(l.progress) }));
     fs.renameSync(tmp, out);
+    fs.rmSync(`${out}.fast`, { force: true });
     this.log("pro matte ready", mediaId + (variant ? ` (${variant})` : ""), `${r?.frames} frames, ${r?.fps} fps, ${r?.restarts} restarts, ${((Date.now() - t0) / 1000).toFixed(1)} s`);
     onProgress?.(1);
     this.notify("matte:ready", { mediaIds: [mediaId] });

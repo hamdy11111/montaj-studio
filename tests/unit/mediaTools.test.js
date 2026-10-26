@@ -69,7 +69,10 @@ test("matte recipe: fast/pro/auto choose the file; the fast one keeps its name",
   quality = "pro";
   assert.match(m.file("abc"), /abc-pro1\.mp4$/);
   assert.equal(m.ready("abc"), false);
-  fs.writeFileSync(m.proFile("abc"), "x");
+  fs.writeFileSync(m.fastFile("abc"), "fast");
+  m.keepFastAsPro(m.fastFile("abc"), "abc");
+  assert.equal(m.ready("abc"), false, "a fast matte under the pro name does not count when pro is asked");
+  fs.rmSync(`${m.proFile("abc")}.fast`);
   assert.equal(m.ready("abc"), true);
   quality = "auto";
   m.proRuntime = () => null; m.proCheck = null;
