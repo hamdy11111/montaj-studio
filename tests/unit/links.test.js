@@ -8,7 +8,7 @@ import {
   verifyQueries, controlQueries, calibrationFrom, applyAnswers, protectKeeps, checkEdit, envelopeDb, suddenSilences, semanticP, LINKS_SCHEMA, LINK_DEFAULTS, peopleIn, samePeople,
 } from "../../src/core/causeLinks.js";
 import { momentUnits, assignRoles, ROLES } from "../../src/core/momentRoles.js";
-import { labelTemplate, validateLabels, evaluate, pooled, labelPageHtml, LABELS_SCHEMA } from "../../src/services/links/labels.js";
+import { labelTemplate, validateLabels, evaluate, pooled, labelPageHtml, indexHtml, LABELS_SCHEMA } from "../../src/services/links/labels.js";
 import { readWav, splitAnswers } from "../../src/services/links/linkService.js";
 
 let n = 0;
@@ -268,6 +268,9 @@ test("labels: template, validation, precision and recall, pooled scores, the lab
   const p = pooled([e, e]);
   assert.equal(p.linkPrecision, 1);
   assert.equal(p.real, 6);
+  const front = indexHtml([{ name: "x", doc, eval: e }], p);
+  assert.ok(front.includes("x.labels.html") && front.includes("100 %"));
+  assert.ok(labelPageHtml(doc, { fileName: "02-x.labels.json" }).includes('"fileName":"02-x.labels.json"'));
   const html = labelPageHtml(doc);
   assert.ok(html.includes("<video") && html.includes("حفظ الملف") && html.includes(doc.reactions[0].id));
   assert.ok(!/<\/script>[^]*<\/script>[^]*<\/script>/.test(html.replace(/<\/script><\/body>/, "")), "the embedded data cannot close the script");
@@ -355,9 +358,22 @@ test("eye + ear: a heard laugh makes a reaction real; crying or talk heard leave
   assert.equal(r.R3.reaction_real, true, "hands on head is strong enough over talk");
   assert.equal(r.R4.reaction_real, true, "the ear heard a laugh the eye could not see");
   assert.equal(r.R4.cause, "B");
+  assert.equal(r.R4.reaction_seen, "heard_laughter", "heard, not seen: still real downstream");
   assert.equal(r.R5.cause, "A");
   assert.equal(r.R5.confidence, 0.63);
   assert.deepEqual(r.R5.also_related, ["B"]);
   assert.equal(mergeAnswers(null, null), null);
   assert.equal(mergeAnswers({ R1: eye("smiling", "A") }, null).R1.cause, "A");
+});
+
+test("director view: best links with spans inline, in µs when asked; sure-only filter", async () => {
+  const { directorView } = await import("../../src/core/causeLinks.js");
+  const doc = { schema: LINKS_SCHEMA, media: null, profile: { kind: "speech" }, ...protectedDoc(), moments: [{ id: "M001", t0: 10, t1: 12, role: "punch", roleConfidence: 0.9, links: ["L001"] }] };
+  doc.links[1].status = "unsure";
+  const v = directorView(doc, { scale: 1e6 });
+  assert.equal(v.unit, "us");
+  assert.equal(v.links.length, 2);
+  assert.deepEqual([v.links[0].cause.t0, v.links[0].reaction.t1], [10e6, 13.5e6]);
+  assert.equal(v.moments[0].t1, 12e6);
+  assert.equal(directorView(doc, { sureOnly: true }).links.length, 1);
 });

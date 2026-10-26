@@ -146,19 +146,25 @@ export class LinkService {
   }
 
   /**
-   * One engine's answers to the questions (+ decoys), from the cache or from the worker: frames on the CPU first, then
-   * the model under the GPU lock. {answers, controlAnswers, report}; answers null when the engine is not installed.
+   * One engine's answers to the questions (+ decoys). Every answer is cached on its own, keyed by the exact question,
+   * so a new decoy or one new reaction asks only what is new. What is missing is asked of the worker: frames on the
+   * CPU first, then the model under the GPU lock. {answers, controlAnswers, report}; null answers when not installed.
    */
   async #ask(engine, tl, dir, queries, controls, { side, refresh, signal, onProgress, from = 0, to = 1 }) {
     const st = this.status();
-    const ansFile = path.join(dir, `answers.${keyOf([VERSION, engine, queries, controls])}.json`);
-    if (fs.existsSync(ansFile) && !refresh) {
-      const r = JSON.parse(fs.readFileSync(ansFile, "utf8"));
-      return { answers: r.answers, controlAnswers: r.controls ?? null, report: { ...r.report, cached: true } };
-    }
+    const cacheFile = path.join(dir, `answers.${engine}.json`);
+    const cache = fs.existsSync(cacheFile) && !refresh ? JSON.parse(fs.readFileSync(cacheFile, "utf8")) : { answers: {}, runs: [] };
+    const all = [...queries, ...controls];
+    const k = (q) => keyOf([VERSION, engine, q]);
+    const missing = all.filter((q) => !cache.answers[k(q)]);
+    const result = () => {
+      const raw = Object.fromEntries(all.map((q) => [q.reaction, cache.answers[k(q)]]).filter(([, x]) => x));
+      return { ...splitAnswers(raw, queries, controls), report: { engine, available: true, cachedAnswers: all.length - missing.length, runs: cache.runs } };
+    };
+    if (!missing.length) return result();
     if (!st.engines[engine] || !st.llama || !st.env) return { answers: null, controlAnswers: null, report: { engine, available: false, reason: `not installed (${JSON.stringify(st)})` } };
     const llama = path.join(this.runtime, "llama", process.platform === "win32" ? "llama-server.exe" : "llama-server");
-    const job = { media: tl.media.path, ffmpeg: this.ffmpeg, llama, modelsDir: this.models, engine, queries: [...queries, ...controls], workDir: path.join(dir, "frames"), side };
+    const job = { media: tl.media.path, ffmpeg: this.ffmpeg, llama, modelsDir: this.models, engine, queries: missing, workDir: path.join(dir, "frames"), side };
     const script = path.join(WORKERS, "verify_links.py");
     const mid = from + 0.4 * (to - from);
     const wopts = (stage, a, b) => ({ signal, onProgress: (p) => onProgress?.(a + (b - a) * p), log: (l) => this.log(`[links ${engine} ${stage}] ${l}`), outFile: path.join(dir, `${engine}-${stage}-${Date.now()}.json`) });
@@ -169,10 +175,11 @@ export class LinkService {
     const waitMs = Date.now() - wait0;
     try {
       const r = await runWorker(venvPython(this.runtime), script, job, wopts("verify", mid, to));
-      const got = r.available ? splitAnswers(r.answers, queries, controls) : { answers: null, controlAnswers: null };
-      const report = { engine, available: r.available, model: r.model, reason: r.reason ?? null, errors: r.errors, msPerReaction: r.ms, serverLoadS: r.serverLoadS, frames: r.frames, timing: r.timing, gpuWaitMs: waitMs };
-      if (r.available) fs.writeFileSync(ansFile, JSON.stringify({ answers: got.answers, controls: got.controlAnswers, report }, null, 1));
-      return { ...got, report };
+      if (!r.available) return { answers: null, controlAnswers: null, report: { engine, available: false, reason: r.reason ?? null } };
+      for (const q of missing) if (r.answers[q.reaction]) cache.answers[k(q)] = r.answers[q.reaction];
+      cache.runs.push({ at: new Date().toISOString(), model: r.model, asked: missing.length, errors: r.errors, msPerQuestion: r.ms, serverLoadS: r.serverLoadS, frames: r.frames, timing: r.timing, gpuWaitMs: waitMs });
+      fs.writeFileSync(cacheFile, JSON.stringify(cache, null, 1));
+      return result();
     } finally { await Promise.resolve(release()).catch(() => {}); }
   }
 

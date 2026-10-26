@@ -32,7 +32,8 @@ export const LINK_DEFAULTS = Object.freeze({
   eventFwdS: 30,          // …and forward to the scene's end, at most this far
   eventTauS: 20,          // event profile: how slowly the time prior decays
   topK: { speech: 4, event: 5 }, // candidates per reaction kept (and sent to the semantic check)
-  sureAt: 0.65,           // final confidence from which a link is «متأكد»
+  sureAt: 0.65,           // final confidence from which a link is «متأكد»…
+  sureSemantic: 0.5,      // …when the model's (calibrated) yes is at least this sure
   unverifiedCap: 0.6,     // a link nobody checked for meaning can never be «متأكد»
   nearGapS: 3,            // cause and reaction closer than this: the gap between them is part of the relation
 });
@@ -388,7 +389,7 @@ export function finalizeLinks(cands, verdicts = {}, { reactionChecks = {}, ...op
   const out = [...byR.values()].flat();
   out.forEach((l, i) => {
     l.id = `L${String(i + 1).padStart(3, "0")}`;
-    l.status = l.best && l.confidence >= o.sureAt && l.checks.semantic?.yes === true && reactionChecks[l.reaction]?.real !== false ? "sure" : "unsure";
+    l.status = l.best && l.confidence >= o.sureAt && l.checks.semantic?.yes === true && (l.checks.semantic.confidence ?? 1) >= o.sureSemantic && reactionChecks[l.reaction]?.real !== false ? "sure" : "unsure";
     l.label_ar = l.status === "sure" ? "متأكد" : "مش متأكد";
     l.keepGap = l.gapS <= o.nearGapS;
   });
@@ -436,15 +437,20 @@ export function verifyQueries(tl, doc, opts = {}) {
 }
 
 /**
- * Decoy questions: the same question asked at moments where nothing was heard (≥ `awayS` from every reaction, the
- * evidence text borrowed from a real reaction). How often the model still says "a real reaction" and names a cause
+ * Decoy questions: the same question asked at calm moments where nothing was heard (≥ `awayS` from every reaction,
+ * vision energy ≤ 3, no burst within 2 s; the evidence text borrowed from a real reaction). How often the model still says "a real reaction" and names a cause
  * there is its false-yes rate — the calibration that discounts its confidence (applyAnswers). Deterministic.
  */
 export function controlQueries(tl, doc, { n = 6, awayS = 4, ...opts } = {}) {
   const dur = doc.media?.duration || tl.media?.duration || 0;
   const busy = (t) => doc.reactions.some((r) => t > r.t0 - awayS && t < r.t1 + awayS);
-  const slots = [];
-  for (let t = 3; t < dur - 2; t += 0.5) if (!busy(t)) slots.push(r3(t));
+  // Calm moments only: a "quiet" second inside a lively stretch may still be a reaction nobody flagged.
+  const energy = (t) => byType(tl, "shot_log").find((e) => t >= e.t0 && t < e.t1)?.extra?.energy ?? null;
+  const loud = (t) => byType(tl, "loudness_spike", "laughter", "audio_tag").some((e) => e.t1 >= t - 2 && e.t0 <= t + 2 && e.type !== "audio_tag" || (e.type === "audio_tag" && TAG_REACTION.some(([re]) => re.test(e.text || "")) && e.t1 >= t - 2 && e.t0 <= t + 2));
+  const free = [];
+  for (let t = 3; t < dur - 2; t += 0.5) if (!busy(t)) free.push(r3(t));
+  const calm = free.filter((t) => (energy(t) ?? 3) <= 3 && !loud(t));
+  const slots = calm.length >= n ? calm : free;
   const real = doc.reactions.filter((r) => r.evidence.length);
   if (!slots.length || !real.length) return [];
   const out = [];
@@ -496,7 +502,7 @@ export function mergeAnswers(vision, audio) {
     }
     if (!real) { pick = "none"; conf = Math.max(v.confidence ?? 0.5, a.confidence ?? 0.5); }
     out[id] = {
-      reaction_real: real, reaction_confidence: r3(rc), reaction_seen: real ? seen : "nothing_visible", sound_heard: heard,
+      reaction_real: real, reaction_confidence: r3(rc), reaction_seen: !real ? "nothing_visible" : vReal ? seen : `heard_${heard}`, sound_heard: heard,
       cause: pick, cause_time: time, confidence: r3(conf), also_related: also, reason: `eye: ${v.reason || ""} | ear: ${a.reason || ""}`,
       _map: v._map || a._map, engines: { vision: v, audio: a },
     };
@@ -683,4 +689,26 @@ export function checkEdit(doc, segments, { scale = 1, ...opts } = {}) {
     }
   }
   return out;
+}
+
+/**
+ * The compact view the director (phase 7) reads: the best link of every reaction with its cause and reaction spans
+ * inline, and the moments with their roles, in the director's units (`scale` 1e6 = µs of source time). Links under
+ * `minConfidence` are left out; «مش متأكد» ones stay unless `sureOnly`.
+ */
+export function directorView(doc, { scale = 1, minConfidence = 0, sureOnly = false } = {}) {
+  const R = new Map(doc.reactions.map((r) => [r.id, r])), C = new Map(doc.causes.map((c) => [c.id, c]));
+  const t = (x) => Math.round(x * scale * 1000) / 1000;
+  return {
+    schema: doc.schema, media: doc.media, profile: doc.profile?.kind ?? null, unit: scale === 1 ? "s" : scale === 1e6 ? "us" : `x${scale}`,
+    links: bestLinks(doc, minConfidence).filter((l) => !sureOnly || l.status === "sure").map((l) => {
+      const r = R.get(l.reaction), c = C.get(l.cause);
+      return {
+        id: l.id, status: l.status, label_ar: l.label_ar, confidence: l.confidence, direction: l.direction, gap: t(l.gapS), keepGap: l.keepGap,
+        cause: { id: c.id, t0: t(c.t0), t1: t(c.t1), kind: c.kind, text: c.text ?? null },
+        reaction: { id: r.id, t0: t(r.t0), t1: t(r.t1), kind: r.kind, kinds: r.kinds, strength: r.strength, real: r.verified?.real ?? null },
+      };
+    }),
+    moments: (doc.moments || []).map((m) => ({ id: m.id, t0: t(m.t0), t1: t(m.t1), role: m.role, roleConfidence: m.roleConfidence, links: m.links })),
+  };
 }

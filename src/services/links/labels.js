@@ -101,10 +101,10 @@ const KIND_AR = { laughter: "ضحك", applause: "تصفيق", cheer: "هتاف",
  * The labelling page: the raw video (read in place through file://), every reaction with its candidate causes and
  * the system's guess, and per reaction: real or not, which cause (or mark a new one from the video's current time),
  * no clear cause, unsure. Saved in the browser as you go; "حفظ الملف" downloads the label JSON. `labels`: an existing
- * label file to continue (else a template).
+ * label file to continue (else a template); `fileName`: the name the saved file gets (the CLI's <name>.labels.json).
  */
-export function labelPageHtml(doc, { labels = null, videoUrl = null } = {}) {
-  const data = { doc: { media: doc.media, profile: doc.profile, reactions: doc.reactions, causes: doc.causes, links: doc.links, moments: doc.moments || [] }, labels: labels || labelTemplate(doc), kindAr: KIND_AR };
+export function labelPageHtml(doc, { labels = null, videoUrl = null, fileName = null } = {}) {
+  const data = { fileName: fileName || `${doc.media?.name || "media"}.labels.json`, doc: { media: doc.media, profile: doc.profile, reactions: doc.reactions, causes: doc.causes, links: doc.links, moments: doc.moments || [] }, labels: labels || labelTemplate(doc), kindAr: KIND_AR };
   const src = videoUrl || (doc.media?.path ? `file:///${String(doc.media.path).replace(/\\/g, "/").split("/").map(encodeURIComponent).join("/").replace(/^([A-Za-z])%3A/, "$1:")}` : "");
   return `<!doctype html><html lang="ar" dir="rtl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>تعليم الروابط — ${esc(doc.media?.name)}</title>
@@ -146,7 +146,7 @@ function store(){try{localStorage.setItem(KEY,JSON.stringify(L))}catch(e){}const
 document.getElementById("who").value=L.labeller||"";document.getElementById("who").oninput=e=>{L.labeller=e.target.value;store()};
 document.getElementById("gnote").value=L.note||"";document.getElementById("gnote").oninput=e=>{L.note=e.target.value;store()};
 document.getElementById("add").onclick=()=>{const t=v.currentTime;L.reactions.push({id:"H"+(L.reactions.length+1),t0:+(t-0.5).toFixed(2),t1:+(t+0.5).toFixed(2),kind:"laughter",real:true,unsure:false,noCause:false,causes:[],note:"added by hand"});render();store()};
-document.getElementById("save").onclick=()=>{const b=new Blob([JSON.stringify(L,null,1)],{type:"application/json"});const a=document.createElement("a");a.href=URL.createObjectURL(b);a.download=(D.doc.media&&D.doc.media.name||"media")+".labels.json";a.click()};
+document.getElementById("save").onclick=()=>{const b=new Blob([JSON.stringify(L,null,1)],{type:"application/json"});const a=document.createElement("a");a.href=URL.createObjectURL(b);a.download=D.fileName;a.click()};
 function render(){const box=document.getElementById("list");box.innerHTML="";
 for(const lr of L.reactions){const pr=D.doc.reactions.find(r=>r.id===lr.id);const links=D.doc.links.filter(k=>k.reaction===lr.id).sort((a,b)=>a.rank-b.rank);
 const d=document.createElement("div");d.className="r"+(lr.real!==null||lr.unsure?" done":"");
@@ -168,4 +168,36 @@ const [s0,s1]=mk.querySelectorAll("button");s0.onclick=()=>{lr._c0=+v.currentTim
 const nt=document.createElement("textarea");nt.rows=1;nt.placeholder="ملاحظة";nt.value=lr.note||"";nt.oninput=()=>{lr.note=nt.value;store()};d.appendChild(nt);box.appendChild(d)}}
 render();store();
 </script></body></html>`;
+}
+
+/**
+ * The results folder's front page (Arabic): per media the content profile, reactions / links / «متأكد», the check's
+ * engine and calibration, the scores when labelled, and a link to its labelling page; then how to label.
+ * rows: [{name, doc, eval?}], pooledScores: pooled(…) or null.
+ */
+export function indexHtml(rows, pooledScores = null) {
+  const pc = (x) => (x === null || x === undefined ? "—" : `${Math.round(x * 100)} %`);
+  const tr = rows.map(({ name, doc, eval: e }) => {
+    const v = doc.report.verify || {};
+    const cal = v.calibration ? `${pc(v.calibration.realRate)} (${v.calibration.n})` : "—";
+    return `<tr><td><a href="${esc(encodeURIComponent(name))}.labels.html">${esc(name)}</a></td><td>${doc.profile.kind === "event" ? "حدث/تحدي" : "كلام"}</td><td>${doc.reactions.length}</td><td>${doc.links.filter((l) => l.best).length}</td><td>${doc.report.counts.sure}</td><td>${esc(v.engine || "—")}</td><td>${cal}</td><td>${e ? `${e.counts.real} / ${e.counts.withCause}` : "—"}</td><td>${e ? pc(e.links.precision) : "—"}</td><td>${e ? pc(e.links.precisionSure) : "—"}</td><td>${e ? pc(e.links.recall) : "—"}</td></tr>`;
+  }).join("");
+  const P = pooledScores;
+  return `<!doctype html><html lang="ar" dir="rtl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>روابط السبب ورد الفعل</title>
+<style>:root{--bg:#f6f5f2;--card:#fff;--ink:#1d1d1f;--mute:#6b6b70;--line:#e3e1dc}@media (prefers-color-scheme:dark){:root{--bg:#161618;--card:#202023;--ink:#ececee;--mute:#a0a0a8;--line:#34343a}}
+body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.7 system-ui,"Segoe UI",Tahoma,sans-serif}main{max-width:1000px;margin:0 auto;padding:16px}
+table{width:100%;border-collapse:collapse;background:var(--card);font-size:14px}th,td{border-bottom:1px solid var(--line);padding:6px 8px;text-align:start}th{color:var(--mute);font-weight:600}
+.box{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:10px 14px;margin:14px 0}.mute{color:var(--mute)}a{color:inherit}</style></head><body><main>
+<h1>روابط «السبب ↔ رد الفعل» وأدوار اللحظات</h1>
+<p class="mute">لكل فيديو: ردود الفعل اللي اتسمعت أو اتشافت، وسبب كل واحدة، ودرجة الثقة. «متأكد» = نموذج الصورة شاف السبب ورد الفعل وأكّدهم. «مش متأكد» = الرابط موجود بس محتاج عينك.</p>
+<div style="overflow-x:auto"><table><tr><th>الفيديو (صفحة التعليم)</th><th>النوع</th><th>ردود فعل</th><th>روابط</th><th>متأكد</th><th>الفحص</th><th>«آه» على الطُعم</th><th>متعلّم: حقيقي / بسبب</th><th>دقة الروابط</th><th>دقة «متأكد»</th><th>السبب الصح اتلقى</th></tr>${tr}</table></div>
+${P ? `<p>المجموع على الملفات المتعلّمة: دقة الروابط ${pc(P.linkPrecision)} · دقة «متأكد» ${pc(P.linkPrecisionSure)} (من ${P.nSure}) · السبب الصح اتلقى ${pc(P.linkRecall)} (من ${P.withCause}) · السبب الصح جوه المرشحين ${pc(P.linkRecallTopK)}.</p>` : ""}
+<div class="box"><b>تنبيه مهم:</b> الأرقام دي من تعليم Claude بالصورة بس (من غير صوت)، على عدد صغير جدًا من الروابط، ومش من تعليمك انت. هي بتقول الطريقة شغالة ولا لأ، مش النسبة الحقيقية. «الطُعم» = لحظات هادية مفيهاش حاجة، بنسأل عنها النموذج عشان نعرف بيقول «آه» غلط قد إيه.</div>
+<div class="box"><b>إزاي تعلّم (المطلوب 50 رابط من مقالبك وتحدياتك):</b><ol>
+<li>افتح صفحة التعليم بتاعة الفيديو (في Chrome أو Edge). الفيديو الخام بيتقري من مكانه، مفيش نسخ.</li>
+<li>لكل رد فعل: اضغط ▶ وشوف. «رد فعل حقيقي؟» آه أو لأ. لو مش متأكد اضغط «مش متأكد».</li>
+<li>اختار السبب الصح من القايمة («ده السبب»)، أو علّمه بنفسك: «بداية سبب تاني» و«نهايته» من الفيديو. لو مفيش سبب ظاهر: «مفيش سبب واضح».</li>
+<li>لو فيه رد فعل النظام ماشافهوش: وقّف الفيديو عنده واضغط «➕ رد فعل جديد».</li>
+<li>في الآخر «💾 حفظ الملف»، وحط الملف في فولدر <code>labels</code> جنب الصفحة. الشغل بيتحفظ في المتصفح أول بأول.</li></ol></div>
+</main></body></html>`;
 }
