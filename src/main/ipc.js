@@ -407,6 +407,9 @@ export function registerIpc({ getServices, getAgents = () => null, getWindow, ap
       return S().perception.analyze(m.path, { stages: q.stages ? arr(q.stages, "stages").map(String) : undefined, options: q.options ? obj(q.options) : {}, onProgress: (p) => notifyAll("perception:progress", { mediaId: m.id, ...p }) });
     },
     "perception.timeline": (mid) => S().perception.cached(S().repos.media.get(id(mid)).path),
+    // ---------------------------------------------------------------- director (Phase 7): the verifier on an export, the planner models
+    "director.verify": async (tid, file) => (await import("../agent/director.js")).verifyExport(A().userContext(), id(tid), str(file, "file")),
+    "director.planners": async () => (await import("../services/directorLLM.js")).plannerModels(S().perception.runtime).map(({ id: i, name }) => ({ id: i, name })),
   };
   // The VFX library service of this window's services (created on first use).
   let vfxLibInstance = null;

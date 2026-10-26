@@ -595,6 +595,27 @@ const D = {
   "set.matteQuality": ["Person cut-out", "قص الشخص"], "set.matteQuality.auto": ["Best available (SAM 3.1 + MatAnyone2 when installed)", "الأحسن المتاح (SAM 3.1 + MatAnyone2 لو متسطّبين)"],
   "set.matteQuality.pro": ["Professional (GPU)", "احترافي (كارت الشاشة)"], "set.matteQuality.fast": ["Fast (CPU)", "سريع (المعالج)"],
   "set.libraryDir": ["Sound and B-roll library folder", "فولدر مكتبة الأصوات والبي-رول"],
+  // Phase 7 — the director as a pipeline (treatments, critic, verifier)
+  "dir.optPerceive": ["Understand the video first: action, laughs and reactions (slower, uses the graphics card)", "افهم الفيديو الأول: الأكشن والضحك وردود الفعل (أبطأ، وبيستخدم كارت الشاشة)"],
+  "dir.planner": ["Director", "المخرج"], "dir.plannerRules": ["Built-in rules (fast)", "قواعد البرنامج (سريع)"], "dir.plannerLocal": ["Local model (Qwen, on this computer)", "موديل محلي (Qwen على الجهاز)"],
+  "dir.plannerClaude": ["Stronger director (Claude, needs internet and your key)", "مخرج أقوى (Claude، محتاج نت ومفتاحك)"],
+  "dir.claudeKeyPh": ["Your Anthropic API key (used for this run only, never saved)", "مفتاح Anthropic بتاعك (للمرة دي بس، مش بيتحفظ)"],
+  "dir.sheet": ["Cut sheet", "ورقة القص"], "dir.sheetChosen": ["Chosen: «{title}» — {len} s, hook: {hook}, score {score}", "المختارة: «{title}» — {len} ث، الهوك: {hook}، التقييم {score}"],
+  "dir.sheetAlt": ["Alternative: «{title}» — {len} s, hook: {hook}, score {score}", "بديل: «{title}» — {len} ث، الهوك: {hook}، التقييم {score}"],
+  "dir.sheetOrder": ["Moments in order: {list}", "اللحظات بالترتيب: {list}"], "dir.sheetUnsure": ["Not sure (check): {list}", "مش متأكد (راجعها): {list}"],
+  "dir.stage.perceive": ["Understanding the video", "يفهم الفيديو"], "dir.stage.moments": ["Finding the moments", "يحدد اللحظات"], "dir.stage.planner": ["Thinking of treatments", "يفكر في معالجات"],
+  "dir.stage.critic": ["Comparing the treatments", "يقارن المعالجات"], "dir.stage.graphics": ["Choosing graphics by meaning", "يختار الجرافيك بالمعنى"], "dir.stage.sounds": ["Choosing sounds", "يختار الأصوات"],
+  "dec.treatment": ["Treatment «{title}»: {moments} of {of} moments, {length} s ({alternatives} alternatives on the cut sheet)", "المعالجة «{title}»: {moments} لحظة من {of}، {length} ث ({alternatives} بدايل في ورقة القص)"],
+  "dec.hook": ["Opens with moment {moment} ({from}–{to} s) as a flash-forward", "بيبدأ بلحظة {moment} ({from}–{to} ث) كفلاش قدام"],
+  "dec.noPerception": ["The video was not analysed yet: moments from the words only", "الفيديو لسه ما اتفهمش: اللحظات من الكلام بس"],
+  "err.claudeKeyMissing": ["The stronger director needs your Anthropic API key.", "المخرج الأقوى محتاج مفتاح Anthropic بتاعك."],
+  "err.claudeFailed": ["Claude did not answer ({status}): {message}", "Claude ما ردّش ({status}): {message}"],
+  "err.directorNoRun": ["Run the smart edit on this timeline first.", "شغّل المونتاج الذكي على التايملاين ده الأول."],
+  "qa.action.cut": ["Most of the action without words is cut: {kept} of {of} s kept ({pct} %)", "معظم الأكشن اللي من غير كلام اتشال: فضل {kept} من {of} ث ({pct}%)"],
+  "qa.edit.tooShort": ["The edit keeps only {edit} s of {raw} s although {action} s of action happened", "المونتاج ساب {edit} ث بس من {raw} ث مع إن فيه {action} ث أكشن"],
+  "qa.links.apart": ["Moment {cause} and its reaction {reaction} are not side by side", "لحظة {cause} ورد فعلها {reaction} مش جنب بعض"],
+  "qa.links.lost": ["The reaction in moment {reaction} is kept without its cause (moment {cause})", "رد الفعل في لحظة {reaction} فضل من غير سببه (لحظة {cause})"],
+  "qa.hook.empty": ["Nothing said or happening in the first {sec} s", "مفيش كلام ولا حاجة بتحصل في أول {sec} ث"],
 };
 
 let lang = "ar";

@@ -379,8 +379,11 @@ test("the director on two clips: one story in timeline order, each file's words 
   assert.equal(r.undoLabel, "plan:auto two");
   assert.equal(T.get(tid).history.depth, depth + 1, "one undo step");
   assert.equal(r.plan.schema, "montaj.editplan/2");
-  const order = mainPieces(T.get(tid).timeline).map((p) => p.mediaId);
+  // The body keeps the timeline order; a treatment may open with a flash-forward hook (phase 7), also kept in place.
+  const order = r.plan.segments.filter((s) => s.role !== "hook").map((s) => s.mediaId);
   assert.deepEqual([...new Set(order)], [red, blue], "timeline order kept");
+  const hooks = r.plan.segments.filter((s) => s.role === "hook").length;
+  assert.equal(mainPieces(T.get(tid).timeline).map((p) => p.mediaId)[hooks], red, "after the hook, the story starts with the first clip");
   assert.ok(T.get(tid).timeline.tracks.find((t) => t.isMain).segments.some((s) => s.mediaId === blue && s.jlUs === -200_000), "a J lead into the second clip");
   assert.ok(r.qa.passed.includes("speech.lostWord") && r.qa.passed.includes("speech.cutInsideWord"));
   assert.ok(r.notes.some((n) => /2 clips planned as one story/.test(n)));
